@@ -98,7 +98,7 @@ function isQuestionDue(q) {
 // =========================================================================
 // --- MODULE SUPABASE CLOUD SYNC & STOCKAGE ---
 // =========================================================================
-let supabase = null;
+let supabaseClient = null;
 
 function getSupabaseCredentials() {
   const cfg = window.PATHOSORUS_CONFIG || {};
@@ -109,9 +109,10 @@ function getSupabaseCredentials() {
 
 function initSupabase() {
   const { url, key } = getSupabaseCredentials();
-  if (url && key && window.supabase) {
+  const lib = window.supabase;
+  if (url && key && lib && typeof lib.createClient === 'function') {
     try {
-      supabase = window.supabase.createClient(url, key);
+      supabaseClient = lib.createClient(url, key);
       updateSupabaseUI(true);
       return true;
     } catch (e) {
@@ -164,27 +165,33 @@ function updateSupabaseUI(connected, errorMsg) {
 
 function openSupabaseModal() {
   const modal = document.getElementById('modal-supabase');
+  if (!modal) return;
   const { url, key } = getSupabaseCredentials();
-  document.getElementById('supabase-input-url').value = url;
-  document.getElementById('supabase-input-key').value = key;
+  const inputUrl = document.getElementById('supabase-input-url');
+  const inputKey = document.getElementById('supabase-input-key');
+  if (inputUrl) inputUrl.value = url;
+  if (inputKey) inputKey.value = key;
   modal.classList.remove('hidden');
   modal.classList.add('flex');
 }
 
 function closeSupabaseModal() {
   const modal = document.getElementById('modal-supabase');
+  if (!modal) return;
   modal.classList.add('hidden');
   modal.classList.remove('flex');
 }
 
 async function saveSupabaseSettings() {
-  const url = document.getElementById('supabase-input-url').value.trim();
-  const key = document.getElementById('supabase-input-key').value.trim();
+  const inputUrl = document.getElementById('supabase-input-url');
+  const inputKey = document.getElementById('supabase-input-key');
+  const url = inputUrl ? inputUrl.value.trim() : '';
+  const key = inputKey ? inputKey.value.trim() : '';
 
   if (!url || !key) {
     localStorage.removeItem('pathosorus_supabase_url');
     localStorage.removeItem('pathosorus_supabase_key');
-    supabase = null;
+    supabaseClient = null;
     updateSupabaseUI(false);
     alert("Configuration Cloud effacée. Retour au mode local.");
     closeSupabaseModal();
@@ -196,7 +203,7 @@ async function saveSupabaseSettings() {
 
   if (initSupabase()) {
     try {
-      const { data, error } = await supabase.from('questions').select('id').limit(1);
+      const { data, error } = await supabaseClient.from('questions').select('id').limit(1);
       if (error) {
         alert("Attention : Connexion réussie mais erreur d'accès aux tables : " + error.message + "\nAvez-vous bien exécuté le script SQL dans Supabase ?");
       } else {
@@ -211,12 +218,12 @@ async function saveSupabaseSettings() {
 }
 
 async function fetchSupabaseData(silent = false) {
-  if (!supabase) return;
+  if (!supabaseClient) return;
   try {
     const [qRes, cRes, tRes] = await Promise.all([
-      supabase.from('questions').select('*').order('created_at', { ascending: false }),
-      supabase.from('cases').select('*').order('created_at', { ascending: false }),
-      supabase.from('custom_tags').select('*').order('created_at', { ascending: true })
+      supabaseClient.from('questions').select('*').order('created_at', { ascending: false }),
+      supabaseClient.from('cases').select('*').order('created_at', { ascending: false }),
+      supabaseClient.from('custom_tags').select('*').order('created_at', { ascending: true })
     ]);
 
     if (!qRes.error && qRes.data) {
@@ -260,24 +267,26 @@ async function fetchSupabaseData(silent = false) {
 }
 
 async function syncLocalToSupabase() {
-  if (!supabase) {
+  if (!supabaseClient) {
     alert("Veuillez d'abord connecter votre projet Supabase.");
     return;
   }
   const btn = document.getElementById('btn-sync-to-cloud');
-  btn.disabled = true;
-  btn.innerHTML = `<span>Envoi en cours...</span>`;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span>Envoi en cours...</span>`;
+  }
 
   try {
     if (state.customTags.length > 0) {
       const tagRows = state.customTags.map(t => ({ name: t }));
-      await supabase.from('custom_tags').upsert(tagRows);
+      await supabaseClient.from('custom_tags').upsert(tagRows);
     }
     if (state.questions.length > 0) {
-      await supabase.from('questions').upsert(state.questions);
+      await supabaseClient.from('questions').upsert(state.questions);
     }
     if (state.cases.length > 0) {
-      await supabase.from('cases').upsert(state.cases);
+      await supabaseClient.from('cases').upsert(state.cases);
     }
 
     alert(`Synchronisation montante réussie !\n${state.questions.length} questions et ${state.cases.length} DP sauvegardés dans le Cloud.`);
@@ -286,14 +295,16 @@ async function syncLocalToSupabase() {
     console.error("Erreur sync to supabase:", err);
     alert("Erreur lors de l'envoi vers Supabase : " + err.message);
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = `<i data-lucide="upload-cloud" class="w-4 h-4"></i><span>Envoyer mes données locales vers le Cloud</span>`;
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="upload-cloud" class="w-4 h-4"></i><span>Envoyer mes données locales vers le Cloud</span>`;
+    }
     if (window.lucide) lucide.createIcons();
   }
 }
 
 async function syncSupabaseToLocal() {
-  if (!supabase) {
+  if (!supabaseClient) {
     alert("Veuillez d'abord connecter votre projet Supabase.");
     return;
   }
@@ -302,61 +313,61 @@ async function syncSupabaseToLocal() {
 }
 
 async function dbUpsertQuestion(q) {
-  if (!supabase) return;
+  if (!supabaseClient) return;
   try {
-    await supabase.from('questions').upsert(q);
+    await supabaseClient.from('questions').upsert(q);
   } catch (e) {
     console.warn("Erreur upsert question supabase:", e);
   }
 }
 
 async function dbDeleteQuestion(id) {
-  if (!supabase) return;
+  if (!supabaseClient) return;
   try {
-    await supabase.from('questions').delete().eq('id', id);
+    await supabaseClient.from('questions').delete().eq('id', id);
   } catch (e) {
     console.warn("Erreur delete question supabase:", e);
   }
 }
 
 async function dbUpsertCase(c) {
-  if (!supabase) return;
+  if (!supabaseClient) return;
   try {
-    await supabase.from('cases').upsert(c);
+    await supabaseClient.from('cases').upsert(c);
   } catch (e) {
     console.warn("Erreur upsert case supabase:", e);
   }
 }
 
 async function dbDeleteCase(id) {
-  if (!supabase) return;
+  if (!supabaseClient) return;
   try {
-    await supabase.from('cases').delete().eq('id', id);
+    await supabaseClient.from('cases').delete().eq('id', id);
   } catch (e) {
     console.warn("Erreur delete case supabase:", e);
   }
 }
 
 async function dbUpsertTag(name) {
-  if (!supabase) return;
+  if (!supabaseClient) return;
   try {
-    await supabase.from('custom_tags').upsert({ name });
+    await supabaseClient.from('custom_tags').upsert({ name });
   } catch (e) {
     console.warn("Erreur upsert tag supabase:", e);
   }
 }
 
 async function uploadImageFile(file) {
-  if (supabase) {
+  if (supabaseClient) {
     try {
       const ext = (file.name || 'image.jpg').split('.').pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`;
-      const { data, error } = await supabase.storage
+      const { data, error } = await supabaseClient.storage
         .from('pathosorus_images')
         .upload(fileName, file, { cacheControl: '3600', upsert: false });
 
       if (!error && data) {
-        const { data: publicData } = supabase.storage
+        const { data: publicData } = supabaseClient.storage
           .from('pathosorus_images')
           .getPublicUrl(fileName);
         return publicData.publicUrl;
