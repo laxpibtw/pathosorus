@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PathoTrainer Lab 🧪 | Répétition Espacée avec Délais Personnalisés</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdfa',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-teal-500 selection:text-white">
+
+  <!-- ================= TOP HEADER ================= -->
+  <header class="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      
+      <!-- Brand & Mode Local -->
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-teal-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-teal-500/20">
+          <i data-lucide="microscope" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <span class="font-bold text-base tracking-tight bg-gradient-to-r from-teal-400 via-sky-300 to-indigo-400 bg-clip-text text-transparent">PathoTrainer Lab</span>
+            <span class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/30">Votre Espace</span>
+          </div>
+          <p class="text-[11px] text-slate-400 hidden sm:block">Répétition Espacée avec Délais (1j, 3j, 7j, 30j) & Neutralisation</p>
+        </div>
+      </div>
+
+      <!-- Navigation Links -->
+      <nav class="flex items-center space-x-1 sm:space-x-2">
+        <button onclick="switchTab('play')" id="nav-btn-play" class="nav-link px-3.5 py-1.5 rounded-xl text-sm font-semibold flex items-center space-x-1.5 transition text-white bg-teal-600 shadow-sm shadow-teal-500/20">
+          <i data-lucide="play" class="w-4 h-4"></i>
+          <span>Jouer</span>
+        </button>
+        <button onclick="switchTab('bank')" id="nav-btn-bank" class="nav-link px-3.5 py-1.5 rounded-xl text-sm font-semibold flex items-center space-x-1.5 transition text-slate-300 hover:text-white hover:bg-slate-800">
+          <i data-lucide="database" class="w-4 h-4"></i>
+          <span>Ma Banque</span>
+          <span id="badge-bank-count" class="text-xs px-1.5 py-0.2 rounded-full bg-slate-800 border border-slate-700 text-teal-400 font-bold">0</span>
+        </button>
+        <button onclick="switchTab('create')" id="nav-btn-create" class="nav-link px-3.5 py-1.5 rounded-xl text-sm font-semibold flex items-center space-x-1.5 transition text-slate-300 hover:text-white hover:bg-slate-800">
+          <i data-lucide="plus-circle" class="w-4 h-4 text-teal-400"></i>
+          <span>Créer</span>
+        </button>
+      </nav>
+
+      <!-- Stats Pill -->
+      <div class="flex items-center space-x-2">
+        <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold" title="Série de jours actifs">
+          <i data-lucide="flame" class="w-3.5 h-3.5 fill-amber-400"></i>
+          <span id="top-streak">1</span> j
+        </div>
+        <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-semibold" title="Points d'expérience">
+          <i data-lucide="award" class="w-3.5 h-3.5"></i>
+          <span id="top-xp">0</span> <span class="text-[10px]">XP</span>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ================= MAIN CONTAINER ================= -->
+  <main class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- ================= 1. VUE JOUER ================= -->
+    <div id="view-play" class="app-view space-y-6">
+      
+      <!-- Bannière -->
+      <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 border border-slate-800 p-6 sm:p-7">
+        <div class="relative z-10 max-w-2xl">
+          <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20 text-xs font-semibold mb-2.5">
+            <i data-lucide="repeat" class="w-3.5 h-3.5"></i>
+            <span>Répétition Espacée Intelligente</span>
+          </div>
+          <h1 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            Choisissez quand revoir chaque question.
+          </h1>
+          <p class="mt-2 text-xs sm:text-sm text-slate-300 leading-relaxed">
+            À chaque réponse, définissez votre intervalle (<strong>Demain</strong>, <strong>Dans 3 jours</strong>, <strong>Dans 1 semaine</strong> ou <strong>Dans 1 mois</strong>). Le système calcule automatiquement vos cartes échues au jour le jour.
+          </p>
+        </div>
+      </div>
+
+      <!-- Modules de Suivi & Répétition Espacée -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        
+        <!-- Carte 1 : Session du Jour (Cartes échues) -->
+        <div class="bg-slate-900 border border-teal-500/30 hover:border-teal-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg">
+          <div>
+            <div class="flex items-center space-x-3 mb-3">
+              <div class="w-10 h-10 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center">
+                <i data-lucide="calendar" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <h3 class="font-bold text-white text-base">Répétition Espacée du Jour</h3>
+                <p class="text-xs text-teal-400 font-medium">
+                  <span id="stat-due-today-count">0</span> carte(s) échue(s) aujourd'hui
+                </p>
+              </div>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Comprend les questions arrivées à échéance selon vos délais choisis, ainsi que celles marquées en erreur.
+            </p>
+          </div>
+          <button onclick="startSpacedRepetitionDueSession()" id="btn-play-due-today" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-teal-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
+            <i data-lucide="play" class="w-3.5 h-3.5"></i>
+            <span id="label-due-today">Lancer la session du jour (0)</span>
+          </button>
+        </div>
+
+        <!-- Carte 2 : Questions Neutralisées / Maîtrisées -->
+        <div class="bg-slate-900 border border-emerald-500/30 hover:border-emerald-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg">
+          <div>
+            <div class="flex items-center space-x-3 mb-3">
+              <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center">
+                <i data-lucide="award" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <h3 class="font-bold text-white text-base">Questions Maîtrisées (Neutralisées)</h3>
+                <p class="text-xs text-emerald-400 font-medium">
+                  <span id="stat-mastered-count">0</span> neutralisée(s) • <span id="stat-active-count">0</span> active(s)
+                </p>
+              </div>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Ces questions sont exclues de vos sessions habituelles. Vous pouvez les tester ici à tout moment pour vérifier vos acquis.
+            </p>
+          </div>
+          <button onclick="startMasteredReviewSession()" id="btn-play-mastered" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-emerald-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
+            <i data-lucide="play" class="w-3.5 h-3.5"></i>
+            <span id="label-mastered-count">Tester mes maîtrisées (0)</span>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Sélecteur Hiérarchique à 3 Niveaux (QUESTIONS ACTIVES) -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
+        <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+              <i data-lucide="git-branch" class="w-4 h-4 text-teal-400"></i>
+              <span>Classification & Révisions Actives (3 Niveaux)</span>
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">Testez tout un organe, une catégorie ou une lésion (les questions neutralisées sont filtrées).</p>
+          </div>
+          <button onclick="startGlobalSprint()" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 hover:text-white border border-slate-700 text-xs font-bold flex items-center space-x-1.5 transition">
+            <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
+            <span>Sprint Quotidien (Actives)</span>
+          </button>
+        </div>
+
+        <div id="hierarchy-selector-container"></div>
+      </div>
+
+      <!-- Section : Dossiers Progressifs (DP) -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <div class="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+              <i data-lucide="layers" class="w-4 h-4"></i>
+            </div>
+            <h3 class="text-base font-bold text-white">Mes Dossiers Progressifs Clinico-Pathologiques (DP)</h3>
+          </div>
+          <button onclick="switchTab('create'); setCreatorMode('dp');" class="text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center space-x-1">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            <span>Nouveau DP</span>
+          </button>
+        </div>
+        <div id="home-dp-cards-container" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+      </div>
+
+      <!-- Raccourcis par Tags (#HES, #IHC, etc.) -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-lg">
+        <div class="flex items-center justify-between">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center space-x-2">
+            <i data-lucide="tag" class="w-4 h-4"></i>
+            <span>Sessions Ciblées par Tag (#)</span>
+          </h3>
+          <span class="text-[11px] text-slate-400">Cliquez sur un tag pour réviser cette modalité</span>
+        </div>
+        <div id="home-tags-container" class="flex flex-wrap gap-2 pt-1"></div>
+      </div>
+
+    </div>
+
+    <!-- ================= 2. VUE SESSION EN COURS ================= -->
+    <div id="view-session" class="app-view hidden max-w-3xl mx-auto space-y-6">
+      
+      <!-- Barre d'état -->
+      <div class="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl px-5 py-3">
+        <button onclick="switchTab('play')" class="text-xs font-semibold text-slate-400 hover:text-rose-400 flex items-center space-x-1.5 transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+          <span>Quitter</span>
+        </button>
+
+        <div class="flex items-center space-x-3">
+          <span id="session-progress-text" class="text-xs font-semibold text-slate-300">Question 1 / 5</span>
+          <div class="w-24 sm:w-36 h-2 rounded-full bg-slate-800 overflow-hidden">
+            <div id="session-progress-bar" class="h-full bg-teal-500 transition-all duration-300" style="width: 20%;"></div>
+          </div>
+        </div>
+
+        <button id="btn-session-flag" onclick="toggleSessionFlag()" class="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition" title="Marquer comme piège 🚩">
+          <i data-lucide="flag" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- Carte Question -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
+        
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <span id="session-format-badge" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">☑️ QCM</span>
+            <div id="session-tags-box" class="flex flex-wrap gap-1"></div>
+          </div>
+          <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-xs font-mono font-semibold text-teal-300 flex items-center space-x-1.5">
+            <i data-lucide="folder-tree" class="w-3.5 h-3.5 text-teal-400 shrink-0"></i>
+            <span id="session-breadcrumb" class="truncate">Organe > Catégorie > Entité</span>
+          </div>
+        </div>
+
+        <!-- Énoncé & Contexte -->
+        <div>
+          <h2 id="session-question-text" class="text-lg sm:text-xl font-bold text-white leading-relaxed">Énoncé...</h2>
+          <div id="session-context-box" class="mt-3 p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs sm:text-sm text-slate-300 leading-relaxed font-mono"></div>
+        </div>
+
+        <!-- Galerie Multi-Images -->
+        <div id="session-images-container" class="grid grid-cols-1 sm:grid-cols-2 gap-3 hidden"></div>
+
+        <!-- Options Container -->
+        <div id="session-options-container" class="space-y-3"></div>
+
+        <!-- Bouton Valider pour QCM -->
+        <button id="btn-session-validate-qcm" onclick="validateQCMAnswer()" class="hidden w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm transition shadow-lg shadow-teal-500/20 flex items-center justify-center space-x-2">
+          <span>Valider ma sélection</span>
+          <i data-lucide="check-circle" class="w-4 h-4"></i>
+        </button>
+
+        <!-- Feedback & Explications + SÉLECTEUR DE DÉLAI D'INTERVALLE -->
+        <div id="session-feedback-box" class="hidden space-y-4 pt-4 border-t border-slate-800">
+          <div id="session-feedback-banner" class="p-4 rounded-xl flex items-start space-x-3">
+            <div class="flex-1">
+              <h4 id="session-feedback-title" class="font-bold text-sm"></h4>
+              <p id="session-feedback-text" class="text-xs mt-1 leading-relaxed text-slate-300"></p>
+              <div class="mt-2 text-[11px] text-slate-400 font-mono" id="session-stat-streak"></div>
+            </div>
+          </div>
+
+          <!-- Piège classique -->
+          <div class="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs space-y-1">
+            <div class="flex items-center space-x-1.5 font-bold text-amber-400">
+              <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+              <span>Le Piège & Réflexe Diagnostique Clé :</span>
+            </div>
+            <p id="session-trap-text" class="leading-relaxed pl-5 text-slate-300"></p>
+          </div>
+
+          <!-- SÉLECTEUR DE DÉLAI DE RÉPÉTITION ESPACÉE (ANKI STYLE) -->
+          <div class="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2.5">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-bold text-white flex items-center space-x-1.5">
+                <i data-lucide="calendar" class="w-4 h-4 text-teal-400"></i>
+                <span>Quand souhaitez-vous revoir cette question ? (Répétition Espacée)</span>
+              </span>
+              <span class="text-[11px] text-slate-400">Un clic planifie et passe à la suite</span>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              <button type="button" onclick="chooseReviewInterval(0)" class="p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-bold transition flex flex-col items-center">
+                <span>Aujourd'hui</span>
+                <span class="text-[10px] text-rose-400/80 font-mono">&lt; 1 jour</span>
+              </button>
+              <button type="button" onclick="chooseReviewInterval(1)" class="p-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-bold transition flex flex-col items-center">
+                <span>Demain</span>
+                <span class="text-[10px] text-amber-400/80 font-mono">+1 jour</span>
+              </button>
+              <button type="button" onclick="chooseReviewInterval(3)" class="p-2.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 text-xs font-bold transition flex flex-col items-center">
+                <span>Dans 3 jours</span>
+                <span class="text-[10px] text-sky-400/80 font-mono">+3 jours</span>
+              </button>
+              <button type="button" onclick="chooseReviewInterval(7)" class="p-2.5 rounded-xl bg-teal-500/10 hover:bg-teal-500/25 text-teal-300 border border-teal-500/30 text-xs font-bold transition flex flex-col items-center">
+                <span>Dans 1 sem.</span>
+                <span class="text-[10px] text-teal-400/80 font-mono">+7 jours</span>
+              </button>
+              <button type="button" onclick="chooseReviewInterval(30)" class="p-2.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 text-xs font-bold transition flex flex-col items-center col-span-2 sm:col-span-1">
+                <span>Dans 1 mois</span>
+                <span class="text-[10px] text-indigo-400/80 font-mono">+30 jours</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Barre d'actions secondaires : Neutralisation & Suivant classique -->
+          <div class="flex items-center justify-between pt-2">
+            <button id="btn-session-toggle-mastered" onclick="toggleCurrentSessionQuestionMastered()" type="button" class="px-3 py-2 rounded-xl border text-xs font-bold flex items-center space-x-1.5 transition">
+              <!-- Rempli dynamiquement -->
+            </button>
+
+            <button onclick="nextSessionQuestion()" class="py-2.5 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs flex items-center space-x-2 transition border border-slate-700">
+              <span>Passer sans délai</span>
+              <i data-lucide="arrow-right" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ================= 3. VUE SESSION DOSSIER PROGRESSIF (DP) ================= -->
+    <div id="view-dp-session" class="app-view hidden max-w-3xl mx-auto space-y-6">
+      
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <button onclick="switchTab('play')" class="text-xs font-semibold text-slate-400 hover:text-rose-400 flex items-center space-x-1.5 transition">
+            <i data-lucide="x" class="w-4 h-4"></i>
+            <span>Quitter le Cas</span>
+          </button>
+          <span id="dp-step-indicator" class="text-xs font-bold text-indigo-400">Étape 1 / 3</span>
+        </div>
+
+        <div class="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+          <div id="dp-progress-bar" class="h-full bg-indigo-500 transition-all duration-300" style="width: 33%;"></div>
+        </div>
+
+        <div>
+          <span id="dp-case-meta" class="text-[11px] font-semibold text-slate-400 font-mono">Organe > Catégorie > Lésion</span>
+          <h2 id="dp-case-title" class="text-lg font-extrabold text-white">Titre du cas clinique...</h2>
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
+        
+        <div class="space-y-3">
+          <h3 id="dp-step-title" class="text-base font-bold text-indigo-300 flex items-center space-x-2">
+            <i data-lucide="compass" class="w-4 h-4"></i>
+            <span>Étape 1 : Présentation</span>
+          </h3>
+          <div id="dp-step-narrative" class="p-4 rounded-xl bg-slate-950/70 border border-slate-800 text-xs sm:text-sm text-slate-300 leading-relaxed font-sans whitespace-pre-line"></div>
+        </div>
+
+        <div id="dp-step-images-container" class="grid grid-cols-1 sm:grid-cols-2 gap-3 hidden"></div>
+
+        <div class="pt-2 border-t border-slate-800 space-y-3">
+          <div class="flex items-center justify-between">
+            <span id="dp-step-type-badge" class="text-[11px] font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">☑️ QCM</span>
+            <span class="text-xs text-slate-400">Répondez pour débloquer l'étape suivante</span>
+          </div>
+          <h4 id="dp-step-question" class="text-sm sm:text-base font-bold text-white">Question ici...</h4>
+        </div>
+
+        <div id="dp-step-options-container" class="space-y-3"></div>
+
+        <button id="btn-dp-validate-qcm" onclick="validateDPQCM()" class="hidden w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm transition shadow-lg shadow-indigo-500/20 flex items-center justify-center space-x-2">
+          <span>Valider cette étape</span>
+          <i data-lucide="check-circle" class="w-4 h-4"></i>
+        </button>
+
+        <div id="dp-step-feedback-box" class="hidden space-y-4 pt-4 border-t border-slate-800">
+          <div id="dp-feedback-banner" class="p-4 rounded-xl flex items-start space-x-3">
+            <div>
+              <h4 id="dp-feedback-title" class="font-bold text-sm"></h4>
+              <p id="dp-feedback-text" class="text-xs mt-1 leading-relaxed text-slate-300"></p>
+            </div>
+          </div>
+
+          <div class="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs space-y-1">
+            <div class="flex items-center space-x-1.5 font-bold text-amber-400">
+              <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+              <span>Raisonnement Clé de l'Étape :</span>
+            </div>
+            <p id="dp-trap-text" class="leading-relaxed pl-5 text-slate-300"></p>
+          </div>
+
+          <div class="flex justify-end pt-2">
+            <button id="btn-dp-next-step" onclick="nextDPStep()" class="py-2.5 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm flex items-center space-x-2 transition shadow-lg shadow-indigo-500/20">
+              <span>Débloquer l'Étape Suivante</span>
+              <i data-lucide="arrow-right" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ================= 4. VUE MA BANQUE ================= -->
+    <div id="view-bank" class="app-view hidden space-y-5">
+      
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+        <div class="flex flex-1 flex-wrap items-center gap-2">
+          <div class="relative flex-1 min-w-[180px]">
+            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
+            <input type="text" id="bank-search-input" oninput="renderBank()" placeholder="Rechercher organe, lésion, #tag..." class="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+          </div>
+          
+          <!-- Filtre Statut avec option Échues aujourd'hui -->
+          <select id="bank-filter-status" onchange="renderBank()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-teal-300 font-semibold focus:outline-none focus:border-teal-500">
+            <option value="all">Tous les statuts</option>
+            <option value="due">📅 À revoir aujourd'hui (Dues)</option>
+            <option value="active">⏳ En apprentissage (Actives)</option>
+            <option value="errors">🚩 À revoir / Erreurs</option>
+            <option value="mastered">🎓 Maîtrisées (Neutralisées)</option>
+          </select>
+
+          <select id="bank-filter-format" onchange="renderBank()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500">
+            <option value="all">Tous formats & types</option>
+            <option value="qcm">☑️ QCM (Choix Multiples)</option>
+            <option value="qcu">🔘 QCU (Choix Unique)</option>
+            <option value="piege">⚠️ Vrai/Faux</option>
+            <option value="dp">📋 Dossiers Progressifs (DP)</option>
+          </select>
+
+          <select id="bank-filter-organ" onchange="renderBank()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500">
+            <option value="all">Tous les organes</option>
+          </select>
+
+          <select id="bank-filter-tag" onchange="renderBank()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500">
+            <option value="all">Tous les tags (#)</option>
+          </select>
+        </div>
+
+        <div class="flex items-center space-x-2 self-end md:self-auto">
+          <button onclick="exportCustomBankJSON()" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition border border-slate-700" title="Télécharger votre banque en JSON">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            <span>Exporter</span>
+          </button>
+          <label class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition border border-slate-700 cursor-pointer" title="Importer une banque JSON">
+            <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+            <span>Importer</span>
+            <input type="file" accept=".json" onchange="importCustomBankJSON(event)" class="hidden">
+          </label>
+          <button onclick="clearAllData()" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 transition" title="Vider toute la banque">
+            <i data-lucide="trash" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <div id="bank-items-container" class="space-y-3"></div>
+    </div>
+
+    <!-- ================= 5. VUE CRÉATEUR MODULAIRE (QUESTION OU DP) ================= -->
+    <div id="view-create" class="app-view hidden max-w-3xl mx-auto space-y-6">
+      
+      <div class="flex items-center p-1.5 rounded-2xl bg-slate-900 border border-slate-800 shadow-lg">
+        <button type="button" id="tab-creator-simple" onclick="setCreatorMode('simple')" class="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 bg-teal-600 text-white shadow-md">
+          <i data-lucide="help-circle" class="w-4 h-4"></i>
+          <span>Question Simple (QCM par défaut)</span>
+        </button>
+        <button type="button" id="tab-creator-dp" onclick="setCreatorMode('dp')" class="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 text-slate-400 hover:text-white">
+          <i data-lucide="layers" class="w-4 h-4 text-indigo-400"></i>
+          <span>Dossier Progressif Multi-Étapes (DP)</span>
+        </button>
+      </div>
+
+      <datalist id="datalist-organs"></datalist>
+      <datalist id="datalist-categories"></datalist>
+      <datalist id="datalist-entities"></datalist>
+
+      <!-- 5A. QUESTION SIMPLE -->
+      <div id="creator-box-simple" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
+        <div>
+          <h2 class="text-xl font-bold text-white flex items-center space-x-2">
+            <i data-lucide="plus-circle" class="w-5 h-5 text-teal-400"></i>
+            <span>Créer une Question Diagnostique</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-1">Par défaut en <strong>Choix Multiple (QCM)</strong>. Classez-la selon vos 3 niveaux et vos tags.</p>
+        </div>
+
+        <form id="form-create-question" onsubmit="handleSaveQuestionForm(event)" class="space-y-5">
+          <input type="hidden" id="form-q-edit-id" value="">
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Format de réponse *</label>
+            <select id="form-q-format" onchange="onFormatChange()" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-teal-500 font-medium">
+              <option value="qcm" selected>☑️ Choix Multiples (QCM) - Par défaut</option>
+              <option value="qcu">🔘 Choix Unique (QCU) - 1 seule bonne réponse</option>
+              <option value="piege">⚠️ Vrai / Faux - Diagnostic tranché</option>
+            </select>
+          </div>
+
+          <!-- CLASSIFICATION 3 NIVEAUX -->
+          <div class="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
+            <div class="flex items-center space-x-2">
+              <i data-lucide="git-commit" class="w-4 h-4 text-teal-400"></i>
+              <span class="text-xs font-bold text-teal-300 uppercase tracking-wider">Classification Diagnostique (3 Niveaux)</span>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 1 : Organe *</label>
+                <input type="text" id="form-q-organ" list="datalist-organs" required placeholder="ex: Sein, Poumon..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 2 : Catégorie *</label>
+                <input type="text" id="form-q-category" list="datalist-categories" required placeholder="ex: Tumeurs épithéliales..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 3 : Lésion précise *</label>
+                <input type="text" id="form-q-entity" list="datalist-entities" required placeholder="ex: Carcinome lobulaire..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+              </div>
+            </div>
+          </div>
+
+          <!-- TAGS PERSONNALISÉS -->
+          <div class="space-y-2">
+            <label class="block text-xs font-semibold text-slate-300">Tags de la question (Cliquez pour activer/désactiver)</label>
+            <div id="editor-tags-pills" class="flex flex-wrap gap-1.5 p-3 rounded-xl bg-slate-950 border border-slate-800"></div>
+            <div class="flex items-center space-x-2 pt-1">
+              <input type="text" id="form-new-tag-input" placeholder="Créer un nouveau tag (ex: E-cadhérine, Ki67...)" class="flex-1 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono">
+              <button type="button" onclick="handleAddCustomTagFromInput()" class="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center space-x-1">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                <span>Ajouter ce Tag</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Énoncé & Contexte -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Énoncé de la question *</label>
+            <input type="text" id="form-q-text" required placeholder="ex: Quels marqueurs immunohistochimiques permettent de confirmer..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-teal-500">
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Contexte clinique / Profil d'anticorps / Vignette</label>
+            <textarea id="form-q-context" rows="2" placeholder="ex: Profil IHC : E-cadhérine membranaire négative, p120 caténine cytoplasmique diffuse..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-mono focus:outline-none focus:border-teal-500"></textarea>
+          </div>
+
+          <!-- Multi-Photos -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-semibold text-slate-300">Coupes microscopiques & Photos (Optionnel)</label>
+              <label class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition border border-slate-700">
+                <i data-lucide="image-plus" class="w-3.5 h-3.5 text-teal-400"></i>
+                <span>Sélectionner des photos</span>
+                <input type="file" accept="image/*" multiple onchange="handleEditorImageUpload(event)" class="hidden">
+              </label>
+            </div>
+            <div id="editor-images-preview" class="grid grid-cols-2 sm:grid-cols-3 gap-3 hidden"></div>
+          </div>
+
+          <!-- Options de Réponses -->
+          <div class="space-y-3 pt-2">
+            <label class="block text-xs font-semibold text-slate-300">Options & Réponses (Cochez la ou les bonnes réponses) *</label>
+            
+            <div id="form-mcq-wrapper" class="space-y-2">
+              <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                <input type="checkbox" id="form-opt-indicator-0" name="correct_qcm_choice" value="0" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
+                <input type="text" id="form-opt-text-0" required placeholder="Option A" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
+              </div>
+              <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                <input type="checkbox" id="form-opt-indicator-1" name="correct_qcm_choice" value="1" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
+                <input type="text" id="form-opt-text-1" required placeholder="Option B" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
+              </div>
+              <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                <input type="checkbox" id="form-opt-indicator-2" name="correct_qcm_choice" value="2" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
+                <input type="text" id="form-opt-text-2" required placeholder="Option C" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
+              </div>
+              <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                <input type="checkbox" id="form-opt-indicator-3" name="correct_qcm_choice" value="3" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
+                <input type="text" id="form-opt-text-3" required placeholder="Option D" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
+              </div>
+            </div>
+
+            <div id="form-tf-wrapper" class="hidden space-y-2">
+              <label class="flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer">
+                <input type="radio" name="form_tf_choice" value="Vrai" class="text-teal-500">
+                <span class="text-xs font-bold text-emerald-400">VRAI</span>
+              </label>
+              <label class="flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer">
+                <input type="radio" name="form_tf_choice" value="Faux" checked class="text-teal-500">
+                <span class="text-xs font-bold text-rose-400">FAUX</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Explications & Piège classique -->
+          <div class="space-y-3 pt-2 border-t border-slate-800">
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1.5">Explication détaillée *</label>
+              <textarea id="form-q-explanation" rows="2" required placeholder="Pourquoi ces réponses sont exactes et comment éliminer les différentiels..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-teal-500"></textarea>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-amber-400 mb-1.5 flex items-center space-x-1.5">
+                <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
+                <span>Le Piège Classique ACP à éviter *</span>
+              </label>
+              <textarea id="form-q-trap" rows="2" required placeholder="ex: Attention au clone d'anticorps... ou à l'expression aberrante de..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/30 text-xs text-white focus:outline-none focus:border-amber-500"></textarea>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end space-x-3 pt-4 border-t border-slate-800">
+            <button type="button" onclick="switchTab('bank')" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">
+              Annuler
+            </button>
+            <button type="submit" class="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center space-x-1.5 transition shadow-lg shadow-teal-500/20">
+              <i data-lucide="save" class="w-3.5 h-3.5"></i>
+              <span>Enregistrer la Question</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- 5B. FORMULAIRE DOSSIER PROGRESSIF -->
+      <div id="creator-box-dp" class="hidden bg-slate-900 border border-indigo-500/30 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
+        <div>
+          <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-xs font-semibold mb-2">
+            <i data-lucide="layers" class="w-3.5 h-3.5"></i>
+            <span>Dossier Progressif Clinico-Pathologique</span>
+          </div>
+          <h2 class="text-xl font-bold text-white flex items-center space-x-2">
+            <span>Créer un Cas Clinique Séquentiel (DP)</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-1">Créez votre dossier étape par étape avec révélations successives de coupes et questions.</p>
+        </div>
+
+        <form id="form-create-dp" onsubmit="handleSaveDPForm(event)" class="space-y-6">
+          <input type="hidden" id="form-dp-edit-id" value="">
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Titre du Dossier Clinique *</label>
+            <input type="text" id="form-dp-title" required placeholder="ex: Masse sous-muqueuse gastrique chez un homme de 62 ans" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500 font-medium">
+          </div>
+
+          <!-- CLASSIFICATION 3 NIVEAUX DU DP -->
+          <div class="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
+            <div class="flex items-center space-x-2">
+              <i data-lucide="git-commit" class="w-4 h-4 text-indigo-400"></i>
+              <span class="text-xs font-bold text-indigo-300 uppercase tracking-wider">Classification Diagnostique (3 Niveaux)</span>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 1 : Organe *</label>
+                <input type="text" id="form-dp-organ" list="datalist-organs" required placeholder="ex: Tube Digestif, Sein..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 2 : Catégorie *</label>
+                <input type="text" id="form-dp-category" list="datalist-categories" required placeholder="ex: Tumeurs mésenchymateuses..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 3 : Lésion finale *</label>
+                <input type="text" id="form-dp-entity" list="datalist-entities" required placeholder="ex: GIST gastrique..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+              </div>
+            </div>
+          </div>
+
+          <!-- TAGS DU DP -->
+          <div class="space-y-2">
+            <label class="block text-xs font-semibold text-slate-300">Tags du Dossier (Cliquez pour activer/désactiver)</label>
+            <div id="dp-tags-pills" class="flex flex-wrap gap-1.5 p-3 rounded-xl bg-slate-950 border border-slate-800"></div>
+            <div class="flex items-center space-x-2 pt-1">
+              <input type="text" id="form-dp-new-tag-input" placeholder="Ajouter un tag..." class="flex-1 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono">
+              <button type="button" onclick="handleAddCustomTagFromDPInput()" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center space-x-1">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                <span>Ajouter ce Tag</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Synopsis -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Synopsis / Présentation clinique générale *</label>
+            <textarea id="form-dp-synopsis" rows="2" required placeholder="ex: Découverte endoscopique d'une masse sous-muqueuse de 4,5 cm chez un homme de 62 ans..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans"></textarea>
+          </div>
+
+          <!-- CONTENEUR DES ÉTAPES DU DP -->
+          <div class="space-y-4 pt-2 border-t border-slate-800">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-bold text-white flex items-center space-x-2">
+                <i data-lucide="list-ordered" class="w-4 h-4 text-indigo-400"></i>
+                <span>Étapes Séquentielles du Dossier</span>
+              </h3>
+              <button type="button" onclick="addStepToDP()" class="px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-bold flex items-center space-x-1.5 transition">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                <span>Ajouter une étape suivante</span>
+              </button>
+            </div>
+
+            <div id="dp-steps-builder-container" class="space-y-4"></div>
+          </div>
+
+          <div class="flex items-center justify-between pt-4 border-t border-slate-800">
+            <button type="button" onclick="addStepToDP()" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-bold flex items-center space-x-1.5 transition">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Ajouter une étape</span>
+            </button>
+            <div class="flex items-center space-x-3">
+              <button type="button" onclick="switchTab('bank')" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">
+                Annuler
+              </button>
+              <button type="submit" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-1.5 transition shadow-lg shadow-indigo-500/20">
+                <i data-lucide="save" class="w-3.5 h-3.5"></i>
+                <span>Enregistrer le Dossier Progressif</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ================= LIGHTBOX MODAL PLEIN ÉCRAN ================= -->
+  <div id="lightbox-modal" class="fixed inset-0 z-50 bg-black/95 hidden items-center justify-center p-4 backdrop-blur-md" onclick="closeLightbox()">
+    <div class="relative max-w-5xl max-h-[92vh] flex flex-col items-center">
+      <img id="lightbox-img" src="" alt="Agrandissement" class="max-w-full max-h-[82vh] object-contain rounded-xl border border-slate-800 shadow-2xl">
+      <p id="lightbox-caption" class="text-slate-300 text-xs font-medium mt-3 bg-slate-900/90 px-3 py-1 rounded-full border border-slate-800"></p>
+      <button onclick="closeLightbox()" class="absolute top-2 right-2 bg-slate-900/80 text-white p-2.5 rounded-full hover:bg-slate-800 transition border border-slate-700">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="seed_data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
