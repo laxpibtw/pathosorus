@@ -29,6 +29,10 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <!-- Canvas Confetti -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <!-- Supabase JS SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Config Cloud Supabase -->
+  <script src="config.js"></script>
 
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -74,8 +78,12 @@
         </button>
       </nav>
 
-      <!-- Stats Pill -->
+      <!-- Stats Pill & Cloud Status -->
       <div class="flex items-center space-x-2">
+        <button id="btn-supabase-modal" onclick="openSupabaseModal()" class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition bg-slate-800 text-slate-300 border-slate-700 hover:border-teal-500" title="Configurer la synchronisation Cloud Supabase">
+          <span class="w-2 h-2 rounded-full bg-slate-500" id="supabase-status-dot"></span>
+          <span id="supabase-status-text" class="hidden md:inline">Cloud Hôpital</span>
+        </button>
         <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold" title="Série de jours actifs">
           <i data-lucide="flame" class="w-3.5 h-3.5 fill-amber-400"></i>
           <span id="top-streak">1</span> j
@@ -739,6 +747,57 @@
       <button onclick="closeLightbox()" class="absolute top-2 right-2 bg-slate-900/80 text-white p-2.5 rounded-full hover:bg-slate-800 transition border border-slate-700">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
+    </div>
+  </div>
+
+  <!-- ================= MODAL SUPABASE CLOUD ================= -->
+  <div id="modal-supabase" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-9 h-9 rounded-xl bg-teal-500/20 text-teal-400 border border-teal-500/30 flex items-center justify-center">
+            <i data-lucide="cloud" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-base text-white">Connexion Cloud Supabase</h3>
+            <p class="text-xs text-slate-400">Synchronisez vos questions entre l'hôpital et vos appareils</p>
+          </div>
+        </div>
+        <button onclick="closeSupabaseModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div id="supabase-status-banner" class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex items-center space-x-2">
+        <i data-lucide="info" class="w-4 h-4 shrink-0"></i>
+        <span id="supabase-status-banner-text">Non connecté. En mode local (sur ce navigateur uniquement).</span>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">Supabase Project URL</label>
+          <input type="text" id="supabase-input-url" placeholder="https://votre-projet.supabase.co" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 font-mono text-xs">
+        </div>
+        <div>
+          <label class="block font-bold text-slate-300 mb-1">Supabase Anon Key (clé publique)</label>
+          <input type="password" id="supabase-input-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 font-mono text-xs">
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-2 pt-2">
+        <button onclick="saveSupabaseSettings()" class="w-full py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-1.5 transition shadow-lg shadow-teal-500/20">
+          <i data-lucide="check-circle" class="w-4 h-4"></i>
+          <span>Enregistrer & Connecter</span>
+        </button>
+        <button id="btn-sync-to-cloud" onclick="syncLocalToSupabase()" class="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 font-semibold text-xs flex items-center justify-center space-x-1.5 transition border border-slate-700">
+          <i data-lucide="upload-cloud" class="w-4 h-4"></i>
+          <span>Envoyer mes données locales vers le Cloud</span>
+        </button>
+        <button id="btn-sync-from-cloud" onclick="syncSupabaseToLocal()" class="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 font-semibold text-xs flex items-center justify-center space-x-1.5 transition border border-slate-700">
+          <i data-lucide="download-cloud" class="w-4 h-4"></i>
+          <span>Recharger depuis le Cloud Supabase</span>
+        </button>
+      </div>
     </div>
   </div>
 

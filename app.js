@@ -95,6 +95,284 @@ function isQuestionDue(q) {
   return q.stats.nextReviewDate <= getTodayString();
 }
 
+// =========================================================================
+// --- MODULE SUPABASE CLOUD SYNC & STOCKAGE ---
+// =========================================================================
+let supabase = null;
+
+function getSupabaseCredentials() {
+  const cfg = window.PATHOSORUS_CONFIG || {};
+  const url = cfg.supabaseUrl || localStorage.getItem('pathosorus_supabase_url') || '';
+  const key = cfg.supabaseAnonKey || localStorage.getItem('pathosorus_supabase_key') || '';
+  return { url: url.trim(), key: key.trim() };
+}
+
+function initSupabase() {
+  const { url, key } = getSupabaseCredentials();
+  if (url && key && window.supabase) {
+    try {
+      supabase = window.supabase.createClient(url, key);
+      updateSupabaseUI(true);
+      return true;
+    } catch (e) {
+      console.error('Erreur Supabase init:', e);
+      updateSupabaseUI(false, "Erreur de connexion aux identifiants Supabase");
+      return false;
+    }
+  } else {
+    updateSupabaseUI(false);
+    return false;
+  }
+}
+
+function updateSupabaseUI(connected, errorMsg) {
+  const dot = document.getElementById('supabase-status-dot');
+  const text = document.getElementById('supabase-status-text');
+  const banner = document.getElementById('supabase-status-banner');
+  const bannerText = document.getElementById('supabase-status-banner-text');
+
+  if (connected) {
+    if (dot) {
+      dot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse";
+    }
+    if (text) {
+      text.textContent = "Cloud Connecté";
+      text.className = "text-emerald-300 font-semibold hidden md:inline";
+    }
+    if (banner) {
+      banner.className = "p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-center space-x-2";
+    }
+    if (bannerText) {
+      bannerText.textContent = "🟢 Connecté au Cloud Supabase ! Synchronisation automatique active.";
+    }
+  } else {
+    if (dot) {
+      dot.className = "w-2 h-2 rounded-full bg-slate-500";
+    }
+    if (text) {
+      text.textContent = "Mode Local";
+      text.className = "text-slate-400 hidden md:inline";
+    }
+    if (banner) {
+      banner.className = "p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex items-center space-x-2";
+    }
+    if (bannerText) {
+      bannerText.textContent = errorMsg || "Mode local actif. Vos questions sont enregistrées sur ce navigateur.";
+    }
+  }
+}
+
+function openSupabaseModal() {
+  const modal = document.getElementById('modal-supabase');
+  const { url, key } = getSupabaseCredentials();
+  document.getElementById('supabase-input-url').value = url;
+  document.getElementById('supabase-input-key').value = key;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closeSupabaseModal() {
+  const modal = document.getElementById('modal-supabase');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+async function saveSupabaseSettings() {
+  const url = document.getElementById('supabase-input-url').value.trim();
+  const key = document.getElementById('supabase-input-key').value.trim();
+
+  if (!url || !key) {
+    localStorage.removeItem('pathosorus_supabase_url');
+    localStorage.removeItem('pathosorus_supabase_key');
+    supabase = null;
+    updateSupabaseUI(false);
+    alert("Configuration Cloud effacée. Retour au mode local.");
+    closeSupabaseModal();
+    return;
+  }
+
+  localStorage.setItem('pathosorus_supabase_url', url);
+  localStorage.setItem('pathosorus_supabase_key', key);
+
+  if (initSupabase()) {
+    try {
+      const { data, error } = await supabase.from('questions').select('id').limit(1);
+      if (error) {
+        alert("Attention : Connexion réussie mais erreur d'accès aux tables : " + error.message + "\nAvez-vous bien exécuté le script SQL dans Supabase ?");
+      } else {
+        alert("Connexion Cloud Supabase réussie avec succès !");
+        await fetchSupabaseData(true);
+      }
+    } catch (e) {
+      alert("Erreur de test : " + e.message);
+    }
+  }
+  closeSupabaseModal();
+}
+
+async function fetchSupabaseData(silent = false) {
+  if (!supabase) return;
+  try {
+    const [qRes, cRes, tRes] = await Promise.all([
+      supabase.from('questions').select('*').order('created_at', { ascending: false }),
+      supabase.from('cases').select('*').order('created_at', { ascending: false }),
+      supabase.from('custom_tags').select('*').order('created_at', { ascending: true })
+    ]);
+
+    if (!qRes.error && qRes.data) {
+      state.questions = qRes.data.map(q => ({
+        ...q,
+        options: q.options || [],
+        correct: q.correct || [],
+        tags: q.tags || [],
+        images: q.images || [],
+        stats: q.stats || { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 }
+      }));
+      localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
+    }
+
+    if (!cRes.error && cRes.data) {
+      state.cases = cRes.data.map(c => ({
+        ...c,
+        tags: c.tags || [],
+        steps: c.steps || []
+      }));
+      localStorage.setItem(STORAGE_KEY_CASES, JSON.stringify(state.cases));
+    }
+
+    if (!tRes.error && tRes.data && tRes.data.length > 0) {
+      state.customTags = tRes.data.map(t => t.name);
+      localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(state.customTags));
+    }
+
+    updateTopBar();
+    renderHierarchySelector();
+    renderTagsCloud();
+    renderDPCardsOnPlay();
+    renderSpacedRepetitionDashboard();
+    renderBank();
+
+    if (!silent) alert("Données synchronisées depuis le Cloud Supabase !");
+  } catch (err) {
+    console.error("Erreur fetch Supabase:", err);
+    if (!silent) alert("Erreur lors de la récupération des données : " + err.message);
+  }
+}
+
+async function syncLocalToSupabase() {
+  if (!supabase) {
+    alert("Veuillez d'abord connecter votre projet Supabase.");
+    return;
+  }
+  const btn = document.getElementById('btn-sync-to-cloud');
+  btn.disabled = true;
+  btn.innerHTML = `<span>Envoi en cours...</span>`;
+
+  try {
+    if (state.customTags.length > 0) {
+      const tagRows = state.customTags.map(t => ({ name: t }));
+      await supabase.from('custom_tags').upsert(tagRows);
+    }
+    if (state.questions.length > 0) {
+      await supabase.from('questions').upsert(state.questions);
+    }
+    if (state.cases.length > 0) {
+      await supabase.from('cases').upsert(state.cases);
+    }
+
+    alert(`Synchronisation montante réussie !\n${state.questions.length} questions et ${state.cases.length} DP sauvegardés dans le Cloud.`);
+    closeSupabaseModal();
+  } catch (err) {
+    console.error("Erreur sync to supabase:", err);
+    alert("Erreur lors de l'envoi vers Supabase : " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<i data-lucide="upload-cloud" class="w-4 h-4"></i><span>Envoyer mes données locales vers le Cloud</span>`;
+    if (window.lucide) lucide.createIcons();
+  }
+}
+
+async function syncSupabaseToLocal() {
+  if (!supabase) {
+    alert("Veuillez d'abord connecter votre projet Supabase.");
+    return;
+  }
+  await fetchSupabaseData(false);
+  closeSupabaseModal();
+}
+
+async function dbUpsertQuestion(q) {
+  if (!supabase) return;
+  try {
+    await supabase.from('questions').upsert(q);
+  } catch (e) {
+    console.warn("Erreur upsert question supabase:", e);
+  }
+}
+
+async function dbDeleteQuestion(id) {
+  if (!supabase) return;
+  try {
+    await supabase.from('questions').delete().eq('id', id);
+  } catch (e) {
+    console.warn("Erreur delete question supabase:", e);
+  }
+}
+
+async function dbUpsertCase(c) {
+  if (!supabase) return;
+  try {
+    await supabase.from('cases').upsert(c);
+  } catch (e) {
+    console.warn("Erreur upsert case supabase:", e);
+  }
+}
+
+async function dbDeleteCase(id) {
+  if (!supabase) return;
+  try {
+    await supabase.from('cases').delete().eq('id', id);
+  } catch (e) {
+    console.warn("Erreur delete case supabase:", e);
+  }
+}
+
+async function dbUpsertTag(name) {
+  if (!supabase) return;
+  try {
+    await supabase.from('custom_tags').upsert({ name });
+  } catch (e) {
+    console.warn("Erreur upsert tag supabase:", e);
+  }
+}
+
+async function uploadImageFile(file) {
+  if (supabase) {
+    try {
+      const ext = (file.name || 'image.jpg').split('.').pop();
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`;
+      const { data, error } = await supabase.storage
+        .from('pathosorus_images')
+        .upload(fileName, file, { cacheControl: '3600', upsert: false });
+
+      if (!error && data) {
+        const { data: publicData } = supabase.storage
+          .from('pathosorus_images')
+          .getPublicUrl(fileName);
+        return publicData.publicUrl;
+      }
+    } catch (err) {
+      console.warn("Erreur upload Supabase Storage, fallback base64", err);
+    }
+  }
+
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (evt) => resolve(evt.target.result);
+    reader.readAsDataURL(file);
+  });
+}
+
 // --- INITIALISATION ---
 function initApp() {
   const storedQ = localStorage.getItem(STORAGE_KEY_QUESTIONS);
@@ -120,6 +398,11 @@ function initApp() {
   renderDPCardsOnPlay();
   renderSpacedRepetitionDashboard();
   renderBank();
+
+  // Initialisation du Cloud Supabase
+  if (initSupabase()) {
+    fetchSupabaseData(true);
+  }
 
   if (window.lucide) lucide.createIcons();
 }
@@ -250,6 +533,7 @@ function toggleQuestionMastered(id) {
 
   q.mastered = !q.mastered;
   saveQuestions();
+  dbUpsertQuestion(q);
 
   if (state.currentSession) {
     const curQ = state.currentSession.questions[state.currentSession.currentIndex];
@@ -287,6 +571,7 @@ function chooseReviewInterval(days) {
   if (globalQ) {
     globalQ.stats = q.stats;
     globalQ.flagged = q.flagged;
+    dbUpsertQuestion(globalQ);
   }
 
   saveQuestions();
@@ -870,21 +1155,18 @@ function onFormatChange() {
   }
 }
 
-function handleEditorImageUpload(e) {
+async function handleEditorImageUpload(e) {
   const files = e.target.files;
   if (!files || files.length === 0) return;
 
-  Array.from(files).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = function(evt) {
-      state.editorUploadedImages.push({
-        url: evt.target.result,
-        caption: file.name.replace(/\.[^/.]+$/, "")
-      });
-      renderEditorUploadedImages();
-    };
-    reader.readAsDataURL(file);
-  });
+  for (const file of Array.from(files)) {
+    const url = await uploadImageFile(file);
+    state.editorUploadedImages.push({
+      url: url,
+      caption: file.name.replace(/\.[^/.]+$/, "")
+    });
+    renderEditorUploadedImages();
+  }
 }
 
 function renderEditorUploadedImages() {
@@ -955,6 +1237,7 @@ function handleSaveQuestionForm(e) {
         format, organ, category, entity, question, context, explanation, trap, tags, options, correct,
         images: [...state.editorUploadedImages]
       };
+      dbUpsertQuestion(state.questions[idx]);
     }
   } else {
     const newQ = {
@@ -966,6 +1249,7 @@ function handleSaveQuestionForm(e) {
       stats: { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 }
     };
     state.questions.push(newQ);
+    dbUpsertQuestion(newQ);
   }
 
   saveQuestions();
@@ -1016,6 +1300,7 @@ function deleteQuestion(id) {
   if (!confirm("Voulez-vous supprimer cette question ?")) return;
   state.questions = state.questions.filter(q => q.id !== id);
   saveQuestions();
+  dbDeleteQuestion(id);
 }
 
 // =========================================================================
@@ -1220,22 +1505,19 @@ function handleDPStepCorrectChange(stepIdx, optIdx, isChecked, isQCM) {
   }
 }
 
-function handleDPStepImageUpload(e, stepIdx) {
+async function handleDPStepImageUpload(e, stepIdx) {
   const files = e.target.files;
   if (!files || files.length === 0) return;
 
-  Array.from(files).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = function(evt) {
-      if (!state.dpSteps[stepIdx].images) state.dpSteps[stepIdx].images = [];
-      state.dpSteps[stepIdx].images.push({
-        url: evt.target.result,
-        caption: file.name.replace(/\.[^/.]+$/, "")
-      });
-      renderDPStepImagesPreview(stepIdx);
-    };
-    reader.readAsDataURL(file);
-  });
+  for (const file of Array.from(files)) {
+    const url = await uploadImageFile(file);
+    if (!state.dpSteps[stepIdx].images) state.dpSteps[stepIdx].images = [];
+    state.dpSteps[stepIdx].images.push({
+      url: url,
+      caption: file.name.replace(/\.[^/.]+$/, "")
+    });
+    renderDPStepImagesPreview(stepIdx);
+  }
 }
 
 function renderDPStepImagesPreview(stepIdx) {
@@ -1289,6 +1571,7 @@ function handleSaveDPForm(e) {
         title, organ, category, entity, synopsis, tags,
         steps: JSON.parse(JSON.stringify(state.dpSteps))
       };
+      dbUpsertCase(state.cases[idx]);
     }
   } else {
     const newCase = {
@@ -1297,6 +1580,7 @@ function handleSaveDPForm(e) {
       steps: JSON.parse(JSON.stringify(state.dpSteps))
     };
     state.cases.push(newCase);
+    dbUpsertCase(newCase);
   }
 
   saveCases();
@@ -1329,6 +1613,7 @@ function deleteDP(id) {
   if (!confirm("Voulez-vous supprimer ce Dossier Progressif ?")) return;
   state.cases = state.cases.filter(c => c.id !== id);
   saveCases();
+  dbDeleteCase(id);
 }
 
 // =========================================================================
@@ -1622,6 +1907,7 @@ function createNewGlobalTag(tagName) {
   if (!state.customTags.includes(clean)) {
     state.customTags.push(clean);
     saveCustomTags();
+    dbUpsertTag(clean);
   }
 }
 
