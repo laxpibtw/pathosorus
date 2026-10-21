@@ -1215,6 +1215,27 @@ function handleSaveQuestionForm(e) {
   const trap = document.getElementById('form-q-trap').value.trim();
   const tags = Array.from(state.editorSelectedTags);
 
+  if (!organ) {
+    alert("Veuillez renseigner le Niveau 1 : Organe.");
+    document.getElementById('form-q-organ').focus();
+    return;
+  }
+  if (!category) {
+    alert("Veuillez renseigner le Niveau 2 : Catégorie.");
+    document.getElementById('form-q-category').focus();
+    return;
+  }
+  if (!entity) {
+    alert("Veuillez renseigner le Niveau 3 : Lésion précise.");
+    document.getElementById('form-q-entity').focus();
+    return;
+  }
+  if (!question) {
+    alert("Veuillez renseigner l'énoncé de la question.");
+    document.getElementById('form-q-text').focus();
+    return;
+  }
+
   let options = [];
   let correct = [];
 
@@ -1224,9 +1245,16 @@ function handleSaveQuestionForm(e) {
     correct = [chosen && chosen.value === 'Faux' ? 1 : 0];
   } else if (format === 'qcm') {
     for (let i = 0; i < 4; i++) {
-      options.push(document.getElementById('form-opt-text-' + i).value.trim());
+      const val = document.getElementById('form-opt-text-' + i).value.trim();
       const chk = document.getElementById('form-opt-indicator-' + i);
-      if (chk && chk.checked) correct.push(i);
+      if (val) {
+        options.push(val);
+        if (chk && chk.checked) correct.push(options.length - 1);
+      }
+    }
+    if (options.length < 2) {
+      alert("En mode QCM, veuillez renseigner au moins 2 options.");
+      return;
     }
     if (correct.length === 0) {
       alert("En mode QCM, veuillez cocher au moins une bonne réponse.");
@@ -1234,10 +1262,27 @@ function handleSaveQuestionForm(e) {
     }
   } else {
     for (let i = 0; i < 4; i++) {
-      options.push(document.getElementById('form-opt-text-' + i).value.trim());
+      const val = document.getElementById('form-opt-text-' + i).value.trim();
       const rad = document.getElementById('form-opt-indicator-' + i);
-      if (rad && rad.checked) correct.push(i);
+      if (val) {
+        options.push(val);
+        if (rad && rad.checked) correct.push(options.length - 1);
+      }
     }
+    if (options.length < 2) {
+      alert("En mode QCU, veuillez renseigner au moins 2 options.");
+      return;
+    }
+    if (correct.length === 0) {
+      alert("En mode QCU, veuillez sélectionner la bonne réponse.");
+      return;
+    }
+  }
+
+  if (!explanation) {
+    alert("Veuillez renseigner l'explication détaillée.");
+    document.getElementById('form-q-explanation').focus();
+    return;
   }
 
   if (editId) {
@@ -1265,6 +1310,7 @@ function handleSaveQuestionForm(e) {
 
   saveQuestions();
   alert("Question enregistrée avec succès !");
+  resetQuestionForm();
   switchTab('bank');
 }
 
@@ -1565,6 +1611,32 @@ function handleSaveDPForm(e) {
   const entity = document.getElementById('form-dp-entity').value.trim();
   const synopsis = document.getElementById('form-dp-synopsis').value.trim();
   const tags = Array.from(state.editorSelectedTags);
+
+  if (!title) {
+    alert("Veuillez renseigner le titre du Dossier Clinique.");
+    document.getElementById('form-dp-title').focus();
+    return;
+  }
+  if (!organ) {
+    alert("Veuillez renseigner le Niveau 1 : Organe.");
+    document.getElementById('form-dp-organ').focus();
+    return;
+  }
+  if (!category) {
+    alert("Veuillez renseigner le Niveau 2 : Catégorie.");
+    document.getElementById('form-dp-category').focus();
+    return;
+  }
+  if (!entity) {
+    alert("Veuillez renseigner le Niveau 3 : Lésion précise.");
+    document.getElementById('form-dp-entity').focus();
+    return;
+  }
+
+  if (!state.dpSteps || state.dpSteps.length === 0) {
+    alert("Veuillez ajouter au moins une étape (bouton 'Ajouter une étape suivante').");
+    return;
+  }
 
   for (let i = 0; i < state.dpSteps.length; i++) {
     const s = state.dpSteps[i];

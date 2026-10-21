@@ -504,7 +504,7 @@
           <p class="text-xs text-slate-400 mt-1">Par défaut en <strong>Choix Multiple (QCM)</strong>. Classez-la selon vos 3 niveaux et vos tags.</p>
         </div>
 
-        <form id="form-create-question" onsubmit="handleSaveQuestionForm(event)" class="space-y-5">
+        <form id="form-create-question" novalidate onsubmit="handleSaveQuestionForm(event)" class="space-y-5">
           <input type="hidden" id="form-q-edit-id" value="">
 
           <div>
@@ -583,19 +583,19 @@
             <div id="form-mcq-wrapper" class="space-y-2">
               <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
                 <input type="checkbox" id="form-opt-indicator-0" name="correct_qcm_choice" value="0" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
-                <input type="text" id="form-opt-text-0" required placeholder="Option A" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
+                <input type="text" id="form-opt-text-0" placeholder="Option A" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
               </div>
               <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
                 <input type="checkbox" id="form-opt-indicator-1" name="correct_qcm_choice" value="1" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
-                <input type="text" id="form-opt-text-1" required placeholder="Option B" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
+                <input type="text" id="form-opt-text-1" placeholder="Option B" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
               </div>
               <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
                 <input type="checkbox" id="form-opt-indicator-2" name="correct_qcm_choice" value="2" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
-                <input type="text" id="form-opt-text-2" required placeholder="Option C" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
+                <input type="text" id="form-opt-text-2" placeholder="Option C" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
               </div>
               <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
                 <input type="checkbox" id="form-opt-indicator-3" name="correct_qcm_choice" value="3" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
-                <input type="text" id="form-opt-text-3" required placeholder="Option D" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
+                <input type="text" id="form-opt-text-3" placeholder="Option D" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
               </div>
             </div>
 
@@ -651,7 +651,7 @@
           <p class="text-xs text-slate-400 mt-1">Créez votre dossier étape par étape avec révélations successives de coupes et questions.</p>
         </div>
 
-        <form id="form-create-dp" onsubmit="handleSaveDPForm(event)" class="space-y-6">
+        <form id="form-create-dp" novalidate onsubmit="handleSaveDPForm(event)" class="space-y-6">
           <input type="hidden" id="form-dp-edit-id" value="">
 
           <div>
