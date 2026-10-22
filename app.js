@@ -377,6 +377,12 @@ async function initAuth() {
       } else {
         state.currentUser = null;
         state.currentRole = 'reader';
+        resetInMemoryUserProgress();
+        saveQuestions();
+        updateTopBar();
+        renderSpacedRepetitionDashboard();
+        renderBank();
+        renderHierarchySelector();
       }
       updateUserRoleUI();
     });
@@ -390,13 +396,13 @@ async function syncLocalProgressToCloud() {
   try {
     const toUpload = [];
     (state.questions || []).forEach(q => {
-      if (q && q.id && q.stats && (q.stats.seen > 0 || q.stats.lastReviewed || q.mastered || q.flagged)) {
+      if (q && q.id && (q.mastered || q.flagged || (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed || q.stats.nextReviewDate)))) {
         toUpload.push({
           user_id: state.currentUser.id,
           question_id: q.id,
           mastered: Boolean(q.mastered),
           flagged: Boolean(q.flagged),
-          stats: q.stats || {},
+          stats: q.stats || getDefaultQuestionStats(),
           updated_at: new Date().toISOString()
         });
       }
@@ -539,7 +545,7 @@ async function fetchCurrentUserRole() {
       if (data.role) state.currentRole = data.role;
       if (email === 'padoreau85@gmail.com') state.currentRole = 'creator';
 
-      if (data.stats) {
+      if (data.stats && typeof data.stats === 'object') {
         const cloudStats = data.stats || {};
         const localStats = state.stats || {};
 
@@ -572,45 +578,80 @@ async function fetchCurrentUserRole() {
           syncStatsToCloud();
         }
       } else {
-        syncStatsToCloud();
+        // Profil distant sans stats : ne pousser les stats locales que si elles contiennent une progression réelle
+        if ((state.stats.xp || 0) > 0 || (state.stats.totalAnswered || 0) > 0) {
+          syncStatsToCloud();
+        }
       }
     } else {
       state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || (email === 'padoreau85@gmail.com' ? 'creator' : 'reader');
-      await syncStatsToCloud();
+      if ((state.stats.xp || 0) > 0 || (state.stats.totalAnswered || 0) > 0) {
+        await syncStatsToCloud();
+      }
     }
   } catch (e) {
     state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || (email === 'padoreau85@gmail.com' ? 'creator' : 'reader');
   }
 }
 
+// --- CLÉS DE STOCKAGE ET PROGRESSION ISOLÉES PAR COMPTE UTILISATEUR ---
+function getUserProgressStorageKey() {
+  if (state.currentUser && state.currentUser.id) {
+    return 'pathosorus_user_progress_' + state.currentUser.id;
+  }
+  return 'pathosorus_user_progress_guest';
+}
+
+function getDefaultQuestionStats() {
+  return {
+    seen: 0,
+    correct: 0,
+    consecutiveCorrect: 0,
+    intervalDays: 0,
+    lastReviewed: null,
+    nextReviewDate: null
+  };
+}
+
+function resetInMemoryUserProgress() {
+  (state.questions || []).forEach(q => {
+    q.mastered = false;
+    q.flagged = false;
+    q.stats = getDefaultQuestionStats();
+  });
+  state.userProgress = {};
+}
+
 function saveLocalUserProgress(q) {
   if (!q || !q.id) return;
+  const storageKey = getUserProgressStorageKey();
   let prog = {};
   try {
-    const raw = localStorage.getItem('pathosorus_user_progress');
+    const raw = localStorage.getItem(storageKey);
     if (raw) prog = JSON.parse(raw);
   } catch (e) {}
 
   prog[q.id] = {
-    stats: q.stats,
-    mastered: q.mastered || false,
-    flagged: q.flagged || false,
+    stats: q.stats || getDefaultQuestionStats(),
+    mastered: Boolean(q.mastered),
+    flagged: Boolean(q.flagged),
     updated_at: new Date().toISOString()
   };
-  localStorage.setItem('pathosorus_user_progress', JSON.stringify(prog));
+  localStorage.setItem(storageKey, JSON.stringify(prog));
 }
 
 async function loadUserProgress() {
-  // 1. Restaurer d'abord la progression locale persistante
+  // 1. Restaurer d'abord la progression locale persistante du compte courant
+  const storageKey = getUserProgressStorageKey();
   try {
-    const rawProg = localStorage.getItem('pathosorus_user_progress');
+    const rawProg = localStorage.getItem(storageKey);
     if (rawProg) {
       const prog = JSON.parse(rawProg);
       state.questions.forEach(q => {
         if (prog[q.id]) {
-          if (prog[q.id].stats) q.stats = Object.assign(q.stats || {}, prog[q.id].stats);
-          if (typeof prog[q.id].mastered !== 'undefined') q.mastered = prog[q.id].mastered;
-          if (typeof prog[q.id].flagged !== 'undefined') q.flagged = prog[q.id].flagged;
+          if (prog[q.id].stats) q.stats = Object.assign(q.stats || getDefaultQuestionStats(), prog[q.id].stats);
+          if (typeof prog[q.id].mastered !== 'undefined') q.mastered = Boolean(prog[q.id].mastered);
+          if (typeof prog[q.id].flagged !== 'undefined') q.flagged = Boolean(prog[q.id].flagged);
         }
       });
       renderSpacedRepetitionDashboard();
@@ -632,9 +673,9 @@ async function loadUserProgress() {
         state.userProgress[up.question_id] = up;
         const q = state.questions.find(item => item.id === up.question_id);
         if (q) {
-          if (typeof up.mastered !== 'undefined') q.mastered = up.mastered;
-          if (typeof up.flagged !== 'undefined') q.flagged = up.flagged;
-          if (up.stats) q.stats = Object.assign(q.stats || {}, up.stats);
+          if (typeof up.mastered !== 'undefined') q.mastered = Boolean(up.mastered);
+          if (typeof up.flagged !== 'undefined') q.flagged = Boolean(up.flagged);
+          if (up.stats) q.stats = Object.assign(q.stats || getDefaultQuestionStats(), up.stats);
           saveLocalUserProgress(q);
         }
       });
@@ -644,23 +685,23 @@ async function loadUserProgress() {
       renderHierarchySelector();
     }
   } catch (e) {
-    console.warn("Table user_progress non migrée ou inaccessible:", e);
+    console.warn("Table user_progress non accessible:", e);
   }
 }
 
 async function dbSaveUserProgress(q) {
-  if (!q) return;
+  if (!q || !q.id) return;
 
-  // Persister immédiatement en mémoire locale
+  // Persister immédiatement dans le stockage local réservé au compte courant
   saveLocalUserProgress(q);
   saveQuestions();
 
   if (!state.currentUser) return;
 
   state.userProgress[q.id] = {
-    mastered: q.mastered,
-    flagged: q.flagged,
-    stats: q.stats
+    mastered: Boolean(q.mastered),
+    flagged: Boolean(q.flagged),
+    stats: q.stats || getDefaultQuestionStats()
   };
   localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
 
@@ -670,9 +711,9 @@ async function dbSaveUserProgress(q) {
     await supabaseClient.from('user_progress').upsert({
       user_id: state.currentUser.id,
       question_id: q.id,
-      mastered: q.mastered || false,
-      flagged: q.flagged || false,
-      stats: q.stats || {},
+      mastered: Boolean(q.mastered),
+      flagged: Boolean(q.flagged),
+      stats: q.stats || getDefaultQuestionStats(),
       updated_at: new Date().toISOString()
     });
   } catch (e) {
@@ -834,6 +875,7 @@ async function handleAuthLogout() {
   if (!confirm("Voulez-vous vous déconnecter de PathoSorus ?")) return;
   if (state.currentUser) {
     saveStats();
+    await syncLocalProgressToCloud();
   }
   if (supabaseClient) {
     try {
@@ -844,7 +886,12 @@ async function handleAuthLogout() {
   }
   state.currentUser = null;
   state.currentRole = 'reader';
-  // Réinitialiser les statistiques vers un profil visiteur propre
+
+  // 1. Réinitialiser la progression des révisions en mémoire (évite toute fuite entre comptes)
+  resetInMemoryUserProgress();
+  saveQuestions();
+
+  // 2. Réinitialiser les statistiques vers un profil visiteur propre
   state.stats = {
     xp: 0,
     creatorXp: 0,
@@ -859,6 +906,11 @@ async function handleAuthLogout() {
   localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
   updateUserRoleUI();
   updateTopBar();
+  renderSpacedRepetitionDashboard();
+  renderBank();
+  renderHierarchySelector();
+  renderTrophiesView();
+
   alert("Vous êtes maintenant déconnecté.");
   switchTab('play');
 }
@@ -1427,51 +1479,53 @@ async function fetchSupabaseData(silent = false) {
     }
 
     if (!qRes.error && qRes.data) {
-      // 1. Sauvegarder la progression actuelle et les questions locales pour éviter toute perte d'explications
-      const localProgressMap = new Map();
+      // Conserver une trace brute et intacte de Supabase pour vérifier les colonnes réellement vides
+      const rawCloudQuestionsMap = new Map((qRes.data || []).map(item => [item.id, item]));
+
+      // 1. Sauvegarder la mémoire locale pour éviter toute perte de notes
       const localQuestionMap = new Map();
       (state.questions || []).forEach(oldQ => {
         if (oldQ && oldQ.id) {
           localQuestionMap.set(oldQ.id, oldQ);
-          localProgressMap.set(oldQ.id, {
-            stats: oldQ.stats,
-            mastered: oldQ.mastered,
-            flagged: oldQ.flagged
-          });
         }
       });
 
+      // Récupérer la progression locale STRICTEMENT liée à l'utilisateur courant (ou invité)
+      const userStorageKey = getUserProgressStorageKey();
       let storedProgress = {};
       try {
-        const raw = localStorage.getItem('pathosorus_user_progress');
+        const raw = localStorage.getItem(userStorageKey);
         if (raw) storedProgress = JSON.parse(raw);
       } catch (e) {}
 
       const cloudQuestions = qRes.data.map(q => {
         const cloudProg = cloudProgressMap.get(q.id);
-        const localProg = localProgressMap.get(q.id) || storedProgress[q.id];
+        const localProg = storedProgress[q.id];
         const localQ = localQuestionMap.get(q.id);
         
-        let stats = q.stats || { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 };
-        let mastered = q.mastered || false;
-        let flagged = q.flagged || false;
+        let stats = getDefaultQuestionStats();
+        let mastered = false;
+        let flagged = false;
 
-        // Priorité absolue à user_progress de Supabase pour le compte connecté
+        // RÈGLE FONDAMENTALE D'ISOLATION DES COMPTES :
+        // La progression personnelle (intervalles, révisions, maîtrisées) provient EXCLUSIVEMENT
+        // de user_progress du compte connecté, ou du cache local réservé à cet utilisateur.
+        // On n'utilise JAMAIS q.stats de la banque partagée pour planifier les révisions !
         if (cloudProg) {
-          if (typeof cloudProg.mastered !== 'undefined') mastered = cloudProg.mastered;
-          if (typeof cloudProg.flagged !== 'undefined') flagged = cloudProg.flagged;
+          mastered = Boolean(cloudProg.mastered);
+          flagged = Boolean(cloudProg.flagged);
           if (cloudProg.stats) stats = { ...stats, ...cloudProg.stats };
+        } else if (localProg) {
+          if (localProg.stats) stats = { ...stats, ...localProg.stats };
+          if (typeof localProg.mastered !== 'undefined') mastered = Boolean(localProg.mastered);
+          if (typeof localProg.flagged !== 'undefined') flagged = Boolean(localProg.flagged);
         }
 
-        // Si la machine locale a une révision plus récente (ex: révision hors-ligne ou session active)
-        if (localProg) {
-          if (!cloudProg || (localProg.stats && (localProg.stats.seen || 0) > (stats.seen || 0))) {
-            if (localProg.stats && (localProg.stats.lastReviewed || (localProg.stats.seen && localProg.stats.seen > 0) || localProg.stats.nextReviewDate)) {
-              stats = { ...stats, ...localProg.stats };
-            }
-            if (typeof localProg.mastered !== 'undefined') mastered = localProg.mastered;
-            if (typeof localProg.flagged !== 'undefined') flagged = localProg.flagged;
-          }
+        // Si la session locale a une révision encore plus récente pour ce même utilisateur
+        if (cloudProg && localProg && localProg.stats && (localProg.stats.seen || 0) > (stats.seen || 0)) {
+          stats = { ...stats, ...localProg.stats };
+          if (typeof localProg.mastered !== 'undefined') mastered = Boolean(localProg.mastered);
+          if (typeof localProg.flagged !== 'undefined') flagged = Boolean(localProg.flagged);
         }
 
         // Récupérer optionExplanations depuis la colonne Supabase (optionexplanations ou optionExplanations)
@@ -1479,7 +1533,7 @@ async function fetchSupabaseData(silent = false) {
           ? q.optionexplanations
           : ((Array.isArray(q.optionExplanations) && q.optionExplanations.length > 0) ? q.optionExplanations : []);
 
-        // Filet de sécurité : si le Cloud a renvoyé des explications vides mais que le navigateur local avait déjà des explications renseignées, préserver les notes locales !
+        // Filet de sécurité local : si le Cloud a renvoyé des explications vides mais que le navigateur local avait déjà des explications renseignées, préserver les notes locales !
         if ((!optExp || optExp.length === 0 || optExp.every(e => !e || !e.trim())) && localQ) {
           const localExp = (Array.isArray(localQ.optionExplanations) && localQ.optionExplanations.length > 0)
             ? localQ.optionExplanations
@@ -1487,6 +1541,17 @@ async function fetchSupabaseData(silent = false) {
           if (localExp.some(e => e && e.trim())) {
             optExp = localExp;
           }
+        }
+
+        // Filet spécifique CIN-3 (q_1792663474345) si vide sur Supabase : justifications médicales exhaustives
+        if (q.id === 'q_1792663474345' && (!optExp || optExp.length === 0 || optExp.every(e => !e || !e.trim()))) {
+          optExp = [
+            "Faux : L'atteinte limitée aux 2/3 inférieurs caractérise le CIN-2. Dans le CIN-3 (haut grade), la désorganisation architecturale et les atypies cytonucléaires intéressent toute la hauteur (ou >2/3) de l'épithélium malpighien.",
+            "Faux : L'IHC p16INK4a montre un marquage diffus et intense « en bloc » (nucléaire et cytoplasmique continu sur au moins le tiers inférieur), traduisant l'inactivation de pRb par l'oncoprotéine E7 des HPV à haut risque.",
+            "Faux : Les koïlocytes correspondent à l'effet cytopathogène du HPV (Human Papillomavirus), et non du virus HSV.",
+            "Faux : La zone de jonction pavimento-cylindrique (zone de transformation) est le site électif de vulnérabilité et de développement des NIEM / CIN.",
+            "Vrai : Toutes les propositions précédentes comportent des erreurs, ce qui fait de cette assertion la seule réponse exacte."
+          ];
         }
 
         const expImgs = (Array.isArray(q.explanationimages) && q.explanationimages.length > 0)
@@ -1497,13 +1562,13 @@ async function fetchSupabaseData(silent = false) {
           ? q.acceptedanswers
           : ((Array.isArray(q.acceptedAnswers) && q.acceptedAnswers.length > 0) ? q.acceptedAnswers : (q.format === 'ouverte' ? (q.options || []) : []));
 
-        const diff = q.difficulty || (stats && stats.difficulty) || 'facile';
-        const extClues = q.extremeClues || q.extremeclues || (stats && stats.extremeClues) || '';
+        const diff = q.difficulty || (q.stats && q.stats.difficulty) || 'facile';
+        const extClues = q.extremeClues || q.extremeclues || (q.stats && q.stats.extremeClues) || '';
 
         return {
           ...q,
           options: q.options || [],
-          correct: q.correct || [],
+          correct: Array.isArray(q.correct) ? q.correct : (typeof q.correct === 'number' ? [q.correct] : []),
           optionExplanations: optExp,
           optionexplanations: optExp,
           acceptedAnswers: accAns,
@@ -1527,14 +1592,14 @@ async function fetchSupabaseData(silent = false) {
       state.questions = [...cloudQuestions, ...localOnlyQuestions];
       localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
 
-      // Sauvegarder dans le cache local pour répétition espacée
+      // Sauvegarder dans le cache local propre à cet utilisateur pour la répétition espacée
       const syncProg = {};
       state.questions.forEach(q => {
-        if (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed || q.mastered || q.flagged)) {
-          syncProg[q.id] = { stats: q.stats, mastered: q.mastered, flagged: q.flagged };
+        if (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed || q.stats.nextReviewDate || q.mastered || q.flagged)) {
+          syncProg[q.id] = { stats: q.stats, mastered: Boolean(q.mastered), flagged: Boolean(q.flagged) };
         }
       });
-      localStorage.setItem('pathosorus_user_progress', JSON.stringify(syncProg));
+      localStorage.setItem(userStorageKey, JSON.stringify(syncProg));
     }
 
     if (!cRes.error && cRes.data) {
@@ -1572,14 +1637,16 @@ async function fetchSupabaseData(silent = false) {
     renderTrophiesView();
 
     // Auto-push vers Supabase : si des questions ont des justifications locales mais vides sur Supabase
-    if (state.currentUser && isCreator()) {
+    if (state.currentUser && isCreator() && qRes.data) {
+      const rawCloudMap = new Map(qRes.data.map(item => [item.id, item]));
       const needSync = state.questions.filter(q => {
         const hasNotes = Array.isArray(q.optionExplanations) && q.optionExplanations.some(e => e && e.trim());
-        const remoteEmpty = !q.optionexplanations || q.optionexplanations.length === 0 || q.optionexplanations.every(e => !e || !e.trim());
+        const rawQ = rawCloudMap.get(q.id);
+        const remoteEmpty = !rawQ || !rawQ.optionexplanations || rawQ.optionexplanations.length === 0 || rawQ.optionexplanations.every(e => !e || !e.trim());
         return hasNotes && remoteEmpty;
       });
       if (needSync.length > 0) {
-        console.log(`Auto-push vers Supabase de ${needSync.length} question(s) avec justifications locales...`);
+        console.log(`☁️ Auto-push vers Supabase de ${needSync.length} question(s) avec justifications...`);
         for (const q of needSync) {
           await dbUpsertQuestion(q);
         }
@@ -1624,9 +1691,9 @@ function formatQuestionForSupabase(q) {
   const diff = q.difficulty || (q.stats && q.stats.difficulty) || 'facile';
   const extClues = q.extremeClues || q.extremeclues || (q.stats && q.stats.extremeClues) || '';
 
-  // Stats JSONB supporte nativement difficulty et extremeClues sans altération DDL de la table distante
-  const stats = {
-    ...(q.stats || {}),
+  // IMPORTANT : La table collective `questions` ne stocke que les métadonnées de la question
+  // (difficulté, indices extrêmes) et JAMAIS la progression individuelle d'un utilisateur (intervalles, révisions)
+  const questionMetadataStats = {
     difficulty: diff,
     extremeClues: extClues
   };
@@ -1646,9 +1713,9 @@ function formatQuestionForSupabase(q) {
     trap: q.trap || '',
     tags: Array.isArray(q.tags) ? q.tags : [],
     images: Array.isArray(q.images) ? q.images : [],
-    mastered: Boolean(q.mastered),
-    flagged: Boolean(q.flagged),
-    stats,
+    mastered: false, // Ne pas figer de statut individuel sur la banque partagée
+    flagged: false,  // Ne pas figer d'erreur individuelle sur la banque partagée
+    stats: questionMetadataStats,
     // Colonnes PostgreSQL en minuscules conformes à PostgREST
     optionexplanations: optExp,
     explanationimages: expImgs,
@@ -1815,16 +1882,23 @@ function initApp() {
     q.optionexplanations = optExp;
   });
 
-  // Restaurer immédiatement la progression locale des révisions (lastReviewed, nextReviewDate)
+  // Restaurer immédiatement la progression locale des révisions propre au profil
   try {
-    const rawProg = localStorage.getItem('pathosorus_user_progress');
+    const userStorageKey = getUserProgressStorageKey();
+    let rawProg = localStorage.getItem(userStorageKey);
+    if (!rawProg && (!state.currentUser || !state.currentUser.id)) {
+      rawProg = localStorage.getItem('pathosorus_user_progress');
+      if (rawProg) {
+        localStorage.setItem(userStorageKey, rawProg);
+      }
+    }
     if (rawProg) {
       const prog = JSON.parse(rawProg);
       state.questions.forEach(q => {
         if (prog[q.id]) {
-          if (prog[q.id].stats) q.stats = Object.assign(q.stats || {}, prog[q.id].stats);
-          if (typeof prog[q.id].mastered !== 'undefined') q.mastered = prog[q.id].mastered;
-          if (typeof prog[q.id].flagged !== 'undefined') q.flagged = prog[q.id].flagged;
+          if (prog[q.id].stats) q.stats = Object.assign(q.stats || getDefaultQuestionStats(), prog[q.id].stats);
+          if (typeof prog[q.id].mastered !== 'undefined') q.mastered = Boolean(prog[q.id].mastered);
+          if (typeof prog[q.id].flagged !== 'undefined') q.flagged = Boolean(prog[q.id].flagged);
         }
       });
     }
@@ -4775,25 +4849,33 @@ async function handleSaveQuestionForm(e) {
     if (idx !== -1) {
       state.questions[idx] = {
         ...state.questions[idx],
-        format, organ, category, entity, question, context, explanation, trap, tags, options, correct, optionExplanations,
+        format, organ, category, entity, question, context, explanation, trap, tags, options, correct,
+        optionExplanations,
+        optionexplanations: optionExplanations,
         difficulty, extremeClues,
         acceptedAnswers: [...acceptedAnswers],
+        acceptedanswers: [...acceptedAnswers],
         images: [...state.editorUploadedImages],
-        explanationImages: [...(state.editorUploadedExplanationImages || [])]
+        explanationImages: [...(state.editorUploadedExplanationImages || [])],
+        explanationimages: [...(state.editorUploadedExplanationImages || [])]
       };
       savedQuestion = state.questions[idx];
     }
   } else {
     const newQ = {
       id: "q_" + Date.now(),
-      format, organ, category, entity, question, context, explanation, trap, tags, options, correct, optionExplanations,
+      format, organ, category, entity, question, context, explanation, trap, tags, options, correct,
+      optionExplanations,
+      optionexplanations: optionExplanations,
       difficulty, extremeClues,
       acceptedAnswers: [...acceptedAnswers],
+      acceptedanswers: [...acceptedAnswers],
       images: [...state.editorUploadedImages],
       explanationImages: [...(state.editorUploadedExplanationImages || [])],
+      explanationimages: [...(state.editorUploadedExplanationImages || [])],
       flagged: false,
       mastered: false,
-      stats: { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 }
+      stats: getDefaultQuestionStats()
     };
     state.questions.push(newQ);
     savedQuestion = newQ;
