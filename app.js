@@ -2433,81 +2433,106 @@ function getQuestionXp(q) {
   const diff = q.difficulty || 'facile';
   if (diff === 'intermediaire') return 5;
   if (diff === 'difficile') return 10;
-  if (diff === 'extreme') return 100;
+  if (diff === 'extreme') return 50;
   return 2; // Facile par défaut (+2 pts)
+}
+
+function getTrophyXpReward(b) {
+  if (b && typeof b.xpReward === 'number') return b.xpReward;
+  if (b && b.tier === 'platinum') return 100;
+  if (b && b.tier === 'gold') return 50;
+  if (b && b.tier === 'silver') return 25;
+  return 10; // Bronze par défaut (+10 pts)
 }
 
 function calculatePlayerLevel(xp) {
   let rem = Math.max(0, xp || 0);
 
-  // Tranche 1 : Niveaux 1 à 100 (30 pts par palier, 0 à 3000 XP)
-  if (rem < 3000) {
-    const lvl = 1 + Math.floor(rem / 30);
-    const curXp = rem % 30;
+  // Tranche 1 : Niveaux 1 à 10 (100 XP / palier, 0 à 1 000 XP) - Découverte & Novice
+  if (rem < 1000) {
+    const lvl = 1 + Math.floor(rem / 100);
+    const curXp = rem % 100;
     return {
-      level: Math.min(100, lvl),
+      level: Math.min(10, lvl),
       currentTierXp: curXp,
-      tierMaxXp: 30,
-      percent: Math.min(100, Math.round((curXp / 30) * 100)),
+      tierMaxXp: 100,
+      percent: Math.min(100, Math.round((curXp / 100) * 100)),
       tierName: 'Interne Novice',
       tierBadge: '🥉 Bronze',
-      nextTierInfo: '30 XP / palier'
+      nextTierInfo: '100 XP / palier'
     };
   }
-  rem -= 3000;
+  rem -= 1000;
 
-  // Tranche 2 : Niveaux 101 à 300 (45 pts par palier, 3000 à 12000 XP)
-  if (rem < 9000) {
-    const lvl = 101 + Math.floor(rem / 45);
-    const curXp = rem % 45;
+  // Tranche 2 : Niveaux 11 à 30 (250 XP / palier, 1 000 à 6 000 XP) - Chasseur de Mitoses
+  if (rem < 5000) {
+    const lvl = 11 + Math.floor(rem / 250);
+    const curXp = rem % 250;
     return {
-      level: Math.min(300, lvl),
+      level: Math.min(30, lvl),
       currentTierXp: curXp,
-      tierMaxXp: 45,
-      percent: Math.min(100, Math.round((curXp / 45) * 100)),
-      tierName: 'Praticien Confirmé',
+      tierMaxXp: 250,
+      percent: Math.min(100, Math.round((curXp / 250) * 100)),
+      tierName: 'Chasseur de Mitoses',
       tierBadge: '🥈 Argent',
-      nextTierInfo: '45 XP / palier'
+      nextTierInfo: '250 XP / palier'
     };
   }
-  rem -= 9000;
+  rem -= 5000;
 
-  // Tranche 3 : Niveaux 301 à 600 (60 pts par palier, 12000 à 30000 XP)
+  // Tranche 3 : Niveaux 31 à 66 (500 XP / palier, 6 000 à 24 000 XP) - Compagnon Histologique
   if (rem < 18000) {
-    const lvl = 301 + Math.floor(rem / 60);
-    const curXp = rem % 60;
+    const lvl = 31 + Math.floor(rem / 500);
+    const curXp = rem % 500;
     return {
-      level: Math.min(600, lvl),
+      level: Math.min(66, lvl),
       currentTierXp: curXp,
-      tierMaxXp: 60,
-      percent: Math.min(100, Math.round((curXp / 60) * 100)),
-      tierName: 'Expert Hospitalo-Universitaire',
+      tierMaxXp: 500,
+      percent: Math.min(100, Math.round((curXp / 500) * 100)),
+      tierName: 'Compagnon Histologique',
       tierBadge: '🥇 Or',
-      nextTierInfo: '60 XP / palier'
+      nextTierInfo: '500 XP / palier'
     };
   }
   rem -= 18000;
 
-  // Tranche 4 : Niveaux 601 à 1000 (90 pts par palier, 30000 à 66000 XP)
-  if (rem < 36000) {
-    const lvl = 601 + Math.floor(rem / 90);
-    const curXp = rem % 90;
+  // Tranche 4 : Niveaux 67 à 100 (1 000 XP / palier, 24 000 à 58 000 XP) - Accident de Cryostat & Grand Référent OMS
+  if (rem < 34000) {
+    const lvl = 67 + Math.floor(rem / 1000);
+    const curXp = rem % 1000;
+    const isCryostat = (lvl === 67);
+    return {
+      level: Math.min(100, lvl),
+      currentTierXp: curXp,
+      tierMaxXp: 1000,
+      percent: Math.min(100, Math.round((curXp / 1000) * 100)),
+      tierName: isCryostat ? 'L’Accident de Cryostat (Mythique)' : 'Grand Référent OMS',
+      tierBadge: '💎 Platine',
+      nextTierInfo: '1 000 XP / palier'
+    };
+  }
+  rem -= 34000;
+
+  // Tranche 5 : Niveaux 101 à 1000 (2 500 XP / palier, 58 000 à 2 308 000 XP) - Légendes d'Anatomopathologie
+  if (rem < 2250000) {
+    const lvl = 101 + Math.floor(rem / 2500);
+    const curXp = rem % 2500;
     return {
       level: Math.min(1000, lvl),
       currentTierXp: curXp,
-      tierMaxXp: 90,
-      percent: Math.min(100, Math.round((curXp / 90) * 100)),
-      tierName: 'Maître Émérite OMS',
-      tierBadge: '💎 Platine',
-      nextTierInfo: '90 XP / palier'
+      tierMaxXp: 2500,
+      percent: Math.min(100, Math.round((curXp / 2500) * 100)),
+      tierName: 'Dieu de l’Anatomopathologie',
+      tierBadge: '👑 Légende Absolue',
+      nextTierInfo: '2 500 XP / palier'
     };
   }
 
   // Niveau Max 1000
   return {
     level: 1000,
-    currentTierXp: 90,
-    tierMaxXp: 90,
+    currentTierXp: 2500,
+    tierMaxXp: 2500,
     percent: 100,
     tierName: 'Dieu Vivant de l’Anatomopathologie',
     tierBadge: '👑 Légende Absolue',
@@ -2518,38 +2543,38 @@ function calculatePlayerLevel(xp) {
 function calculateCreatorLevel(creatorXp) {
   let rem = Math.max(0, creatorXp || 0);
 
-  // Niveaux 1 à 10 : 15 pts par palier (0 à 150 XP)
-  if (rem < 150) {
-    const lvl = 1 + Math.floor(rem / 15);
-    const curXp = rem % 15;
-    return { level: Math.min(10, lvl), currentTierXp: curXp, tierMaxXp: 15, percent: Math.round((curXp / 15) * 100) };
+  // Niveaux 1 à 10 : 25 pts par palier (0 à 250 XP - 5 questions par niveau à 5 pts)
+  if (rem < 250) {
+    const lvl = 1 + Math.floor(rem / 25);
+    const curXp = rem % 25;
+    return { level: Math.min(10, lvl), currentTierXp: curXp, tierMaxXp: 25, percent: Math.round((curXp / 25) * 100) };
   }
-  rem -= 150;
+  rem -= 250;
 
-  // Niveaux 11 à 30 : 30 pts par palier (150 à 750 XP)
-  if (rem < 600) {
-    const lvl = 11 + Math.floor(rem / 30);
-    const curXp = rem % 30;
-    return { level: Math.min(30, lvl), currentTierXp: curXp, tierMaxXp: 30, percent: Math.round((curXp / 30) * 100) };
+  // Niveaux 11 à 30 : 50 pts par palier (250 à 1 250 XP - 10 questions créées par niveau)
+  if (rem < 1000) {
+    const lvl = 11 + Math.floor(rem / 50);
+    const curXp = rem % 50;
+    return { level: Math.min(30, lvl), currentTierXp: curXp, tierMaxXp: 50, percent: Math.round((curXp / 50) * 100) };
   }
-  rem -= 600;
+  rem -= 1000;
 
-  // Niveaux 31 à 60 : 60 pts par palier (750 à 2550 XP)
-  if (rem < 1800) {
-    const lvl = 31 + Math.floor(rem / 60);
-    const curXp = rem % 60;
-    return { level: Math.min(60, lvl), currentTierXp: curXp, tierMaxXp: 60, percent: Math.round((curXp / 60) * 100) };
+  // Niveaux 31 à 60 : 100 pts par palier (1 250 à 4 250 XP)
+  if (rem < 3000) {
+    const lvl = 31 + Math.floor(rem / 100);
+    const curXp = rem % 100;
+    return { level: Math.min(60, lvl), currentTierXp: curXp, tierMaxXp: 100, percent: Math.round((curXp / 100) * 100) };
   }
-  rem -= 1800;
+  rem -= 3000;
 
-  // Niveaux 61 à 100 : 90 pts par palier (2550 à 6150 XP)
-  if (rem < 3600) {
-    const lvl = 61 + Math.floor(rem / 90);
-    const curXp = rem % 90;
-    return { level: Math.min(100, lvl), currentTierXp: curXp, tierMaxXp: 90, percent: Math.round((curXp / 90) * 100) };
+  // Niveaux 61 à 100 : 200 pts par palier (4 250 à 12 250 XP)
+  if (rem < 8000) {
+    const lvl = 61 + Math.floor(rem / 200);
+    const curXp = rem % 200;
+    return { level: Math.min(100, lvl), currentTierXp: curXp, tierMaxXp: 200, percent: Math.round((curXp / 200) * 100) };
   }
 
-  return { level: 100, currentTierXp: 90, tierMaxXp: 90, percent: 100 };
+  return { level: 100, currentTierXp: 200, tierMaxXp: 200, percent: 100 };
 }
 
 function getCreatorStats() {
@@ -2948,7 +2973,7 @@ function checkAndUnlockBadges() {
       if (!state.stats.unlockedBadges[b.id]) {
         state.stats.unlockedBadges[b.id] = Date.now();
         newlyUnlocked = true;
-        const reward = b.xpReward || (b.tier === 'platinum' ? 100 : b.tier === 'gold' ? 50 : 25);
+        const reward = getTrophyXpReward(b);
         state.stats.xp = (state.stats.xp || 0) + reward;
         showRewardToast(`🏆 Trophée Débloqué : "${b.name}" (+${reward} XP) !`, 'award');
       }
@@ -3599,7 +3624,7 @@ function renderTrophiesGrid() {
                 ${(b.icon && b.icon.length > 2) ? `<i data-lucide="${b.icon}" class="w-5 h-5"></i>` : `<span class="text-xl">${b.icon || '🏆'}</span>`}
               </div>
               <div>
-                <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold border border-amber-500/20 block w-fit">+${b.xpReward || 50} XP</span>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold border border-amber-500/20 block w-fit">+${getTrophyXpReward(b)} XP</span>
               </div>
             </div>
             <div class="flex items-center space-x-1.5">
