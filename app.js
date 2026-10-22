@@ -408,8 +408,44 @@ async function fetchCurrentUserRole() {
   }
 }
 
+function saveLocalUserProgress(q) {
+  if (!q || !q.id) return;
+  let prog = {};
+  try {
+    const raw = localStorage.getItem('pathosorus_user_progress');
+    if (raw) prog = JSON.parse(raw);
+  } catch (e) {}
+
+  prog[q.id] = {
+    stats: q.stats,
+    mastered: q.mastered || false,
+    flagged: q.flagged || false,
+    updated_at: new Date().toISOString()
+  };
+  localStorage.setItem('pathosorus_user_progress', JSON.stringify(prog));
+}
+
 async function loadUserProgress() {
+  // 1. Restaurer d'abord la progression locale persistante
+  try {
+    const rawProg = localStorage.getItem('pathosorus_user_progress');
+    if (rawProg) {
+      const prog = JSON.parse(rawProg);
+      state.questions.forEach(q => {
+        if (prog[q.id]) {
+          if (prog[q.id].stats) q.stats = Object.assign(q.stats || {}, prog[q.id].stats);
+          if (typeof prog[q.id].mastered !== 'undefined') q.mastered = prog[q.id].mastered;
+          if (typeof prog[q.id].flagged !== 'undefined') q.flagged = prog[q.id].flagged;
+        }
+      });
+      renderSpacedRepetitionDashboard();
+      renderBank();
+      renderHierarchySelector();
+    }
+  } catch(e) {}
+
   if (!supabaseClient || !state.currentUser) return;
+
   try {
     const { data, error } = await supabaseClient
       .from('user_progress')
@@ -424,6 +460,7 @@ async function loadUserProgress() {
           if (typeof up.mastered !== 'undefined') q.mastered = up.mastered;
           if (typeof up.flagged !== 'undefined') q.flagged = up.flagged;
           if (up.stats) q.stats = Object.assign(q.stats || {}, up.stats);
+          saveLocalUserProgress(q);
         }
       });
       localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
@@ -438,10 +475,12 @@ async function loadUserProgress() {
 
 async function dbSaveUserProgress(q) {
   if (!q) return;
-  if (!state.currentUser) {
-    saveQuestions();
-    return;
-  }
+
+  // Persister immédiatement en mémoire locale
+  saveLocalUserProgress(q);
+  saveQuestions();
+
+  if (!state.currentUser) return;
 
   state.userProgress[q.id] = {
     mastered: q.mastered,
@@ -466,9 +505,6 @@ async function dbSaveUserProgress(q) {
     });
   } catch (e) {
     console.warn("Erreur sauvegarde progression Supabase:", e);
-    if (isCreator()) {
-      dbUpsertQuestion(q);
-    }
   }
 }
 
@@ -1180,19 +1216,56 @@ async function fetchSupabaseData(silent = false) {
     ]);
 
     if (!qRes.error && qRes.data) {
-      const cloudQuestions = qRes.data.map(q => ({
-        ...q,
-        options: q.options || [],
-        correct: q.correct || [],
-        optionExplanations: q.optionExplanations || [],
-        acceptedAnswers: q.acceptedAnswers || (q.format === 'ouverte' ? (q.options || []) : []),
-        tags: q.tags || [],
-        images: q.images || [],
-        explanationImages: q.explanationImages || [],
-        difficulty: q.difficulty || 'facile',
-        extremeClues: q.extremeClues || '',
-        stats: q.stats || { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 }
-      }));
+      // 1. Sauvegarder la progression actuelle de l'utilisateur (lastReviewed, nextReviewDate, intervalDays, seen, correct, mastered, flagged)
+      const localProgressMap = new Map();
+      (state.questions || []).forEach(oldQ => {
+        if (oldQ && oldQ.id) {
+          localProgressMap.set(oldQ.id, {
+            stats: oldQ.stats,
+            mastered: oldQ.mastered,
+            flagged: oldQ.flagged
+          });
+        }
+      });
+
+      let storedProgress = {};
+      try {
+        const raw = localStorage.getItem('pathosorus_user_progress');
+        if (raw) storedProgress = JSON.parse(raw);
+      } catch (e) {}
+
+      const cloudQuestions = qRes.data.map(q => {
+        const localProg = localProgressMap.get(q.id) || storedProgress[q.id];
+        
+        let stats = q.stats || { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 };
+        let mastered = q.mastered || false;
+        let flagged = q.flagged || false;
+
+        // Préserver en priorité absolue la progression de révision de l'utilisateur
+        if (localProg) {
+          if (localProg.stats && (localProg.stats.lastReviewed || (localProg.stats.seen && localProg.stats.seen > 0) || localProg.stats.nextReviewDate)) {
+            stats = { ...stats, ...localProg.stats };
+          }
+          if (typeof localProg.mastered !== 'undefined') mastered = localProg.mastered;
+          if (typeof localProg.flagged !== 'undefined') flagged = localProg.flagged;
+        }
+
+        return {
+          ...q,
+          options: q.options || [],
+          correct: q.correct || [],
+          optionExplanations: q.optionExplanations || [],
+          acceptedAnswers: q.acceptedAnswers || (q.format === 'ouverte' ? (q.options || []) : []),
+          tags: q.tags || [],
+          images: q.images || [],
+          explanationImages: q.explanationImages || [],
+          difficulty: q.difficulty || 'facile',
+          extremeClues: q.extremeClues || '',
+          stats,
+          mastered,
+          flagged
+        };
+      });
 
       // Fusion intelligente : Ne JAMAIS écraser les questions créées localement qui ne sont pas encore sur Supabase
       const cloudIds = new Set(cloudQuestions.map(q => q.id));
@@ -1460,6 +1533,21 @@ function initApp() {
     if (!q.images) q.images = [];
     if (!q.acceptedAnswers) q.acceptedAnswers = (q.format === 'ouverte' ? (q.options || []) : []);
   });
+
+  // Restaurer immédiatement la progression locale des révisions (lastReviewed, nextReviewDate)
+  try {
+    const rawProg = localStorage.getItem('pathosorus_user_progress');
+    if (rawProg) {
+      const prog = JSON.parse(rawProg);
+      state.questions.forEach(q => {
+        if (prog[q.id]) {
+          if (prog[q.id].stats) q.stats = Object.assign(q.stats || {}, prog[q.id].stats);
+          if (typeof prog[q.id].mastered !== 'undefined') q.mastered = prog[q.id].mastered;
+          if (typeof prog[q.id].flagged !== 'undefined') q.flagged = prog[q.id].flagged;
+        }
+      });
+    }
+  } catch(e) {}
 
   const storedCases = localStorage.getItem(STORAGE_KEY_CASES);
   state.cases = storedCases ? JSON.parse(storedCases) : [];
