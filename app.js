@@ -30,7 +30,8 @@ let state = {
   playHierarchy: {
     selectedOrgan: null,
     selectedCategory: null,
-    selectedEntity: null
+    selectedEntity: null,
+    filterMode: 'all' // 'all' | 'colleagues' | 'mine'
   },
   currentSession: null,
   currentDPSession: null,
@@ -1968,7 +1969,7 @@ async function fetchSupabaseData(silent = false) {
     }
 
     if (!tRes.error && tRes.data && tRes.data.length > 0) {
-      state.customTags = tRes.data.map(t => t.name);
+      state.customTags = tRes.data.map(t => t.name).filter(n => n && !n.startsWith('ROLE_'));
       localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(state.customTags));
     }
 
@@ -3443,11 +3444,63 @@ function onDifficultyChange() {
   }
 }
 
+// --- RÉVISIONS DES QUESTIONS DES COLLÈGUES / ÉQUIPE ---
+function getColleaguesQuestions(activeOnly = true) {
+  const currentEmail = (state.currentUser && state.currentUser.email || '').trim().toLowerCase();
+
+  return (state.questions || []).filter(q => {
+    if (activeOnly && q.mastered) return false;
+
+    let author = (q.created_by || (q.stats && q.stats.created_by) || '').trim().toLowerCase();
+    if (!author) {
+      author = (q.id === 'q_1792671361751') ? 'belhadef.samy@gmail.com' : 'padoreau85@gmail.com';
+    }
+
+    if (!currentEmail) {
+      return true; // Mode invité : tout le catalogue
+    }
+
+    return author !== currentEmail;
+  });
+}
+
+function getMyAuthoredQuestions(activeOnly = true) {
+  const currentEmail = (state.currentUser && state.currentUser.email || '').trim().toLowerCase();
+  if (!currentEmail) return [];
+
+  return (state.questions || []).filter(q => {
+    if (activeOnly && q.mastered) return false;
+
+    let author = (q.created_by || (q.stats && q.stats.created_by) || '').trim().toLowerCase();
+    if (!author) {
+      author = (q.id === 'q_1792671361751') ? 'belhadef.samy@gmail.com' : 'padoreau85@gmail.com';
+    }
+
+    return author === currentEmail;
+  });
+}
+
+function startColleaguesQuestionsSession() {
+  const colleaguesQuestions = getColleaguesQuestions(true);
+  if (colleaguesQuestions.length === 0) {
+    alert("Aucune question rédigée par un autre confrère pour l'instant.");
+    return;
+  }
+
+  // Privilégier les cartes non faites aujourd'hui
+  const notDoneToday = colleaguesQuestions.filter(q => !isQuestionDoneToday(q));
+  const pool = notDoneToday.length > 0 ? notDoneToday : colleaguesQuestions;
+
+  state.sessionReturnView = 'play';
+  launchQuizSession(pool, `Questions de l'Équipe (Co-internes) • ${pool.length} Q 👥`);
+}
+
 // --- DASHBOARD DE RÉPÉTITION ESPACÉE ---
 function renderSpacedRepetitionDashboard() {
   const activeQuestions = state.questions.filter(q => !q.mastered);
   const dueQuestions = activeQuestions.filter(q => isQuestionDue(q));
   const masteredCount = state.questions.filter(q => q.mastered).length;
+  const colleaguesQuestions = getColleaguesQuestions(true);
 
   const dueBadge = document.getElementById('stat-due-today-count');
   if (dueBadge) dueBadge.textContent = dueQuestions.length;
@@ -3457,6 +3510,26 @@ function renderSpacedRepetitionDashboard() {
 
   const masteredBadge = document.getElementById('stat-mastered-count');
   if (masteredBadge) masteredBadge.textContent = masteredCount;
+
+  // Badge et bouton Questions des Collègues
+  const colleaguesBadge = document.getElementById('stat-colleagues-count');
+  if (colleaguesBadge) colleaguesBadge.textContent = colleaguesQuestions.length;
+
+  const btnColleagues = document.getElementById('btn-play-colleagues');
+  if (btnColleagues) {
+    btnColleagues.disabled = colleaguesQuestions.length === 0;
+    const labelC = document.getElementById('label-colleagues-count');
+    if (labelC) {
+      labelC.textContent = colleaguesQuestions.length > 0 
+        ? `Réviser les questions de l'équipe (${colleaguesQuestions.length})` 
+        : `Aucune question de collègue pour le moment`;
+    }
+  }
+
+  const labelShortcut = document.getElementById('label-colleagues-shortcut');
+  if (labelShortcut) {
+    labelShortcut.textContent = `Questions des Collègues (${colleaguesQuestions.length})`;
+  }
 
   const btnStartDue = document.getElementById('btn-play-due-today');
   if (btnStartDue) {
@@ -3549,10 +3622,21 @@ function chooseReviewInterval(days) {
 }
 
 // --- CLASSIFICATION 3 NIVEAUX ---
-function getHierarchyTree(includeMastered = false) {
+function getHierarchyTree(includeMastered = false, filterMode = null) {
   const tree = {};
-  const activeQuestions = state.questions.filter(q => includeMastered || !q.mastered);
-  const allItems = [...activeQuestions, ...state.cases];
+  const mode = filterMode || (state.playHierarchy && state.playHierarchy.filterMode) || 'all';
+
+  let activeQuestions = state.questions.filter(q => includeMastered || !q.mastered);
+  if (mode === 'colleagues') {
+    const colleaguesSet = new Set(getColleaguesQuestions(includeMastered).map(q => q.id));
+    activeQuestions = activeQuestions.filter(q => colleaguesSet.has(q.id));
+  } else if (mode === 'mine') {
+    const mySet = new Set(getMyAuthoredQuestions(includeMastered).map(q => q.id));
+    activeQuestions = activeQuestions.filter(q => mySet.has(q.id));
+  }
+
+  const cases = (mode === 'mine' || mode === 'colleagues') ? [] : state.cases;
+  const allItems = [...activeQuestions, ...cases];
 
   allItems.forEach(q => {
     const organ = q.organ || "Autre";
@@ -3571,42 +3655,87 @@ function getHierarchyTree(includeMastered = false) {
   return tree;
 }
 
+function setHierarchyFilterMode(mode) {
+  if (!state.playHierarchy) state.playHierarchy = {};
+  state.playHierarchy.filterMode = mode;
+  state.playHierarchy.selectedOrgan = null;
+  state.playHierarchy.selectedCategory = null;
+  state.playHierarchy.selectedEntity = null;
+  renderHierarchySelector();
+}
+
 function renderHierarchySelector() {
   const container = document.getElementById('hierarchy-selector-container');
   if (!container) return;
 
-  const tree = getHierarchyTree(false);
+  const currentMode = (state.playHierarchy && state.playHierarchy.filterMode) || 'all';
+  const tree = getHierarchyTree(false, currentMode);
   const organs = Object.keys(tree).sort();
 
-  if (organs.length === 0) {
-    const totalQ = state.questions.length;
-    const masteredQ = state.questions.filter(q => q.mastered).length;
+  const allActiveCount = state.questions.filter(q => !q.mastered).length + state.cases.length;
+  const colleaguesCount = getColleaguesQuestions(true).length;
+  const myCount = getMyAuthoredQuestions(true).length;
 
-    if (totalQ > 0 && masteredQ === totalQ) {
-      container.innerHTML = `
-        <div class="p-6 text-center bg-emerald-500/10 rounded-xl border border-emerald-500/30">
-          <i data-lucide="award" class="w-8 h-8 mx-auto mb-2 text-emerald-400"></i>
-          <h4 class="text-sm font-bold text-emerald-300">Toutes vos questions sont actuellement maîtrisées ! 🎉</h4>
+  let html = `<div class="space-y-4">`;
+
+  // Onglets de filtre de provenance : Toutes / Questions de l'équipe / Mes rédactions
+  html += `
+    <div class="flex flex-wrap items-center gap-2 pb-2 border-b border-slate-800/80">
+      <span class="text-xs font-bold text-slate-400">Filtrer par :</span>
+      <button type="button" onclick="setHierarchyFilterMode('all')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
+        currentMode === 'all'
+          ? 'bg-slate-800 text-white border border-slate-600 shadow-sm'
+          : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+      }">
+        <span>🌐 Toutes les questions</span>
+        <span class="text-[10px] px-1.5 py-0.2 rounded-full ${currentMode === 'all' ? 'bg-slate-700 text-white' : 'bg-slate-900 text-slate-400'}">${allActiveCount}</span>
+      </button>
+
+      <button type="button" onclick="setHierarchyFilterMode('colleagues')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
+        currentMode === 'colleagues'
+          ? 'bg-indigo-600 text-white border border-indigo-400 shadow-sm shadow-indigo-600/30'
+          : 'bg-slate-950 text-indigo-400 hover:text-white border border-slate-800'
+      }">
+        <i data-lucide="users" class="w-3.5 h-3.5"></i>
+        <span>Rédigées par mes collègues</span>
+        <span class="text-[10px] px-1.5 py-0.2 rounded-full ${currentMode === 'colleagues' ? 'bg-indigo-700 text-white' : 'bg-slate-900 text-indigo-300'}">${colleaguesCount}</span>
+      </button>
+
+      ${myCount > 0 ? `
+      <button type="button" onclick="setHierarchyFilterMode('mine')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
+        currentMode === 'mine'
+          ? 'bg-teal-600 text-white border border-teal-400 shadow-sm shadow-teal-600/30'
+          : 'bg-slate-950 text-teal-400 hover:text-white border border-slate-800'
+      }">
+        <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+        <span>Mes rédactions</span>
+        <span class="text-[10px] px-1.5 py-0.2 rounded-full ${currentMode === 'mine' ? 'bg-teal-700 text-white' : 'bg-slate-900 text-teal-300'}">${myCount}</span>
+      </button>
+      ` : ''}
+    </div>
+  `;
+
+  if (organs.length === 0) {
+    if (currentMode === 'colleagues') {
+      html += `
+        <div class="p-6 text-center bg-indigo-500/10 rounded-xl border border-indigo-500/30">
+          <i data-lucide="users" class="w-8 h-8 mx-auto mb-2 text-indigo-400"></i>
+          <h4 class="text-sm font-bold text-indigo-300">Aucune question active rédigée par un collègue</h4>
           <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
-            Vous avez neutralisé l'ensemble de votre banque. Vous pouvez les tester à nouveau via l'espace "Questions Maîtrisées" ci-dessus ou en réactiver depuis Ma Banque.
+            Dès qu'un co-interne (Samy ou autre) rédige et publie une question dans la banque collective, elle apparaîtra ici classée par organe !
           </p>
         </div>
       `;
     } else {
-      container.innerHTML = `
+      html += `
         <div class="p-6 text-center bg-slate-950/60 rounded-xl border border-slate-800">
           <i data-lucide="layers" class="w-8 h-8 mx-auto mb-2 text-slate-600"></i>
-          <h4 class="text-sm font-bold text-slate-300">Votre classification est prête</h4>
-          <p class="text-xs text-slate-500 mt-1 max-w-md mx-auto leading-relaxed">
-            Créez vos questions en renseignant votre <strong>Organe</strong> (ex: Sein), votre <strong>Catégorie</strong> (ex: Tumeurs épithéliales) et votre <strong>Lésion</strong> (ex: Carcinome lobulaire).
-          </p>
-          <button onclick="switchTab('create')" class="mt-4 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs inline-flex items-center space-x-1.5 transition">
-            <i data-lucide="plus" class="w-4 h-4"></i>
-            <span>Créer du contenu</span>
-          </button>
+          <h4 class="text-sm font-bold text-slate-300">Aucune question active dans cette sélection</h4>
         </div>
       `;
     }
+    html += `</div>`;
+    container.innerHTML = html;
     if (window.lucide) lucide.createIcons();
     return;
   }
@@ -3616,8 +3745,6 @@ function renderHierarchySelector() {
     state.playHierarchy.selectedCategory = null;
     state.playHierarchy.selectedEntity = null;
   }
-
-  let html = `<div class="space-y-4">`;
 
   // Niveau 1
   html += `
@@ -3754,7 +3881,14 @@ function startHierarchySession(level, organ, category, entity) {
   const isFromBank = document.getElementById('view-bank') && !document.getElementById('view-bank').classList.contains('hidden');
   state.sessionReturnView = isFromBank ? 'bank' : 'play';
 
-  const activeQuestions = state.questions.filter(q => !q.mastered);
+  let activeQuestions = state.questions.filter(q => !q.mastered);
+  if (!isFromBank && state.playHierarchy && state.playHierarchy.filterMode === 'colleagues') {
+    const colleaguesSet = new Set(getColleaguesQuestions(false).map(q => q.id));
+    activeQuestions = activeQuestions.filter(q => colleaguesSet.has(q.id));
+  } else if (!isFromBank && state.playHierarchy && state.playHierarchy.filterMode === 'mine') {
+    const mySet = new Set(getMyAuthoredQuestions(false).map(q => q.id));
+    activeQuestions = activeQuestions.filter(q => mySet.has(q.id));
+  }
 
   let matchingQuestions = [];
   if (level === 'organ') matchingQuestions = activeQuestions.filter(q => (organ === 'all' || q.organ === organ));
@@ -6091,13 +6225,15 @@ function renderTagsCloud() {
   const container = document.getElementById('home-tags-container');
   if (!container) return;
 
-  if (state.customTags.length === 0) {
+  const visibleTags = (state.customTags || []).filter(t => t && !t.startsWith('ROLE_'));
+
+  if (visibleTags.length === 0) {
     container.innerHTML = '<span class="text-xs text-slate-500 italic">Aucun tag créé.</span>';
     return;
   }
 
   container.innerHTML = '';
-  state.customTags.forEach(tag => {
+  visibleTags.forEach(tag => {
     const count = state.questions.filter(q => !q.mastered && (q.tags || []).includes(tag)).length +
                   state.cases.filter(c => (c.tags || []).includes(tag)).length;
     const btn = document.createElement('button');

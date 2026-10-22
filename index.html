@@ -146,24 +146,24 @@
       <div id="play-new-questions-container"></div>
 
       <!-- Modules de Suivi & Répétition Espacée -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         
         <!-- Carte 1 : Session du Jour (Cartes échues) -->
         <div class="bg-slate-900 border border-teal-500/30 hover:border-teal-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg">
           <div>
             <div class="flex items-center space-x-3 mb-3">
-              <div class="w-10 h-10 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center">
+              <div class="w-10 h-10 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center shrink-0">
                 <i data-lucide="calendar" class="w-5 h-5"></i>
               </div>
               <div>
-                <h3 class="font-bold text-white text-base">Répétition Espacée du Jour</h3>
+                <h3 class="font-bold text-white text-base">Répétition du Jour</h3>
                 <p class="text-xs text-teal-400 font-medium">
-                  <span id="stat-due-today-count">0</span> carte(s) échue(s) aujourd'hui
+                  <span id="stat-due-today-count">0</span> carte(s) échue(s)
                 </p>
               </div>
             </div>
             <p class="text-xs text-slate-400 leading-relaxed">
-              Comprend les questions arrivées à échéance selon vos délais choisis, ainsi que celles marquées en erreur.
+              Vos cartes échues selon vos délais personnalisés et les questions marquées en révision.
             </p>
           </div>
           <button onclick="startSpacedRepetitionDueSession()" id="btn-play-due-today" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-teal-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -172,22 +172,50 @@
           </button>
         </div>
 
-        <!-- Carte 2 : Questions Neutralisées / Maîtrisées -->
+        <!-- Carte 2 : Questions de l'Équipe / Co-internes (NOUVEAU) -->
+        <div class="bg-slate-900 border border-indigo-500/30 hover:border-indigo-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg relative overflow-hidden group">
+          <div class="absolute -top-10 -right-10 w-24 h-24 bg-indigo-500/10 rounded-full blur-xl pointer-events-none"></div>
+          <div>
+            <div class="flex items-center space-x-3 mb-3">
+              <div class="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center shrink-0">
+                <i data-lucide="users" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <h3 class="font-bold text-white text-base flex items-center space-x-1.5">
+                  <span>Questions des Collègues</span>
+                  <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Équipe</span>
+                </h3>
+                <p class="text-xs text-indigo-400 font-medium">
+                  <span id="stat-colleagues-count">0</span> question(s) d'autres rédacteurs
+                </p>
+              </div>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Révisez exclusivement les questions créées par vos confrères (Samy et autres rédacteurs, hors vos créations).
+            </p>
+          </div>
+          <button onclick="startColleaguesQuestionsSession()" id="btn-play-colleagues" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-indigo-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
+            <i data-lucide="play" class="w-3.5 h-3.5"></i>
+            <span id="label-colleagues-count">Réviser les questions de l'équipe (0)</span>
+          </button>
+        </div>
+
+        <!-- Carte 3 : Questions Neutralisées / Maîtrisées -->
         <div class="bg-slate-900 border border-emerald-500/30 hover:border-emerald-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg">
           <div>
             <div class="flex items-center space-x-3 mb-3">
-              <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center">
+              <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center shrink-0">
                 <i data-lucide="award" class="w-5 h-5"></i>
               </div>
               <div>
-                <h3 class="font-bold text-white text-base">Questions Maîtrisées (Neutralisées)</h3>
+                <h3 class="font-bold text-white text-base">Questions Maîtrisées</h3>
                 <p class="text-xs text-emerald-400 font-medium">
                   <span id="stat-mastered-count">0</span> neutralisée(s) • <span id="stat-active-count">0</span> active(s)
                 </p>
               </div>
             </div>
             <p class="text-xs text-slate-400 leading-relaxed">
-              Ces questions sont exclues de vos sessions habituelles. Vous pouvez les tester ici à tout moment pour vérifier vos acquis.
+              Ces questions sont exclues de vos sessions habituelles. Testez-les à tout moment pour vérifier vos acquis.
             </p>
           </div>
           <button onclick="startMasteredReviewSession()" id="btn-play-mastered" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-emerald-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -200,7 +228,7 @@
 
       <!-- Sélecteur Hiérarchique à 3 Niveaux (QUESTIONS ACTIVES) -->
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
-        <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
             <h2 class="text-base font-bold text-white flex items-center space-x-2">
               <i data-lucide="git-branch" class="w-4 h-4 text-teal-400"></i>
@@ -208,10 +236,16 @@
             </h2>
             <p class="text-xs text-slate-400 mt-0.5">Testez tout un organe, une catégorie ou une lésion (les questions neutralisées sont filtrées).</p>
           </div>
-          <button onclick="startGlobalSprint()" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 hover:text-white border border-slate-700 text-xs font-bold flex items-center space-x-1.5 transition">
-            <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
-            <span>Sprint Quotidien (Actives)</span>
-          </button>
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="startColleaguesQuestionsSession()" id="btn-play-colleagues-shortcut" class="px-3.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-bold flex items-center space-x-1.5 transition">
+              <i data-lucide="users" class="w-3.5 h-3.5"></i>
+              <span id="label-colleagues-shortcut">Questions des Collègues (0)</span>
+            </button>
+            <button onclick="startGlobalSprint()" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 hover:text-white border border-slate-700 text-xs font-bold flex items-center space-x-1.5 transition">
+              <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
+              <span>Sprint Quotidien (Actives)</span>
+            </button>
+          </div>
         </div>
 
         <div id="hierarchy-selector-container"></div>
@@ -1509,7 +1543,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="seed_data.js?v=20261022_1510"></script>
-  <script src="app.js?v=20261022_1510"></script>
+  <script src="seed_data.js?v=20261022_1520"></script>
+  <script src="app.js?v=20261022_1520"></script>
 </body>
 </html>
