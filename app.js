@@ -1648,10 +1648,52 @@ function startHierarchySession(level, organ, category, entity) {
 }
 
 // --- SESSIONS DE QUIZ SIMPLE ---
+function shuffleQuestionOptions(q) {
+  // Copie profonde pour ne JAMAIS muter la question originale dans state.questions
+  const sessionQ = {
+    ...q,
+    options: [...(q.options || [])],
+    correct: Array.isArray(q.correct) ? [...q.correct] : [q.correct],
+    optionExplanations: q.optionExplanations ? [...q.optionExplanations] : []
+  };
+
+  // Ne pas mélanger le format 'piege' (Vrai / Faux) afin de conserver la convention VRAI puis FAUX
+  if (sessionQ.format !== 'piege' && sessionQ.options && sessionQ.options.length > 1) {
+    const corSet = new Set(sessionQ.correct);
+    const exps = sessionQ.optionExplanations || [];
+
+    const items = sessionQ.options.map((optText, origIdx) => ({
+      text: optText,
+      isCorrect: corSet.has(origIdx),
+      explanation: exps[origIdx] || ''
+    }));
+
+    // Algorithme de mélange aléatoire de Fisher-Yates
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [items[i], items[j]] = [items[j], items[i]];
+    }
+
+    sessionQ.options = items.map(it => it.text);
+    sessionQ.optionExplanations = items.map(it => it.explanation);
+    sessionQ.correct = [];
+    items.forEach((it, newIdx) => {
+      if (it.isCorrect) sessionQ.correct.push(newIdx);
+    });
+  }
+
+  return sessionQ;
+}
+
 function launchQuizSession(pool, title) {
+  // Mélange aléatoire de l'ordre des questions ET mélange aléatoire des propositions (A, B, C...) pour chaque question
+  const randomizedQuestions = [...pool]
+    .sort(() => 0.5 - Math.random())
+    .map(q => shuffleQuestionOptions(q));
+
   state.currentSession = {
     title: title,
-    questions: [...pool].sort(() => 0.5 - Math.random()),
+    questions: randomizedQuestions,
     currentIndex: 0,
     score: 0,
     xpEarned: 0,
@@ -2930,10 +2972,32 @@ function startDPSession(caseId) {
   const dpCase = state.cases.find(c => c.id === caseId);
   if (!dpCase) return;
 
+  // Clone profond pour mélanger les options de chaque étape sans altérer state.cases
+  const clonedCase = JSON.parse(JSON.stringify(dpCase));
+  clonedCase.steps = clonedCase.steps.map(step => {
+    if (step.options && step.options.length > 1) {
+      const items = step.options.map((optText, origIdx) => ({
+        text: optText,
+        isCorrect: (step.correct || []).includes(origIdx)
+      }));
+      // Fisher-Yates
+      for (let i = items.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [items[i], items[j]] = [items[j], items[i]];
+      }
+      step.options = items.map(it => it.text);
+      step.correct = [];
+      items.forEach((it, newIdx) => {
+        if (it.isCorrect) step.correct.push(newIdx);
+      });
+    }
+    return step;
+  });
+
   state.currentDPSession = {
-    caseData: dpCase,
+    caseData: clonedCase,
     currentStepIndex: 0,
-    totalSteps: dpCase.steps.length,
+    totalSteps: clonedCase.steps.length,
     score: 0,
     isStepAnswered: false,
     selectedInCurrentStep: new Set()
