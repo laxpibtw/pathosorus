@@ -1628,6 +1628,27 @@ function openQuestionDetail(id) {
     hierarchyBadge.textContent = `${q.organ} > ${q.category} > ${q.entity}`;
   }
 
+  state.detailModalQuestionId = q.id;
+
+  const authorInfo = getQuestionAuthorDisplayName(q);
+  const authorBadge = document.getElementById('detail-author-badge');
+  const authorNameEl = document.getElementById('detail-author-name');
+  if (authorBadge && authorNameEl) {
+    authorNameEl.textContent = `Rédigé par ${authorInfo.short}`;
+    authorBadge.title = `Rédacteur : ${authorInfo.name} (${authorInfo.email})`;
+  }
+
+  const editBtn = document.getElementById('btn-detail-edit');
+  if (editBtn) {
+    if (isCreator()) {
+      editBtn.classList.remove('hidden');
+      editBtn.classList.add('flex');
+    } else {
+      editBtn.classList.add('hidden');
+      editBtn.classList.remove('flex');
+    }
+  }
+
   document.getElementById('detail-question-text').textContent = q.question;
 
   const contextBox = document.getElementById('detail-context-box');
@@ -1785,6 +1806,14 @@ function closeQuestionDetailModal() {
     modal.classList.remove('flex');
   }
 }
+
+function handleEditFromDetailModal() {
+  if (!state.detailModalQuestionId) return;
+  const qId = state.detailModalQuestionId;
+  closeQuestionDetailModal();
+  editQuestion(qId);
+}
+window.handleEditFromDetailModal = handleEditFromDetailModal;
 
 async function fetchSupabaseData(silent = false) {
   if (!supabaseClient) return;
@@ -2542,10 +2571,7 @@ function getCreatorStats() {
 
   // Filtrer strictement les questions rédigées par CET utilisateur spécifique
   const myQuestions = (state.questions || []).filter(q => {
-    const author = (q.created_by || (q.stats && q.stats.created_by) || '').toLowerCase();
-    if (author) return author === currentEmail;
-    // Les 12 premières questions de la banque initiale appartiennent au compte créateur initial
-    return currentEmail === 'padoreau85@gmail.com';
+    return getQuestionAuthorEmail(q) === currentEmail;
   });
 
   const createdQuestions = myQuestions.length;
@@ -3444,23 +3470,127 @@ function onDifficultyChange() {
   }
 }
 
+// --- GESTION & ATTRIBUTION DE L'AUTEUR D'UNE QUESTION ---
+function getQuestionAuthorEmail(q) {
+  if (!q) return 'padoreau85@gmail.com';
+  let author = (q.created_by || (q.stats && q.stats.created_by) || '').trim().toLowerCase();
+  if (!author) {
+    author = (q.id === 'q_1792671361751') ? 'belhadef.samy@gmail.com' : 'padoreau85@gmail.com';
+  }
+  return author;
+}
+
+function getQuestionAuthorDisplayName(q) {
+  const author = getQuestionAuthorEmail(q);
+  if (author === 'belhadef.samy@gmail.com' || author.includes('samy')) {
+    return { email: 'belhadef.samy@gmail.com', name: 'Samy Belhadef', short: 'Samy' };
+  }
+  if (author === 'padoreau85@gmail.com' || author.includes('padoreau')) {
+    return { email: 'padoreau85@gmail.com', name: 'Pierre-Alain Doreau', short: 'Pierre-Alain' };
+  }
+  const prefix = author.split('@')[0];
+  const cap = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+  return { email: author, name: cap, short: cap };
+}
+
+function getKnownAuthorsList() {
+  const map = new Map();
+  map.set('padoreau85@gmail.com', 'Pierre-Alain Doreau');
+  map.set('belhadef.samy@gmail.com', 'Samy Belhadef');
+
+  if (state.currentUser && state.currentUser.email) {
+    const em = state.currentUser.email.trim().toLowerCase();
+    if (!map.has(em)) {
+      const p = em.split('@')[0];
+      const nm = p.charAt(0).toUpperCase() + p.slice(1);
+      map.set(em, nm);
+    }
+  }
+
+  (state.questions || []).forEach(q => {
+    const aut = (q.created_by || (q.stats && q.stats.created_by) || '').trim().toLowerCase();
+    if (aut && !map.has(aut)) {
+      const p = aut.split('@')[0];
+      const nm = p.charAt(0).toUpperCase() + p.slice(1);
+      map.set(aut, nm);
+    }
+  });
+
+  try {
+    const stored = JSON.parse(localStorage.getItem('pathosorus_known_colleagues') || '[]');
+    if (Array.isArray(stored)) {
+      stored.forEach(c => {
+        if (c && c.email) {
+          const em = c.email.trim().toLowerCase();
+          if (!map.has(em)) map.set(em, c.name || em);
+        }
+      });
+    }
+  } catch (e) {}
+
+  return Array.from(map.entries()).map(([email, name]) => ({ email, name }));
+}
+
+function updateQuestionAuthorSelect(selectedEmail = null) {
+  const select = document.getElementById('form-q-author');
+  if (!select) return;
+
+  const authors = getKnownAuthorsList();
+  const currentEmail = (state.currentUser && state.currentUser.email) ? state.currentUser.email.trim().toLowerCase() : 'padoreau85@gmail.com';
+  const targetEmail = (selectedEmail || currentEmail).toLowerCase();
+
+  if (!authors.some(a => a.email === targetEmail)) {
+    const p = targetEmail.split('@')[0];
+    const nm = p.charAt(0).toUpperCase() + p.slice(1);
+    authors.push({ email: targetEmail, name: nm });
+  }
+
+  select.innerHTML = authors.map(a => `
+    <option value="${a.email}" ${a.email === targetEmail ? 'selected' : ''}>
+      ${escapeHtml(a.name)} (${escapeHtml(a.email)})
+    </option>
+  `).join('') + `
+    <option value="__NEW__">+ Assigner à un autre collègue...</option>
+  `;
+}
+
+function onAuthorSelectChange() {
+  const select = document.getElementById('form-q-author');
+  if (!select) return;
+  if (select.value === '__NEW__') {
+    const newEmail = prompt("Entrez l'adresse email du confrère / rédacteur à assigner :");
+    if (newEmail && newEmail.trim() && newEmail.includes('@')) {
+      const cleanEmail = newEmail.trim().toLowerCase();
+      const opt = document.createElement('option');
+      opt.value = cleanEmail;
+      opt.textContent = `${cleanEmail} (Nouveau confrère)`;
+      opt.selected = true;
+      select.insertBefore(opt, select.lastElementChild);
+    } else {
+      select.value = (state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : 'padoreau85@gmail.com';
+    }
+  }
+}
+window.onAuthorSelectChange = onAuthorSelectChange;
+
 // --- RÉVISIONS DES QUESTIONS DES COLLÈGUES / ÉQUIPE ---
-function getColleaguesQuestions(activeOnly = true) {
+function getColleaguesQuestions(activeOnly = true, toReviewTodayOnly = false) {
   const currentEmail = (state.currentUser && state.currentUser.email || '').trim().toLowerCase();
 
   return (state.questions || []).filter(q => {
     if (activeOnly && q.mastered) return false;
 
-    let author = (q.created_by || (q.stats && q.stats.created_by) || '').trim().toLowerCase();
-    if (!author) {
-      author = (q.id === 'q_1792671361751') ? 'belhadef.samy@gmail.com' : 'padoreau85@gmail.com';
+    const author = getQuestionAuthorEmail(q);
+
+    if (currentEmail && author === currentEmail) {
+      return false; // Rédigée par soi-même
     }
 
-    if (!currentEmail) {
-      return true; // Mode invité : tout le catalogue
+    if (toReviewTodayOnly && isQuestionDoneToday(q)) {
+      return false; // Déjà révisée aujourd'hui
     }
 
-    return author !== currentEmail;
+    return true;
   });
 }
 
@@ -3471,28 +3601,29 @@ function getMyAuthoredQuestions(activeOnly = true) {
   return (state.questions || []).filter(q => {
     if (activeOnly && q.mastered) return false;
 
-    let author = (q.created_by || (q.stats && q.stats.created_by) || '').trim().toLowerCase();
-    if (!author) {
-      author = (q.id === 'q_1792671361751') ? 'belhadef.samy@gmail.com' : 'padoreau85@gmail.com';
-    }
-
+    const author = getQuestionAuthorEmail(q);
     return author === currentEmail;
   });
 }
 
 function startColleaguesQuestionsSession() {
-  const colleaguesQuestions = getColleaguesQuestions(true);
-  if (colleaguesQuestions.length === 0) {
+  const allColleagues = getColleaguesQuestions(true, false);
+  if (allColleagues.length === 0) {
     alert("Aucune question rédigée par un autre confrère pour l'instant.");
     return;
   }
 
-  // Privilégier les cartes non faites aujourd'hui
-  const notDoneToday = colleaguesQuestions.filter(q => !isQuestionDoneToday(q));
-  const pool = notDoneToday.length > 0 ? notDoneToday : colleaguesQuestions;
+  const toReview = getColleaguesQuestions(true, true);
+  if (toReview.length === 0) {
+    if (confirm(`Toutes les questions de l'équipe (${allColleagues.length}) ont déjà été révisées aujourd'hui ! 🎉\n\nSouhaitez-vous quand même les relancer en révision libre ?`)) {
+      state.sessionReturnView = 'play';
+      launchQuizSession(allColleagues, `Questions de l'Équipe • Révision libre (${allColleagues.length} Q) 👥`);
+    }
+    return;
+  }
 
   state.sessionReturnView = 'play';
-  launchQuizSession(pool, `Questions de l'Équipe (Co-internes) • ${pool.length} Q 👥`);
+  launchQuizSession(toReview, `Questions de l'Équipe • ${toReview.length} à réviser 👥`);
 }
 
 // --- DASHBOARD DE RÉPÉTITION ESPACÉE ---
@@ -3500,7 +3631,9 @@ function renderSpacedRepetitionDashboard() {
   const activeQuestions = state.questions.filter(q => !q.mastered);
   const dueQuestions = activeQuestions.filter(q => isQuestionDue(q));
   const masteredCount = state.questions.filter(q => q.mastered).length;
-  const colleaguesQuestions = getColleaguesQuestions(true);
+
+  const allColleagues = getColleaguesQuestions(true, false);
+  const colleaguesToReview = getColleaguesQuestions(true, true);
 
   const dueBadge = document.getElementById('stat-due-today-count');
   if (dueBadge) dueBadge.textContent = dueQuestions.length;
@@ -3513,22 +3646,28 @@ function renderSpacedRepetitionDashboard() {
 
   // Badge et bouton Questions des Collègues
   const colleaguesBadge = document.getElementById('stat-colleagues-count');
-  if (colleaguesBadge) colleaguesBadge.textContent = colleaguesQuestions.length;
+  if (colleaguesBadge) colleaguesBadge.textContent = colleaguesToReview.length;
 
   const btnColleagues = document.getElementById('btn-play-colleagues');
   if (btnColleagues) {
-    btnColleagues.disabled = colleaguesQuestions.length === 0;
+    btnColleagues.disabled = (allColleagues.length === 0);
     const labelC = document.getElementById('label-colleagues-count');
     if (labelC) {
-      labelC.textContent = colleaguesQuestions.length > 0 
-        ? `Réviser les questions de l'équipe (${colleaguesQuestions.length})` 
-        : `Aucune question de collègue pour le moment`;
+      if (allColleagues.length === 0) {
+        labelC.textContent = `Aucune question de collègue pour le moment`;
+      } else if (colleaguesToReview.length > 0) {
+        labelC.textContent = `Réviser les questions de l'équipe (${colleaguesToReview.length} à faire)`;
+      } else {
+        labelC.textContent = `À jour aujourd'hui 🎉 (${allColleagues.length} validée${allColleagues.length > 1 ? 's' : ''})`;
+      }
     }
   }
 
   const labelShortcut = document.getElementById('label-colleagues-shortcut');
   if (labelShortcut) {
-    labelShortcut.textContent = `Questions des Collègues (${colleaguesQuestions.length})`;
+    labelShortcut.textContent = colleaguesToReview.length > 0 
+      ? `Questions des Collègues (${colleaguesToReview.length})` 
+      : `Questions des Collègues (À jour 🎉)`;
   }
 
   const btnStartDue = document.getElementById('btn-play-due-today');
@@ -3673,7 +3812,9 @@ function renderHierarchySelector() {
   const organs = Object.keys(tree).sort();
 
   const allActiveCount = state.questions.filter(q => !q.mastered).length + state.cases.length;
-  const colleaguesCount = getColleaguesQuestions(true).length;
+  const colleaguesTotal = getColleaguesQuestions(true, false).length;
+  const colleaguesToReview = getColleaguesQuestions(true, true).length;
+  const colleaguesBadgeText = (colleaguesToReview === 0 && colleaguesTotal > 0) ? 'À jour 🎉' : `${colleaguesToReview}`;
   const myCount = getMyAuthoredQuestions(true).length;
 
   let html = `<div class="space-y-4">`;
@@ -3698,7 +3839,7 @@ function renderHierarchySelector() {
       }">
         <i data-lucide="users" class="w-3.5 h-3.5"></i>
         <span>Rédigées par mes collègues</span>
-        <span class="text-[10px] px-1.5 py-0.2 rounded-full ${currentMode === 'colleagues' ? 'bg-indigo-700 text-white' : 'bg-slate-900 text-indigo-300'}">${colleaguesCount}</span>
+        <span class="text-[10px] px-1.5 py-0.2 rounded-full ${currentMode === 'colleagues' ? 'bg-indigo-700 text-white' : 'bg-slate-900 text-indigo-300'}">${colleaguesBadgeText}</span>
       </button>
 
       ${myCount > 0 ? `
@@ -3871,6 +4012,24 @@ function selectCategoryForPlay(cat) {
 function quitCurrentSession() {
   switchTab(state.sessionReturnView || 'play');
 }
+
+function handleEditCurrentSessionQuestion() {
+  const session = state.currentSession;
+  if (!session) return;
+  const q = session.questions[session.currentIndex];
+  if (!q) return;
+
+  if (!isCreator()) {
+    alert("Action réservée aux comptes Rédacteurs.");
+    return;
+  }
+
+  if (confirm(`Modifier cette question dans l'éditeur ?\n\nVous pourrez modifier son contenu, ses images ou réassigner son auteur.`)) {
+    state.sessionReturnView = 'play';
+    editQuestion(q.id);
+  }
+}
+window.handleEditCurrentSessionQuestion = handleEditCurrentSessionQuestion;
 
 function quitCurrentDPSession() {
   switchTab(state.sessionReturnView || 'play');
@@ -4048,6 +4207,27 @@ function renderSessionQuestion() {
   } else {
     formatBadge.textContent = (q.format === 'piege' ? "⚠️ Vrai / Faux" : "🔘 QCU (Choix Unique)");
     formatBadge.className = "text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20";
+  }
+
+  // Affichage du Rédacteur de la question
+  const authorInfo = getQuestionAuthorDisplayName(q);
+  const authorBadge = document.getElementById('session-author-badge');
+  const authorNameEl = document.getElementById('session-author-name');
+  if (authorBadge && authorNameEl) {
+    authorNameEl.textContent = `Rédigé par ${authorInfo.short}`;
+    authorBadge.title = `Rédacteur : ${authorInfo.name} (${authorInfo.email})`;
+  }
+
+  // Bouton de modification directe si compte Rédacteur/Créateur
+  const editBtn = document.getElementById('btn-session-edit-question');
+  if (editBtn) {
+    if (isCreator()) {
+      editBtn.classList.remove('hidden');
+      editBtn.classList.add('flex');
+    } else {
+      editBtn.classList.add('hidden');
+      editBtn.classList.remove('flex');
+    }
   }
 
   // Filtrer les tags pour ne pas trahir l'organe ou l'entité pendant la phase de réflexion
@@ -4676,6 +4856,7 @@ function resetQuestionForm() {
   renderEditorUploadedExplanationImages();
   renderEditorTagsSelector();
   updateEditorDatalists();
+  updateQuestionAuthorSelect();
   onFormatChange();
 }
 
@@ -5373,23 +5554,33 @@ async function handleSaveQuestionForm(e) {
     }
   }
 
+  const authorSelect = document.getElementById('form-q-author');
+  const chosenAuthor = (authorSelect && authorSelect.value && authorSelect.value !== '__NEW__')
+    ? authorSelect.value.trim().toLowerCase()
+    : ((state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : 'padoreau85@gmail.com');
+
   let savedQuestion = null;
 
   if (editId) {
     const idx = state.questions.findIndex(q => q.id === editId);
     if (idx !== -1) {
+      const existingStats = state.questions[idx].stats || getDefaultQuestionStats();
       state.questions[idx] = {
         ...state.questions[idx],
         format, organ, category, entity, question, context, explanation, trap, tags, options, correct,
         optionExplanations,
         optionexplanations: optionExplanations,
         difficulty, extremeClues,
-        created_by: state.questions[idx].created_by || ((state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : 'padoreau85@gmail.com'),
+        created_by: chosenAuthor,
         acceptedAnswers: [...acceptedAnswers],
         acceptedanswers: [...acceptedAnswers],
         images: [...state.editorUploadedImages],
         explanationImages: [...(state.editorUploadedExplanationImages || [])],
-        explanationimages: [...(state.editorUploadedExplanationImages || [])]
+        explanationimages: [...(state.editorUploadedExplanationImages || [])],
+        stats: {
+          ...existingStats,
+          created_by: chosenAuthor
+        }
       };
       savedQuestion = state.questions[idx];
     }
@@ -5400,7 +5591,7 @@ async function handleSaveQuestionForm(e) {
       optionExplanations,
       optionexplanations: optionExplanations,
       difficulty, extremeClues,
-      created_by: (state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : 'padoreau85@gmail.com',
+      created_by: chosenAuthor,
       acceptedAnswers: [...acceptedAnswers],
       acceptedanswers: [...acceptedAnswers],
       images: [...state.editorUploadedImages],
@@ -5408,7 +5599,10 @@ async function handleSaveQuestionForm(e) {
       explanationimages: [...(state.editorUploadedExplanationImages || [])],
       flagged: false,
       mastered: false,
-      stats: getDefaultQuestionStats()
+      stats: {
+        ...getDefaultQuestionStats(),
+        created_by: chosenAuthor
+      }
     };
     state.questions.push(newQ);
     savedQuestion = newQ;
@@ -5522,6 +5716,7 @@ function editQuestion(id) {
   const cluesEl = document.getElementById('form-q-extreme-clues');
   if (cluesEl) cluesEl.value = q.extremeClues || '';
   onDifficultyChange();
+  updateQuestionAuthorSelect(getQuestionAuthorEmail(q));
 
   state.editorUploadedImages = q.images ? [...q.images] : [];
   state.editorUploadedExplanationImages = q.explanationImages ? [...q.explanationImages] : [];
@@ -6778,6 +6973,7 @@ function renderBank() {
 
       const formatBadge = q.format === 'qcm' ? '☑️ QCM' : (q.format === 'piege' ? '⚠️ Vrai/Faux' : (q.format === 'ouverte' ? '✍️ Ouverte' : '🔘 QCU'));
       const rate = q.stats && q.stats.seen > 0 ? `${Math.round((q.stats.correct / q.stats.seen) * 100)}% (${q.stats.correct}/${q.stats.seen})` : 'Non jouée';
+      const authorInfo = getQuestionAuthorDisplayName(q);
 
       let dueBadgeHtml = '';
       if (q.mastered) {
@@ -6792,6 +6988,10 @@ function renderBank() {
         <div class="space-y-1.5 flex-1">
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/20">${formatBadge}</span>
+            <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-teal-300 border border-teal-500/20 flex items-center space-x-1" title="Rédacteur : ${escapeHtml(authorInfo.name)} (${escapeHtml(authorInfo.email)})">
+              <span>✍️</span>
+              <span>${escapeHtml(authorInfo.short)}</span>
+            </span>
             <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
               ${escapeHtml(q.category)} > ${escapeHtml(q.entity)}
             </span>
