@@ -34,6 +34,7 @@ let state = {
   editorSelectedTags: new Set(),
   editorQuestionOptions: [],
   editorOpenAnswers: [''],
+  lastActiveImageZone: 'statement',
   dpSteps: [],
   bankCollapsedOrgans: new Set() // Ensemble des boîtes d'organes repliées
 };
@@ -2857,6 +2858,75 @@ function renderEditorUploadedExplanationImages() {
   if (window.lucide) lucide.createIcons();
 }
 
+function setLastActiveImageZone(zone) {
+  state.lastActiveImageZone = zone;
+  const expDrop = document.getElementById('editor-explanation-image-dropzone');
+  const stmtDrop = document.getElementById('editor-image-dropzone');
+
+  if (zone === 'explanation') {
+    if (expDrop) {
+      expDrop.classList.add('border-teal-400', 'bg-teal-500/10');
+    }
+    if (stmtDrop) {
+      stmtDrop.classList.remove('border-teal-400', 'bg-teal-500/10');
+    }
+  } else {
+    if (stmtDrop) {
+      stmtDrop.classList.add('border-teal-400', 'bg-teal-500/10');
+    }
+    if (expDrop) {
+      expDrop.classList.remove('border-teal-400', 'bg-teal-500/10');
+    }
+  }
+}
+
+function handleExplanationDropzoneClick(e) {
+  setLastActiveImageZone('explanation');
+  // Si le clic provient d'un bouton interne (ex: "Coller le schéma"), ne pas déclencher le input file
+  if (e && e.target && e.target.closest('button')) {
+    return;
+  }
+  const fileInput = document.getElementById('editor-explanation-file-input');
+  if (fileInput) fileInput.click();
+}
+
+async function pasteClipboardToExplanation(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  setLastActiveImageZone('explanation');
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.read) {
+      const items = await navigator.clipboard.read();
+      const imageFiles = [];
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            const blob = await item.getType(type);
+            imageFiles.push(new File([blob], "schema_explication.png", { type }));
+          }
+        }
+      }
+      if (imageFiles.length > 0) {
+        await attachExplanationFilesToEditor(imageFiles);
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn("Clipboard read API:", err);
+  }
+
+  // Fallback si la permission presse-papiers est requise ou indisponible : focus sur la zone
+  const dropzone = document.getElementById('editor-explanation-image-dropzone');
+  if (dropzone) {
+    dropzone.focus();
+    dropzone.classList.add('border-teal-400', 'ring-2', 'ring-teal-400/50');
+  }
+  showToast("📋 Zone schéma prête : appuyez sur ⌘V ou Ctrl+V pour coller !", "info");
+}
+
 function initClipboardPasteListener() {
   window.addEventListener('paste', async (e) => {
     // Ne pas intercepter si la vue de création n'est pas active
@@ -2886,12 +2956,46 @@ function initClipboardPasteListener() {
 
     if (state.creatorMode === 'simple') {
       const activeEl = document.activeElement;
-      const isExplanationTarget = activeEl && (
-        activeEl.id === 'form-q-explanation' ||
-        activeEl.id === 'form-q-trap' ||
-        activeEl.closest('#editor-explanation-image-dropzone') ||
-        activeEl.closest('#editor-explanation-images-preview')
-      );
+      const target = e.target;
+
+      let isExplanationTarget = false;
+
+      // 1. Cible explicite via élément actif ou cible directe de l'événement paste
+      if (
+        (activeEl && (
+          activeEl.id === 'form-q-explanation' ||
+          activeEl.id === 'form-q-trap' ||
+          activeEl.closest('#editor-explanation-section') ||
+          activeEl.closest('#editor-explanation-image-dropzone') ||
+          activeEl.closest('#editor-explanation-images-preview')
+        )) ||
+        (target && (
+          target.id === 'form-q-explanation' ||
+          target.id === 'form-q-trap' ||
+          target.closest('#editor-explanation-section') ||
+          target.closest('#editor-explanation-image-dropzone') ||
+          target.closest('#editor-explanation-images-preview')
+        ))
+      ) {
+        isExplanationTarget = true;
+      }
+      // 2. Si l'utilisateur a récemment activé ou cliqué dans la zone explication
+      else if (state.lastActiveImageZone === 'explanation') {
+        isExplanationTarget = true;
+      }
+      // 3. Détection par position de scroll : si l'utilisateur est descendu au niveau de l'explication
+      else {
+        const expDropzone = document.getElementById('editor-explanation-image-dropzone');
+        const stmtDropzone = document.getElementById('editor-image-dropzone');
+        if (expDropzone && stmtDropzone) {
+          const expRect = expDropzone.getBoundingClientRect();
+          const stmtRect = stmtDropzone.getBoundingClientRect();
+          // Si le dropzone énoncé est sorti vers le haut et la zone explication est visible
+          if (stmtRect.bottom < 150 && expRect.top < window.innerHeight) {
+            isExplanationTarget = true;
+          }
+        }
+      }
 
       if (isExplanationTarget) {
         await attachExplanationFilesToEditor(imageFiles);
