@@ -325,7 +325,7 @@
           </div>
 
           <!-- Piège classique -->
-          <div class="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs space-y-1">
+          <div id="session-trap-box" class="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs space-y-1">
             <div class="flex items-center space-x-1.5 font-bold text-amber-400">
               <i data-lucide="alert-triangle" class="w-4 h-4"></i>
               <span>Le Piège & Réflexe Diagnostique Clé :</span>
@@ -645,25 +645,19 @@
 
           <!-- Options de Réponses -->
           <div class="space-y-3 pt-2">
-            <label class="block text-xs font-semibold text-slate-300">Options & Réponses (Cochez la ou les bonnes réponses) *</label>
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300">Propositions & Justifications *</label>
+                <p class="text-[11px] text-slate-400">Cochez la ou les bonnes réponses. Vous pouvez ajouter autant de propositions que nécessaire.</p>
+              </div>
+              <button type="button" id="btn-add-editor-option" onclick="addEditorOption()" class="px-3 py-1.5 rounded-xl bg-teal-600/20 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold flex items-center space-x-1.5 transition">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                <span>Ajouter une proposition</span>
+              </button>
+            </div>
             
-            <div id="form-mcq-wrapper" class="space-y-2">
-              <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                <input type="checkbox" id="form-opt-indicator-0" name="correct_qcm_choice" value="0" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
-                <input type="text" id="form-opt-text-0" placeholder="Option A" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
-              </div>
-              <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                <input type="checkbox" id="form-opt-indicator-1" name="correct_qcm_choice" value="1" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
-                <input type="text" id="form-opt-text-1" placeholder="Option B" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
-              </div>
-              <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                <input type="checkbox" id="form-opt-indicator-2" name="correct_qcm_choice" value="2" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
-                <input type="text" id="form-opt-text-2" placeholder="Option C" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
-              </div>
-              <div class="flex items-center space-x-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                <input type="checkbox" id="form-opt-indicator-3" name="correct_qcm_choice" value="3" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded">
-                <input type="text" id="form-opt-text-3" placeholder="Option D" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
-              </div>
+            <div id="form-mcq-wrapper" class="space-y-3">
+              <!-- Rendu dynamique via renderEditorOptions() dans app.js -->
             </div>
 
             <div id="form-tf-wrapper" class="hidden space-y-2">
@@ -681,15 +675,15 @@
           <!-- Explications & Piège classique -->
           <div class="space-y-3 pt-2 border-t border-slate-800">
             <div>
-              <label class="block text-xs font-semibold text-slate-300 mb-1.5">Explication détaillée *</label>
-              <textarea id="form-q-explanation" rows="2" required placeholder="Pourquoi ces réponses sont exactes et comment éliminer les différentiels..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-teal-500"></textarea>
+              <label class="block text-xs font-semibold text-slate-300 mb-1.5">Explication globale de la question (optionnel)</label>
+              <textarea id="form-q-explanation" rows="2" placeholder="Synthèse globale, rappels théoriques ou pourquoi ces réponses sont exactes (laisser vide si vous avez déjà commenté chaque item)..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"></textarea>
             </div>
             <div>
               <label class="block text-xs font-semibold text-amber-400 mb-1.5 flex items-center space-x-1.5">
                 <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
-                <span>Le Piège Classique ACP à éviter *</span>
+                <span>Le Piège Classique ACP à éviter (optionnel)</span>
               </label>
-              <textarea id="form-q-trap" rows="2" required placeholder="ex: Attention au clone d'anticorps... ou à l'expression aberrante de..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/30 text-xs text-white focus:outline-none focus:border-amber-500"></textarea>
+              <textarea id="form-q-trap" rows="2" placeholder="ex: Attention au piège de l'anticorps... ou au faux positif en IHC (laisser vide si non applicable)..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/30 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"></textarea>
             </div>
           </div>
 
@@ -1122,7 +1116,7 @@
 
       <!-- Explications & Pièges -->
       <div class="space-y-2.5 pt-2 border-t border-slate-800">
-        <div class="p-3.5 rounded-xl bg-slate-950 border border-teal-500/20 text-xs space-y-1">
+        <div id="detail-explanation-container" class="p-3.5 rounded-xl bg-slate-950 border border-teal-500/20 text-xs space-y-1">
           <span class="font-bold text-teal-300 flex items-center space-x-1.5">
             <i data-lucide="info" class="w-3.5 h-3.5"></i>
             <span>Explication diagnostique :</span>

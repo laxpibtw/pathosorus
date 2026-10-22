@@ -31,6 +31,7 @@ let state = {
   creatorMode: 'simple',
   editorUploadedImages: [],
   editorSelectedTags: new Set(),
+  editorQuestionOptions: [],
   dpSteps: [],
   bankCollapsedOrgans: new Set() // Ensemble des boîtes d'organes repliées
 };
@@ -919,21 +920,48 @@ function openQuestionDetail(id) {
   if (optionsContainer) {
     optionsContainer.innerHTML = (q.options || []).map((opt, idx) => {
       const isCorrect = (q.correct || []).includes(idx);
+      const letter = String.fromCharCode(65 + idx);
+      const itemExp = (q.optionExplanations && q.optionExplanations[idx]) ? q.optionExplanations[idx].trim() : '';
       return `
-        <div class="flex items-center space-x-2.5 p-3 rounded-xl border text-xs font-medium ${
-          isCorrect
-            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200'
-            : 'bg-slate-950 border-slate-800 text-slate-400'
-        }">
-          <i data-lucide="${isCorrect ? 'check-circle' : 'circle'}" class="w-4 h-4 ${isCorrect ? 'text-emerald-400' : 'text-slate-600'} shrink-0"></i>
-          <span class="flex-1">${escapeHtml(opt)}</span>
-          ${isCorrect ? `<span class="text-[10px] uppercase font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-500/20">Bonne Réponse</span>` : ''}
+        <div class="space-y-1.5">
+          <div class="flex items-center space-x-2.5 p-3 rounded-xl border text-xs font-medium ${
+            isCorrect
+              ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200'
+              : 'bg-slate-950 border-slate-800 text-slate-400'
+          }">
+            <span class="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold ${
+              isCorrect ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
+            }">${letter}</span>
+            <i data-lucide="${isCorrect ? 'check-circle' : 'circle'}" class="w-4 h-4 ${isCorrect ? 'text-emerald-400' : 'text-slate-600'} shrink-0"></i>
+            <span class="flex-1">${escapeHtml(opt)}</span>
+            ${isCorrect ? `<span class="text-[10px] uppercase font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-500/20">Bonne Réponse</span>` : ''}
+          </div>
+          ${itemExp ? `
+            <div class="ml-6 p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-300 flex items-start space-x-2">
+              <i data-lucide="lightbulb" class="w-3.5 h-3.5 mt-0.5 text-amber-400 shrink-0"></i>
+              <div class="flex-1 leading-relaxed">
+                <span class="font-bold text-amber-300">Justification ${letter} :</span>
+                <span class="text-slate-300 ml-1">${escapeHtml(itemExp)}</span>
+              </div>
+            </div>
+          ` : ''}
         </div>
       `;
     }).join('');
   }
 
-  document.getElementById('detail-explanation-text').textContent = q.explanation || "Aucune explication détaillée enregistrée.";
+  const expContainer = document.getElementById('detail-explanation-container');
+  const expText = document.getElementById('detail-explanation-text');
+  if (expContainer && expText) {
+    if (q.explanation && q.explanation.trim()) {
+      expText.textContent = q.explanation;
+      expContainer.classList.remove('hidden');
+    } else {
+      expContainer.classList.add('hidden');
+    }
+  } else if (expText) {
+    expText.textContent = q.explanation || "";
+  }
   
   const trapContainer = document.getElementById('detail-trap-container');
   const trapText = document.getElementById('detail-trap-text');
@@ -978,6 +1006,7 @@ async function fetchSupabaseData(silent = false) {
         ...q,
         options: q.options || [],
         correct: q.correct || [],
+        optionExplanations: q.optionExplanations || [],
         tags: q.tags || [],
         images: q.images || [],
         stats: q.stats || { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 }
@@ -1036,7 +1065,17 @@ async function syncLocalToSupabase() {
       await supabaseClient.from('custom_tags').upsert(tagRows);
     }
     if (state.questions.length > 0) {
-      await supabaseClient.from('questions').upsert(state.questions);
+      const { error: qErr } = await supabaseClient.from('questions').upsert(state.questions);
+      if (qErr && qErr.message && qErr.message.includes('optionExplanations')) {
+        const sanitized = state.questions.map(q => {
+          const copy = { ...q };
+          delete copy.optionExplanations;
+          return copy;
+        });
+        await supabaseClient.from('questions').upsert(sanitized);
+      } else if (qErr) {
+        throw qErr;
+      }
     }
     if (state.cases.length > 0) {
       await supabaseClient.from('cases').upsert(state.cases);
@@ -1069,7 +1108,14 @@ async function dbUpsertQuestion(q) {
   if (!supabaseClient) return;
   if (!isCreator()) return;
   try {
-    await supabaseClient.from('questions').upsert(q);
+    const { error } = await supabaseClient.from('questions').upsert(q);
+    if (error && error.message && error.message.includes('optionExplanations')) {
+      const fallback = { ...q };
+      delete fallback.optionExplanations;
+      await supabaseClient.from('questions').upsert(fallback);
+    } else if (error) {
+      console.warn("Erreur upsert question supabase:", error);
+    }
   } catch (e) {
     console.warn("Erreur upsert question supabase:", e);
   }
@@ -1682,6 +1728,10 @@ function renderSessionQuestion() {
   const optionsBox = document.getElementById('session-options-container');
   optionsBox.innerHTML = '';
   q.options.forEach((optText, idx) => {
+    const wrapper = document.createElement('div');
+    wrapper.id = 'opt-wrapper-' + idx;
+    wrapper.className = "space-y-1.5";
+
     const btn = document.createElement('button');
     btn.id = 'opt-btn-' + idx;
     btn.className = "w-full text-left p-4 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-teal-500/50 hover:bg-slate-800/50 transition flex items-center justify-between text-sm text-slate-200 group";
@@ -1696,11 +1746,18 @@ function renderSessionQuestion() {
     btn.innerHTML = `
       <div class="flex items-center space-x-3">
         <span class="opt-box w-7 h-7 ${shape} bg-slate-900 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 group-hover:text-teal-400 transition">${letter}</span>
-        <span class="font-medium">${optText}</span>
+        <span class="font-medium">${escapeHtml(optText)}</span>
       </div>
       <div class="opt-status w-5 h-5 flex items-center justify-center"></div>
     `;
-    optionsBox.appendChild(btn);
+    wrapper.appendChild(btn);
+
+    const expDiv = document.createElement('div');
+    expDiv.id = 'opt-exp-' + idx;
+    expDiv.className = "hidden ml-4 pl-3 py-2 pr-3 rounded-xl bg-slate-900/90 border border-slate-800 text-xs text-slate-300 flex items-start space-x-2";
+    wrapper.appendChild(expDiv);
+
+    optionsBox.appendChild(wrapper);
   });
 
   const valBtn = document.getElementById('btn-session-validate-qcm');
@@ -1856,6 +1913,20 @@ function evaluateSessionAnswer(selectedIndices) {
     } else {
       btn.classList.add('opacity-40');
     }
+
+    // Révélation de l'explication spécifique à cet item
+    const expDiv = document.getElementById('opt-exp-' + idx);
+    const itemExplanation = (q.optionExplanations && q.optionExplanations[idx]) ? q.optionExplanations[idx].trim() : '';
+    if (expDiv && itemExplanation) {
+      expDiv.innerHTML = `
+        <i data-lucide="lightbulb" class="w-4 h-4 text-amber-400 shrink-0 mt-0.5"></i>
+        <div class="flex-1 leading-relaxed">
+          <span class="font-bold text-amber-300">Item ${String.fromCharCode(65 + idx)} :</span>
+          <span class="text-slate-300 ml-1">${escapeHtml(itemExplanation)}</span>
+        </div>
+      `;
+      expDiv.classList.remove('hidden');
+    }
   });
 
   document.getElementById('btn-session-validate-qcm').classList.add('hidden');
@@ -1888,8 +1959,28 @@ function evaluateSessionAnswer(selectedIndices) {
   const banner = document.getElementById('session-feedback-banner');
   banner.className = isExact ? "p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300" : "p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300";
   document.getElementById('session-feedback-title').textContent = isExact ? "Exact ! Analyse diagnostique parfaite." : "Erreur diagnostique !";
-  document.getElementById('session-feedback-text').textContent = q.explanation;
-  document.getElementById('session-trap-text').textContent = q.trap || "Aucun piège spécifique renseigné.";
+  
+  const fbText = document.getElementById('session-feedback-text');
+  if (fbText) {
+    if (q.explanation && q.explanation.trim()) {
+      fbText.textContent = q.explanation;
+      fbText.classList.remove('hidden');
+    } else {
+      fbText.textContent = "";
+      fbText.classList.add('hidden');
+    }
+  }
+
+  const trapBox = document.getElementById('session-trap-box');
+  const trapText = document.getElementById('session-trap-text');
+  if (trapBox && trapText) {
+    if (q.trap && q.trap.trim()) {
+      trapText.textContent = q.trap;
+      trapBox.classList.remove('hidden');
+    } else {
+      trapBox.classList.add('hidden');
+    }
+  }
 
   const streakText = document.getElementById('session-stat-streak');
   if (streakText) {
@@ -1930,6 +2021,12 @@ function resetQuestionForm() {
   document.getElementById('form-q-format').value = "qcm";
   state.editorUploadedImages = [];
   state.editorSelectedTags.clear();
+  state.editorQuestionOptions = [
+    { text: '', explanation: '', correct: false },
+    { text: '', explanation: '', correct: false },
+    { text: '', explanation: '', correct: false },
+    { text: '', explanation: '', correct: false }
+  ];
   renderEditorUploadedImages();
   renderEditorTagsSelector();
   updateEditorDatalists();
@@ -1993,17 +2090,128 @@ function onFormatChange() {
   const format = document.getElementById('form-q-format').value;
   const isQCM = (format === 'qcm');
   const isPiege = (format === 'piege');
+  const btnAdd = document.getElementById('btn-add-editor-option');
 
-  document.getElementById('form-mcq-wrapper').classList.toggle('hidden', isPiege);
-  document.getElementById('form-tf-wrapper').classList.toggle('hidden', !isPiege);
+  const mcqWrapper = document.getElementById('form-mcq-wrapper');
+  const tfWrapper = document.getElementById('form-tf-wrapper');
+
+  if (mcqWrapper) mcqWrapper.classList.toggle('hidden', isPiege);
+  if (tfWrapper) tfWrapper.classList.toggle('hidden', !isPiege);
+  if (btnAdd) btnAdd.classList.toggle('hidden', isPiege);
 
   if (!isPiege) {
-    for (let i = 0; i < 4; i++) {
-      const input = document.getElementById('form-opt-indicator-' + i);
-      if (input) {
-        input.type = isQCM ? 'checkbox' : 'radio';
-        input.name = isQCM ? 'correct_qcm_choice' : 'correct_qcu_choice';
-      }
+    if (!isQCM && state.editorQuestionOptions) {
+      let firstFound = false;
+      state.editorQuestionOptions.forEach(opt => {
+        if (opt.correct && !firstFound) {
+          firstFound = true;
+        } else if (opt.correct) {
+          opt.correct = false;
+        }
+      });
+    }
+    renderEditorOptions();
+  }
+}
+
+function renderEditorOptions() {
+  const container = document.getElementById('form-mcq-wrapper');
+  if (!container) return;
+
+  const format = document.getElementById('form-q-format') ? document.getElementById('form-q-format').value : 'qcm';
+  const isQCM = (format === 'qcm');
+  const isPiege = (format === 'piege');
+
+  if (isPiege) return;
+
+  if (!state.editorQuestionOptions || state.editorQuestionOptions.length === 0) {
+    state.editorQuestionOptions = [
+      { text: '', explanation: '', correct: false },
+      { text: '', explanation: '', correct: false },
+      { text: '', explanation: '', correct: false },
+      { text: '', explanation: '', correct: false }
+    ];
+  }
+
+  container.innerHTML = '';
+  const canDelete = state.editorQuestionOptions.length > 2;
+
+  state.editorQuestionOptions.forEach((opt, idx) => {
+    const letter = String.fromCharCode(65 + idx);
+    const card = document.createElement('div');
+    card.className = "p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2 hover:border-slate-700 transition";
+
+    card.innerHTML = `
+      <div class="flex items-center space-x-2.5">
+        <span class="w-6 h-6 rounded-lg bg-slate-900 border border-slate-700 text-teal-400 font-bold text-xs flex items-center justify-center shrink-0 font-mono">${letter}</span>
+        <label class="flex items-center cursor-pointer" title="${isQCM ? 'Cocher si cette réponse est vraie' : 'Sélectionner si cette réponse est la seule vraie'}">
+          <input type="${isQCM ? 'checkbox' : 'radio'}" name="editor_choice_indicator" ${opt.correct ? 'checked' : ''} onchange="handleEditorOptionCorrectChange(${idx}, this.checked)" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded cursor-pointer">
+        </label>
+        <input type="text" value="${escapeHtml(opt.text || '')}" oninput="updateEditorOptionText(${idx}, this.value)" placeholder="Proposition ${letter} *" class="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-medium">
+        ${canDelete ? `
+          <button type="button" onclick="removeEditorOption(${idx})" title="Supprimer la proposition ${letter}" class="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800/80 transition">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          </button>
+        ` : ''}
+      </div>
+      <div class="flex items-center space-x-2 pl-8">
+        <i data-lucide="lightbulb" class="w-3.5 h-3.5 text-amber-400/80 shrink-0"></i>
+        <input type="text" value="${escapeHtml(opt.explanation || '')}" oninput="updateEditorOptionExplanation(${idx}, this.value)" placeholder="Justification / commentaire pour l'item ${letter} (optionnel)..." class="flex-1 px-2.5 py-1 rounded-lg bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-300 placeholder-slate-500 focus:outline-none focus:border-amber-500/50">
+      </div>
+    `;
+
+    container.appendChild(card);
+  });
+
+  if (window.lucide) lucide.createIcons();
+}
+
+function updateEditorOptionText(idx, val) {
+  if (state.editorQuestionOptions && state.editorQuestionOptions[idx]) {
+    state.editorQuestionOptions[idx].text = val;
+  }
+}
+
+function updateEditorOptionExplanation(idx, val) {
+  if (state.editorQuestionOptions && state.editorQuestionOptions[idx]) {
+    state.editorQuestionOptions[idx].explanation = val;
+  }
+}
+
+function addEditorOption() {
+  if (!state.editorQuestionOptions) state.editorQuestionOptions = [];
+  state.editorQuestionOptions.push({ text: '', explanation: '', correct: false });
+  renderEditorOptions();
+  setTimeout(() => {
+    const inputs = document.querySelectorAll('#form-mcq-wrapper input[type="text"]');
+    if (inputs.length >= 2) {
+      inputs[inputs.length - 2].focus();
+    }
+  }, 50);
+}
+
+function removeEditorOption(idx) {
+  if (!state.editorQuestionOptions || state.editorQuestionOptions.length <= 2) {
+    alert("Une question doit comporter au moins 2 propositions.");
+    return;
+  }
+  state.editorQuestionOptions.splice(idx, 1);
+  renderEditorOptions();
+}
+
+function handleEditorOptionCorrectChange(idx, isChecked) {
+  const format = document.getElementById('form-q-format') ? document.getElementById('form-q-format').value : 'qcm';
+  const isQCM = (format === 'qcm');
+  if (isQCM) {
+    if (state.editorQuestionOptions && state.editorQuestionOptions[idx]) {
+      state.editorQuestionOptions[idx].correct = isChecked;
+    }
+  } else {
+    if (state.editorQuestionOptions) {
+      state.editorQuestionOptions.forEach((opt, i) => {
+        opt.correct = (i === idx);
+      });
+      renderEditorOptions();
     }
   }
 }
@@ -2079,60 +2287,42 @@ function handleSaveQuestionForm(e) {
   }
 
   let options = [];
+  let optionExplanations = [];
   let correct = [];
 
   if (format === 'piege') {
     options = ["Vrai", "Faux"];
     const chosen = document.querySelector('input[name="form_tf_choice"]:checked');
     correct = [chosen && chosen.value === 'Faux' ? 1 : 0];
-  } else if (format === 'qcm') {
-    for (let i = 0; i < 4; i++) {
-      const val = document.getElementById('form-opt-text-' + i).value.trim();
-      const chk = document.getElementById('form-opt-indicator-' + i);
-      if (val) {
-        options.push(val);
-        if (chk && chk.checked) correct.push(options.length - 1);
-      }
-    }
-    if (options.length < 2) {
-      alert("En mode QCM, veuillez renseigner au moins 2 options.");
-      return;
-    }
-    if (correct.length === 0) {
-      alert("En mode QCM, veuillez cocher au moins une bonne réponse.");
-      return;
-    }
+    optionExplanations = ["", ""];
   } else {
-    for (let i = 0; i < 4; i++) {
-      const val = document.getElementById('form-opt-text-' + i).value.trim();
-      const rad = document.getElementById('form-opt-indicator-' + i);
+    (state.editorQuestionOptions || []).forEach(opt => {
+      const val = (opt.text || '').trim();
       if (val) {
         options.push(val);
-        if (rad && rad.checked) correct.push(options.length - 1);
+        optionExplanations.push((opt.explanation || '').trim());
+        if (opt.correct) correct.push(options.length - 1);
       }
-    }
+    });
+
     if (options.length < 2) {
-      alert("En mode QCU, veuillez renseigner au moins 2 options.");
+      alert(`En mode ${format === 'qcm' ? 'QCM' : 'QCU'}, veuillez renseigner au moins 2 propositions.`);
       return;
     }
     if (correct.length === 0) {
-      alert("En mode QCU, veuillez sélectionner la bonne réponse.");
+      alert(`En mode ${format === 'qcm' ? 'QCM' : 'QCU'}, veuillez sélectionner au moins une bonne réponse.`);
       return;
     }
   }
 
-  if (!explanation) {
-    alert("Veuillez renseigner l'explication détaillée.");
-    document.getElementById('form-q-explanation').focus();
-    return;
-  }
+  // L'explication globale et le piège sont désormais strictement optionnels !
 
   if (editId) {
     const idx = state.questions.findIndex(q => q.id === editId);
     if (idx !== -1) {
       state.questions[idx] = {
         ...state.questions[idx],
-        format, organ, category, entity, question, context, explanation, trap, tags, options, correct,
+        format, organ, category, entity, question, context, explanation, trap, tags, options, correct, optionExplanations,
         images: [...state.editorUploadedImages]
       };
       dbUpsertQuestion(state.questions[idx]);
@@ -2140,7 +2330,7 @@ function handleSaveQuestionForm(e) {
   } else {
     const newQ = {
       id: "q_" + Date.now(),
-      format, organ, category, entity, question, context, explanation, trap, tags, options, correct,
+      format, organ, category, entity, question, context, explanation, trap, tags, options, correct, optionExplanations,
       images: [...state.editorUploadedImages],
       flagged: false,
       mastered: false,
@@ -2169,33 +2359,42 @@ function editQuestion(id) {
 
   document.getElementById('form-q-edit-id').value = q.id;
   document.getElementById('form-q-format').value = q.format;
-  document.getElementById('form-q-organ').value = q.organ;
+  document.getElementById('form-q-organ').value = q.organ || '';
   document.getElementById('form-q-category').value = q.category || '';
   document.getElementById('form-q-entity').value = q.entity || '';
-  document.getElementById('form-q-text').value = q.question;
+  document.getElementById('form-q-text').value = q.question || '';
   document.getElementById('form-q-context').value = q.context || '';
-  document.getElementById('form-q-explanation').value = q.explanation;
+  document.getElementById('form-q-explanation').value = q.explanation || '';
   document.getElementById('form-q-trap').value = q.trap || '';
 
   state.editorUploadedImages = q.images ? [...q.images] : [];
   state.editorSelectedTags = new Set(q.tags || []);
   renderEditorUploadedImages();
   renderEditorTagsSelector();
-  onFormatChange();
 
   if (q.format === 'piege') {
-    const isFaux = (q.correct[0] === 1);
+    onFormatChange();
+    const isFaux = (q.correct && q.correct[0] === 1);
     const radFaux = document.querySelector('input[name="form_tf_choice"][value="Faux"]');
     const radVrai = document.querySelector('input[name="form_tf_choice"][value="Vrai"]');
     if (isFaux && radFaux) radFaux.checked = true;
     else if (radVrai) radVrai.checked = true;
   } else {
-    q.options.forEach((optText, idx) => {
-      const input = document.getElementById('form-opt-text-' + idx);
-      if (input) input.value = optText;
-      const indicator = document.getElementById('form-opt-indicator-' + idx);
-      if (indicator) indicator.checked = (q.correct || []).includes(idx);
-    });
+    const correctIndices = new Set(Array.isArray(q.correct) ? q.correct : [q.correct]);
+    const exps = Array.isArray(q.optionExplanations) ? q.optionExplanations : [];
+
+    state.editorQuestionOptions = (q.options || []).map((optText, idx) => ({
+      text: optText || '',
+      explanation: exps[idx] || '',
+      correct: correctIndices.has(idx)
+    }));
+
+    if (state.editorQuestionOptions.length < 2) {
+      while (state.editorQuestionOptions.length < 4) {
+        state.editorQuestionOptions.push({ text: '', explanation: '', correct: false });
+      }
+    }
+    onFormatChange();
   }
 }
 
@@ -2385,12 +2584,12 @@ function renderDPStepsBuilder() {
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
         <div>
-          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Explication de l'étape *</label>
-          <textarea rows="2" oninput="state.dpSteps[${sIdx}].explanation = this.value" placeholder="Justifiez les réponses..." required class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500">${step.explanation || ''}</textarea>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Explication de l'étape (optionnel)</label>
+          <textarea rows="2" oninput="state.dpSteps[${sIdx}].explanation = this.value" placeholder="Justifiez les réponses (optionnel)..." class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500">${step.explanation || ''}</textarea>
         </div>
         <div>
-          <label class="block text-[11px] font-semibold text-amber-400 mb-1">Piège diagnostique de l'étape *</label>
-          <textarea rows="2" oninput="state.dpSteps[${sIdx}].trap = this.value" placeholder="Piège ou fausse piste..." required class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-amber-500/30 text-xs text-white focus:outline-none focus:border-amber-500">${step.trap || ''}</textarea>
+          <label class="block text-[11px] font-semibold text-amber-400 mb-1">Piège diagnostique de l'étape (optionnel)</label>
+          <textarea rows="2" oninput="state.dpSteps[${sIdx}].trap = this.value" placeholder="Piège ou fausse piste (optionnel)..." class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-amber-500/30 text-xs text-white focus:outline-none focus:border-amber-500">${step.trap || ''}</textarea>
         </div>
       </div>
     `;
