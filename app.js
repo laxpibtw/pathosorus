@@ -6390,11 +6390,121 @@ function createEmptyDPStep(stepNumber) {
     format: "qcm",
     question: "",
     options: ["", "", "", ""],
+    optionExplanations: ["", "", "", ""],
+    acceptedAnswers: [""],
     correct: [0],
     explanation: "",
     trap: ""
   };
 }
+
+function setDPStepFormat(stepIdx, format) {
+  const step = state.dpSteps[stepIdx];
+  if (!step) return;
+  step.format = format;
+  if (format === 'qcu') {
+    if (step.correct.length > 1) step.correct = [step.correct[0]];
+    else if (step.correct.length === 0) step.correct = [0];
+  } else if (format === 'ouverte') {
+    if (!step.acceptedAnswers || step.acceptedAnswers.length === 0) {
+      step.acceptedAnswers = [""];
+    }
+  } else {
+    // qcm
+    if (!step.options || step.options.length === 0) {
+      step.options = ["", "", "", ""];
+      step.optionExplanations = ["", "", "", ""];
+      step.correct = [0];
+    }
+  }
+  renderDPStepsBuilder();
+}
+window.setDPStepFormat = setDPStepFormat;
+
+function addOptionToDPStep(stepIdx) {
+  const step = state.dpSteps[stepIdx];
+  if (!step) return;
+  if (!step.options) step.options = [];
+  if (!step.optionExplanations) step.optionExplanations = [];
+  step.options.push("");
+  step.optionExplanations.push("");
+  renderDPStepsBuilder();
+}
+window.addOptionToDPStep = addOptionToDPStep;
+
+function removeOptionFromDPStep(stepIdx, optIdx) {
+  const step = state.dpSteps[stepIdx];
+  if (!step) return;
+  if (step.options.length <= 2) {
+    alert("Une question à choix multiples doit comporter au moins 2 propositions.");
+    return;
+  }
+  step.options.splice(optIdx, 1);
+  if (step.optionExplanations) step.optionExplanations.splice(optIdx, 1);
+  step.correct = (step.correct || [])
+    .filter(i => i !== optIdx)
+    .map(i => i > optIdx ? i - 1 : i);
+  if (step.correct.length === 0) step.correct = [0];
+  renderDPStepsBuilder();
+}
+window.removeOptionFromDPStep = removeOptionFromDPStep;
+
+function updateDPStepOptionText(stepIdx, optIdx, text) {
+  if (state.dpSteps[stepIdx] && state.dpSteps[stepIdx].options) {
+    state.dpSteps[stepIdx].options[optIdx] = text;
+  }
+}
+window.updateDPStepOptionText = updateDPStepOptionText;
+
+function updateDPStepOptionExplanation(stepIdx, optIdx, exp) {
+  if (state.dpSteps[stepIdx]) {
+    if (!state.dpSteps[stepIdx].optionExplanations) state.dpSteps[stepIdx].optionExplanations = [];
+    state.dpSteps[stepIdx].optionExplanations[optIdx] = exp;
+  }
+}
+window.updateDPStepOptionExplanation = updateDPStepOptionExplanation;
+
+function addAcceptedAnswerToDPStep(stepIdx) {
+  const step = state.dpSteps[stepIdx];
+  if (!step) return;
+  if (!step.acceptedAnswers) step.acceptedAnswers = [];
+  step.acceptedAnswers.push("");
+  renderDPStepsBuilder();
+}
+window.addAcceptedAnswerToDPStep = addAcceptedAnswerToDPStep;
+
+function removeAcceptedAnswerFromDPStep(stepIdx, ansIdx) {
+  const step = state.dpSteps[stepIdx];
+  if (!step || !step.acceptedAnswers || step.acceptedAnswers.length <= 1) return;
+  step.acceptedAnswers.splice(ansIdx, 1);
+  renderDPStepsBuilder();
+}
+window.removeAcceptedAnswerFromDPStep = removeAcceptedAnswerFromDPStep;
+
+function updateDPStepAcceptedAnswer(stepIdx, ansIdx, val) {
+  if (state.dpSteps[stepIdx] && state.dpSteps[stepIdx].acceptedAnswers) {
+    state.dpSteps[stepIdx].acceptedAnswers[ansIdx] = val;
+  }
+}
+window.updateDPStepAcceptedAnswer = updateDPStepAcceptedAnswer;
+
+function getDPStepAcceptedAnswers(step) {
+  const list = [];
+  if (Array.isArray(step.acceptedAnswers)) {
+    step.acceptedAnswers.forEach(a => {
+      const s = (a || '').trim();
+      if (s && !list.includes(s)) list.push(s);
+    });
+  }
+  if (Array.isArray(step.options) && step.format === 'ouverte') {
+    step.options.forEach(o => {
+      const s = (o || '').trim();
+      if (s && !list.includes(s)) list.push(s);
+    });
+  }
+  return list;
+}
+window.getDPStepAcceptedAnswers = getDPStepAcceptedAnswers;
 
 function renderDPTagsSelector() {
   const container = document.getElementById('dp-tags-pills');
@@ -6451,7 +6561,18 @@ function renderDPStepsBuilder() {
   container.innerHTML = '';
 
   state.dpSteps.forEach((step, sIdx) => {
+    // Normalisation des champs
+    if (!step.format) step.format = 'qcm';
+    if (!step.options) step.options = ["", "", "", ""];
+    if (!step.optionExplanations) step.optionExplanations = step.options.map(() => "");
+    while (step.optionExplanations.length < step.options.length) step.optionExplanations.push("");
+    if (!step.acceptedAnswers) step.acceptedAnswers = [""];
+    if (!step.correct) step.correct = [0];
+
     const isQCM = (step.format === 'qcm');
+    const isQCU = (step.format === 'qcu');
+    const isOpen = (step.format === 'ouverte');
+
     const stepCard = document.createElement('div');
     stepCard.className = "bg-slate-950/80 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-md";
     stepCard.setAttribute('data-dp-step-index', sIdx);
@@ -6473,11 +6594,11 @@ function renderDPStepsBuilder() {
       <div class="grid grid-cols-1 gap-3">
         <div>
           <label class="block text-[11px] font-semibold text-slate-300 mb-1">Titre de l'étape *</label>
-          <input type="text" value="${step.title || ''}" oninput="state.dpSteps[${sIdx}].title = this.value" placeholder="ex: Étape 1 : Présentation clinique & HES panoramique" required class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500">
+          <input type="text" value="${escapeHtml(step.title || '')}" oninput="state.dpSteps[${sIdx}].title = this.value" placeholder="ex: Étape ${sIdx + 1} : Présentation clinique & HES panoramique" required class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500">
         </div>
         <div>
           <label class="block text-[11px] font-semibold text-slate-300 mb-1">Données cliniques & description microscopique *</label>
-          <textarea rows="2" oninput="state.dpSteps[${sIdx}].narrative = this.value" placeholder="Détaillez ce qui est observé à ce stade du cas clinique..." required class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans">${step.narrative || ''}</textarea>
+          <textarea rows="2" oninput="state.dpSteps[${sIdx}].narrative = this.value" placeholder="Détaillez ce qui est observé à ce stade du cas clinique..." required class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans">${escapeHtml(step.narrative || '')}</textarea>
         </div>
       </div>
 
@@ -6494,34 +6615,94 @@ function renderDPStepsBuilder() {
       </div>
 
       <div class="pt-3 border-t border-slate-800/80 space-y-3">
-        <div class="flex items-center justify-between">
-          <label class="block text-[11px] font-semibold text-indigo-300">Question de l'étape *</label>
-          <select onchange="state.dpSteps[${sIdx}].format = this.value; renderDPStepsBuilder();" class="py-1 px-2.5 rounded-lg bg-slate-900 border border-slate-700 text-[11px] text-white focus:outline-none focus:border-indigo-500">
-            <option value="qcm" ${isQCM ? 'selected' : ''}>☑️ QCM (Choix Multiples - Défaut)</option>
-            <option value="qcu" ${!isQCM ? 'selected' : ''}>🔘 QCU (Choix Unique)</option>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <label class="block text-[11px] font-semibold text-indigo-300">Format & Question de l'étape *</label>
+          <select onchange="setDPStepFormat(${sIdx}, this.value)" class="py-1 px-2.5 rounded-lg bg-slate-900 border border-slate-700 text-[11px] text-white focus:outline-none focus:border-indigo-500 font-semibold">
+            <option value="qcm" ${isQCM ? 'selected' : ''}>☑️ QCM (Choix Multiples)</option>
+            <option value="qcu" ${isQCU ? 'selected' : ''}>🔘 QCU (Choix Unique)</option>
+            <option value="ouverte" ${isOpen ? 'selected' : ''}>✍️ Question à remplir (Texte / Diagnostic)</option>
           </select>
         </div>
-        <input type="text" value="${step.question || ''}" oninput="state.dpSteps[${sIdx}].question = this.value" placeholder="ex: Quels diagnostics différentiels évoquez-vous ?" required class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500">
+        <input type="text" value="${escapeHtml(step.question || '')}" oninput="state.dpSteps[${sIdx}].question = this.value" placeholder="ex: Quels diagnostics différentiels évoquez-vous ?" required class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500">
       </div>
 
-      <div class="space-y-2">
-        <label class="block text-[11px] font-semibold text-slate-400">Propositions (Cochez la ou les bonnes réponses) :</label>
-        ${[0, 1, 2, 3].map(optIdx => `
-          <div class="flex items-center space-x-2 bg-slate-900 p-2 rounded-xl border border-slate-800">
-            <input type="${isQCM ? 'checkbox' : 'radio'}" name="dp_step_${sIdx}_correct" ${step.correct.includes(optIdx) ? 'checked' : ''} onchange="handleDPStepCorrectChange(${sIdx}, ${optIdx}, this.checked, ${isQCM})" class="text-indigo-500 focus:ring-indigo-500 w-4 h-4">
-            <input type="text" value="${step.options[optIdx] || ''}" oninput="state.dpSteps[${sIdx}].options[${optIdx}] = this.value" placeholder="Option ${String.fromCharCode(65 + optIdx)}" required class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none">
+      ${isOpen ? `
+        <!-- FORMAT QUESTION À REMPLIR -->
+        <div class="space-y-2.5 pt-2">
+          <div class="flex items-center justify-between">
+            <label class="block text-[11px] font-semibold text-teal-300">Réponse(s) acceptée(s) & synonymes :</label>
+            <button type="button" onclick="addAcceptedAnswerToDPStep(${sIdx})" class="text-[11px] text-teal-400 hover:text-teal-300 font-bold flex items-center space-x-1">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>+ Ajouter une variante acceptée</span>
+            </button>
           </div>
-        `).join('')}
-      </div>
+          <div class="space-y-2">
+            ${step.acceptedAnswers.map((ans, aIdx) => `
+              <div class="flex items-center space-x-2 bg-slate-900 p-2 rounded-xl border border-slate-800">
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded ${aIdx === 0 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold' : 'bg-slate-800 text-slate-400'}">
+                  ${aIdx === 0 ? 'Attendu' : `Variante ${aIdx + 1}`}
+                </span>
+                <input type="text" value="${escapeHtml(ans)}" oninput="updateDPStepAcceptedAnswer(${sIdx}, ${aIdx}, this.value)" placeholder="${aIdx === 0 ? 'Diagnostic principal attendu * (ex: Carcinome canalaire infiltrant)' : 'Abréviation ou synonyme (ex: CCI)'}" class="flex-1 bg-transparent border-none text-xs text-white focus:outline-none font-medium">
+                ${step.acceptedAnswers.length > 1 ? `
+                  <button type="button" onclick="removeAcceptedAnswerFromDPStep(${sIdx}, ${aIdx})" title="Supprimer cette variante" class="text-slate-500 hover:text-rose-400 p-1">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                  </button>
+                ` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : `
+        <!-- FORMAT QCM / QCU AVEC JUSTIFICATIONS PAR PROPOSITION -->
+        <div class="space-y-2.5 pt-2">
+          <div class="flex items-center justify-between">
+            <label class="block text-[11px] font-semibold text-slate-300">
+              Propositions (${isQCM ? 'Cochez la ou les bonnes réponses' : 'Cochez la seule bonne réponse'}) :
+            </label>
+            <button type="button" onclick="addOptionToDPStep(${sIdx})" class="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold flex items-center space-x-1">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>+ Ajouter une proposition</span>
+            </button>
+          </div>
+
+          <div class="space-y-2.5">
+            ${step.options.map((optText, optIdx) => {
+              const letter = String.fromCharCode(65 + optIdx);
+              const isChecked = (step.correct || []).includes(optIdx);
+              const exp = (step.optionExplanations && step.optionExplanations[optIdx]) || '';
+              const canDelete = step.options.length > 2;
+
+              return `
+                <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2 hover:border-slate-700 transition">
+                  <div class="flex items-center space-x-2">
+                    <span class="w-6 h-6 rounded-lg bg-slate-950 border border-slate-700 text-indigo-400 font-bold text-xs flex items-center justify-center shrink-0 font-mono">${letter}</span>
+                    <input type="${isQCM ? 'checkbox' : 'radio'}" name="dp_step_${sIdx}_correct" ${isChecked ? 'checked' : ''} onchange="handleDPStepCorrectChange(${sIdx}, ${optIdx}, this.checked, ${isQCM})" class="text-indigo-500 focus:ring-indigo-500 w-4 h-4 cursor-pointer" title="${isQCM ? 'Cocher si vraie' : 'Sélectionner si vraie'}">
+                    <input type="text" value="${escapeHtml(optText)}" oninput="updateDPStepOptionText(${sIdx}, ${optIdx}, this.value)" placeholder="Proposition ${letter} *" required class="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-medium">
+                    ${canDelete ? `
+                      <button type="button" onclick="removeOptionFromDPStep(${sIdx}, ${optIdx})" title="Supprimer la proposition ${letter}" class="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 transition">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                      </button>
+                    ` : ''}
+                  </div>
+                  <div class="flex items-center space-x-2 pl-8">
+                    <i data-lucide="lightbulb" class="w-3.5 h-3.5 text-amber-400/80 shrink-0"></i>
+                    <input type="text" value="${escapeHtml(exp)}" oninput="updateDPStepOptionExplanation(${sIdx}, ${optIdx}, this.value)" placeholder="Justification / commentaire pour l'item ${letter} (optionnel)..." class="flex-1 px-2.5 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80 text-[11px] text-slate-300 placeholder-slate-500 focus:outline-none focus:border-amber-500/50">
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `}
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
         <div>
-          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Explication de l'étape (optionnel)</label>
-          <textarea rows="2" oninput="state.dpSteps[${sIdx}].explanation = this.value" placeholder="Justifiez les réponses (optionnel)..." class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500">${step.explanation || ''}</textarea>
+          <label class="block text-[11px] font-semibold text-slate-300 mb-1">Explication globale de l'étape (optionnel)</label>
+          <textarea rows="2" oninput="state.dpSteps[${sIdx}].explanation = this.value" placeholder="Justifiez le raisonnement général de l'étape..." class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500">${escapeHtml(step.explanation || '')}</textarea>
         </div>
         <div>
           <label class="block text-[11px] font-semibold text-amber-400 mb-1">Piège diagnostique de l'étape (optionnel)</label>
-          <textarea rows="2" oninput="state.dpSteps[${sIdx}].trap = this.value" placeholder="Piège ou fausse piste (optionnel)..." class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-amber-500/30 text-xs text-white focus:outline-none focus:border-amber-500">${step.trap || ''}</textarea>
+          <textarea rows="2" oninput="state.dpSteps[${sIdx}].trap = this.value" placeholder="Fausse piste fréquente ou piège histologique..." class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-amber-500/30 text-xs text-white focus:outline-none focus:border-amber-500">${escapeHtml(step.trap || '')}</textarea>
         </div>
       </div>
     `;
@@ -6588,7 +6769,7 @@ function renderDPStepImagesPreview(stepIdx) {
     card.className = "relative rounded-xl overflow-hidden border border-slate-700 bg-black flex flex-col p-2 space-y-1";
     card.innerHTML = `
       <img src="${imgObj.url}" alt="Aperçu" class="h-24 w-full object-contain rounded">
-      <input type="text" value="${imgObj.caption}" oninput="state.dpSteps[${stepIdx}].images[${iIdx}].caption = this.value" placeholder="Légende" class="text-[10px] bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-white">
+      <input type="text" value="${escapeHtml(imgObj.caption)}" oninput="state.dpSteps[${stepIdx}].images[${iIdx}].caption = this.value" placeholder="Légende" class="text-[10px] bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-white">
       <button type="button" onclick="state.dpSteps[${stepIdx}].images.splice(${iIdx}, 1); renderDPStepImagesPreview(${stepIdx});" class="text-[9px] text-rose-400 hover:text-rose-300 font-semibold text-center">Supprimer</button>
     `;
     container.appendChild(card);
@@ -6634,9 +6815,22 @@ function handleSaveDPForm(e) {
 
   for (let i = 0; i < state.dpSteps.length; i++) {
     const s = state.dpSteps[i];
-    if (s.correct.length === 0) {
-      alert(`À l'étape ${i + 1}, veuillez cocher au moins une bonne réponse.`);
-      return;
+    if (s.format === 'ouverte') {
+      const accepted = getDPStepAcceptedAnswers(s);
+      if (accepted.length === 0) {
+        alert(`À l'étape ${i + 1}, veuillez renseigner au moins une réponse acceptée.`);
+        return;
+      }
+    } else {
+      if (!s.correct || s.correct.length === 0) {
+        alert(`À l'étape ${i + 1}, veuillez cocher au moins une bonne réponse.`);
+        return;
+      }
+      const validOpts = (s.options || []).filter(o => o && o.trim());
+      if (validOpts.length < 2) {
+        alert(`À l'étape ${i + 1}, veuillez renseigner au moins 2 propositions.`);
+        return;
+      }
     }
   }
 
@@ -6687,7 +6881,16 @@ function editDP(id) {
   state.editorSelectedTags = new Set(c.tags || []);
   renderDPTagsSelector();
 
-  state.dpSteps = JSON.parse(JSON.stringify(c.steps));
+  state.dpSteps = JSON.parse(JSON.stringify(c.steps || [])).map((s, idx) => {
+    if (!s.stepNumber) s.stepNumber = idx + 1;
+    if (!s.format) s.format = 'qcm';
+    if (!s.options) s.options = ["", "", "", ""];
+    if (!s.optionExplanations) s.optionExplanations = s.options.map(() => "");
+    while (s.optionExplanations.length < s.options.length) s.optionExplanations.push("");
+    if (!s.acceptedAnswers) s.acceptedAnswers = [""];
+    if (!s.correct) s.correct = [0];
+    return s;
+  });
   renderDPStepsBuilder();
 }
 
@@ -6703,7 +6906,7 @@ function deleteDP(id) {
 }
 
 // =========================================================================
-// --- LECTEUR DE DOSSIER PROGRESSIF (DP SESSION) ---
+// --- LECTEUR DE DOSSIER PROGRESSIF (DP SESSION) SANS SPOILER AVEC CORRECTION FINALE ---
 // =========================================================================
 function startDPSession(caseId) {
   const isFromBank = document.getElementById('view-bank') && !document.getElementById('view-bank').classList.contains('hidden');
@@ -6714,9 +6917,15 @@ function startDPSession(caseId) {
   // Clone profond pour mélanger les options de chaque étape sans altérer state.cases
   const clonedCase = JSON.parse(JSON.stringify(dpCase));
   clonedCase.steps = clonedCase.steps.map(step => {
-    if (step.options && step.options.length > 1) {
+    if (!step.format) step.format = 'qcm';
+    if (!step.optionExplanations) step.optionExplanations = (step.options || []).map(() => "");
+    while (step.optionExplanations.length < (step.options || []).length) step.optionExplanations.push("");
+
+    if (step.format !== 'ouverte' && step.options && step.options.length > 1) {
+      const exps = step.optionExplanations || [];
       const items = step.options.map((optText, origIdx) => ({
         text: optText,
+        explanation: exps[origIdx] || '',
         isCorrect: (step.correct || []).includes(origIdx)
       }));
       // Fisher-Yates
@@ -6725,6 +6934,7 @@ function startDPSession(caseId) {
         [items[i], items[j]] = [items[j], items[i]];
       }
       step.options = items.map(it => it.text);
+      step.optionExplanations = items.map(it => it.explanation);
       step.correct = [];
       items.forEach((it, newIdx) => {
         if (it.isCorrect) step.correct.push(newIdx);
@@ -6738,20 +6948,27 @@ function startDPSession(caseId) {
     currentStepIndex: 0,
     totalSteps: clonedCase.steps.length,
     score: 0,
-    isStepAnswered: false,
-    selectedInCurrentStep: new Set()
+    xpEarned: 0,
+    selectedInCurrentStep: new Set(),
+    stepSubmissions: {},
+    isFinished: false
   };
+
+  const playingView = document.getElementById('dp-session-playing-view');
+  const reviewView = document.getElementById('dp-session-review-view');
+  if (playingView) playingView.classList.remove('hidden');
+  if (reviewView) reviewView.classList.add('hidden');
 
   switchTab('dp-session');
   renderDPStep();
 }
+window.startDPSession = startDPSession;
 
 function renderDPStep() {
   const session = state.currentDPSession;
   if (!session) return;
 
   const currentStep = session.caseData.steps[session.currentStepIndex];
-  session.isStepAnswered = false;
   session.selectedInCurrentStep.clear();
 
   document.getElementById('dp-case-title').textContent = session.caseData.title;
@@ -6760,8 +6977,8 @@ function renderDPStep() {
   document.getElementById('dp-step-indicator').textContent = `Étape ${session.currentStepIndex + 1} / ${session.totalSteps}`;
   document.getElementById('dp-progress-bar').style.width = `${((session.currentStepIndex + 1) / session.totalSteps) * 100}%`;
 
-  document.getElementById('dp-step-title').textContent = currentStep.title;
-  document.getElementById('dp-step-narrative').textContent = currentStep.narrative;
+  document.getElementById('dp-step-title').textContent = currentStep.title || `Étape ${session.currentStepIndex + 1}`;
+  document.getElementById('dp-step-narrative').textContent = currentStep.narrative || '';
 
   const imagesContainer = document.getElementById('dp-step-images-container');
   imagesContainer.innerHTML = '';
@@ -6774,7 +6991,7 @@ function renderDPStep() {
       card.innerHTML = `
         <img src="${imgObj.url}" alt="Cliché" class="max-h-64 w-full object-contain">
         <div class="absolute bottom-0 inset-x-0 bg-slate-900/80 backdrop-blur p-2 text-white text-[11px] font-medium flex items-center justify-between border-t border-slate-800">
-          <span class="truncate">${imgObj.caption}</span>
+          <span class="truncate">${escapeHtml(imgObj.caption || `Lame ${idx + 1}`)}</span>
           <i data-lucide="zoom-in" class="w-3.5 h-3.5 text-indigo-400"></i>
         </div>
       `;
@@ -6785,156 +7002,469 @@ function renderDPStep() {
   }
 
   const isQCM = (currentStep.format === 'qcm');
-  const typeBadge = document.getElementById('dp-step-type-badge');
-  typeBadge.textContent = isQCM ? "☑️ QCM (Choix multiples)" : "🔘 QCU (Choix unique)";
+  const isQCU = (currentStep.format === 'qcu');
+  const isOpen = (currentStep.format === 'ouverte');
 
-  document.getElementById('dp-step-question').textContent = currentStep.question;
+  const typeBadge = document.getElementById('dp-step-type-badge');
+  typeBadge.textContent = isOpen ? "✍️ Question à remplir (Texte)" : (isQCM ? "☑️ QCM (Choix multiples)" : "🔘 QCU (Choix unique)");
+
+  document.getElementById('dp-step-question').textContent = currentStep.question || '';
+
+  const isLastStep = (session.currentStepIndex + 1 >= session.totalSteps);
+  const nextBtnText = isLastStep ? "Valider et terminer le Dossier 🏁" : "Valider et passer à l'étape suivante ➔";
+  const valBtn = document.getElementById('btn-dp-validate-step');
 
   const optionsBox = document.getElementById('dp-step-options-container');
-  optionsBox.innerHTML = '';
-  currentStep.options.forEach((optText, idx) => {
-    const btn = document.createElement('button');
-    btn.id = 'dp-opt-' + idx;
-    btn.className = "w-full text-left p-4 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-indigo-500/50 hover:bg-slate-800/50 transition flex items-center justify-between text-sm text-slate-200 group";
-    btn.onclick = () => {
-      if (isQCM) toggleDPOption(idx);
-      else selectDPSingle(idx);
-    };
+  const openBox = document.getElementById('dp-step-open-container');
 
-    const letter = String.fromCharCode(65 + idx);
-    const boxShape = isQCM ? "rounded-md" : "rounded-lg";
-
-    btn.innerHTML = `
-      <div class="flex items-center space-x-3">
-        <span class="opt-indicator w-7 h-7 ${boxShape} bg-slate-900 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 group-hover:text-indigo-400 transition">${letter}</span>
-        <span class="font-medium">${optText}</span>
-      </div>
-      <div class="opt-check-status w-5 h-5 flex items-center justify-center"></div>
-    `;
-    optionsBox.appendChild(btn);
-  });
-
-  const valBtn = document.getElementById('btn-dp-validate-qcm');
-  if (isQCM) {
-    valBtn.classList.remove('hidden');
-    valBtn.disabled = true;
-    valBtn.textContent = "Valider cette étape (0 cochée)";
+  if (isOpen) {
+    if (optionsBox) optionsBox.classList.add('hidden');
+    if (openBox) {
+      openBox.classList.remove('hidden');
+      const openInput = document.getElementById('dp-step-open-input');
+      if (openInput) {
+        openInput.value = '';
+        setTimeout(() => openInput.focus(), 60);
+      }
+    }
+    if (valBtn) {
+      valBtn.disabled = true;
+      valBtn.innerHTML = `<span>${nextBtnText}</span><i data-lucide="${isLastStep ? 'check' : 'arrow-right'}" class="w-4 h-4"></i>`;
+    }
   } else {
-    valBtn.classList.add('hidden');
+    if (openBox) openBox.classList.add('hidden');
+    if (optionsBox) {
+      optionsBox.classList.remove('hidden');
+      optionsBox.innerHTML = '';
+      (currentStep.options || []).forEach((optText, idx) => {
+        const btn = document.createElement('button');
+        btn.id = 'dp-opt-' + idx;
+        btn.type = 'button';
+        btn.className = "w-full text-left p-4 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-indigo-500/50 hover:bg-slate-800/50 transition flex items-center justify-between text-sm text-slate-200 group";
+        btn.onclick = () => {
+          if (isQCM) toggleDPOption(idx);
+          else selectDPSingle(idx);
+        };
+
+        const letter = String.fromCharCode(65 + idx);
+        const boxShape = isQCM ? "rounded-md" : "rounded-full";
+
+        btn.innerHTML = `
+          <div class="flex items-center space-x-3">
+            <span class="opt-indicator w-7 h-7 ${boxShape} bg-slate-900 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 group-hover:text-indigo-400 transition font-mono">${letter}</span>
+            <span class="font-medium text-slate-200">${escapeHtml(optText)}</span>
+          </div>
+          <div class="opt-check-status w-5 h-5 flex items-center justify-center"></div>
+        `;
+        optionsBox.appendChild(btn);
+      });
+    }
+
+    if (valBtn) {
+      valBtn.disabled = true;
+      valBtn.innerHTML = `<span>${nextBtnText}</span><i data-lucide="${isLastStep ? 'check' : 'arrow-right'}" class="w-4 h-4"></i>`;
+    }
   }
 
-  document.getElementById('dp-step-feedback-box').classList.add('hidden');
   if (window.lucide) lucide.createIcons();
 }
 
 function toggleDPOption(idx) {
   const session = state.currentDPSession;
-  if (!session || session.isStepAnswered) return;
+  if (!session) return;
 
   const btn = document.getElementById('dp-opt-' + idx);
+  if (!btn) return;
+
+  const isLastStep = (session.currentStepIndex + 1 >= session.totalSteps);
+  const nextBtnText = isLastStep ? "Valider et terminer le Dossier 🏁" : "Valider et passer à l'étape suivante ➔";
+  const valBtn = document.getElementById('btn-dp-validate-step');
+
   if (session.selectedInCurrentStep.has(idx)) {
     session.selectedInCurrentStep.delete(idx);
     btn.classList.remove('border-indigo-500', 'bg-indigo-500/10');
-    btn.querySelector('.opt-indicator').classList.remove('bg-indigo-600', 'text-white', 'border-indigo-500');
+    const ind = btn.querySelector('.opt-indicator');
+    if (ind) ind.classList.remove('bg-indigo-600', 'text-white', 'border-indigo-500');
+    const chk = btn.querySelector('.opt-check-status');
+    if (chk) chk.innerHTML = '';
   } else {
     session.selectedInCurrentStep.add(idx);
     btn.classList.add('border-indigo-500', 'bg-indigo-500/10');
-    btn.querySelector('.opt-indicator').classList.add('bg-indigo-600', 'text-white', 'border-indigo-500');
+    const ind = btn.querySelector('.opt-indicator');
+    if (ind) ind.classList.add('bg-indigo-600', 'text-white', 'border-indigo-500');
+    const chk = btn.querySelector('.opt-check-status');
+    if (chk) chk.innerHTML = '<i data-lucide="check" class="w-4 h-4 text-indigo-400"></i>';
   }
 
-  const valBtn = document.getElementById('btn-dp-validate-qcm');
   const count = session.selectedInCurrentStep.size;
-  valBtn.disabled = count === 0;
-  valBtn.textContent = `Valider cette étape (${count} cochée${count > 1 ? 's' : ''})`;
+  if (valBtn) {
+    valBtn.disabled = (count === 0);
+    valBtn.innerHTML = `<span>${nextBtnText} (${count} cochée${count > 1 ? 's' : ''})</span><i data-lucide="${isLastStep ? 'check' : 'arrow-right'}" class="w-4 h-4"></i>`;
+  }
+  if (window.lucide) lucide.createIcons();
 }
-
-function validateDPQCM() {
-  const session = state.currentDPSession;
-  if (!session || session.isStepAnswered) return;
-  evaluateDPStep(Array.from(session.selectedInCurrentStep));
-}
+window.toggleDPOption = toggleDPOption;
 
 function selectDPSingle(idx) {
   const session = state.currentDPSession;
-  if (!session || session.isStepAnswered) return;
-  evaluateDPStep([idx]);
-}
-
-function evaluateDPStep(selectedIndices) {
-  const session = state.currentDPSession;
-  if (!session || session.isStepAnswered) return;
-  session.isStepAnswered = true;
+  if (!session) return;
 
   const currentStep = session.caseData.steps[session.currentStepIndex];
-  const correctIndices = Array.isArray(currentStep.correct) ? currentStep.correct : [currentStep.correct];
+  const isLastStep = (session.currentStepIndex + 1 >= session.totalSteps);
+  const nextBtnText = isLastStep ? "Valider et terminer le Dossier 🏁" : "Valider et passer à l'étape suivante ➔";
+  const valBtn = document.getElementById('btn-dp-validate-step');
 
-  const selSet = new Set(selectedIndices);
-  const corSet = new Set(correctIndices);
-  const isExact = (selSet.size === corSet.size) && [...selSet].every(x => corSet.has(x));
+  session.selectedInCurrentStep.clear();
+  session.selectedInCurrentStep.add(idx);
 
-  if (isExact) {
-    session.score += 1;
-    state.stats.xp += 20;
-    playSound('correct');
-  } else {
-    playSound('wrong');
-  }
-  saveStats();
-
-  currentStep.options.forEach((_, idx) => {
-    const btn = document.getElementById('dp-opt-' + idx);
+  (currentStep.options || []).forEach((_, oIdx) => {
+    const btn = document.getElementById('dp-opt-' + oIdx);
     if (!btn) return;
-    btn.disabled = true;
+    const ind = btn.querySelector('.opt-indicator');
+    const chk = btn.querySelector('.opt-check-status');
 
-    const isTrue = corSet.has(idx);
-    const wasSel = selSet.has(idx);
-
-    if (isTrue && wasSel) {
-      btn.className = "w-full text-left p-4 rounded-xl border border-emerald-500 bg-emerald-500/10 text-emerald-200 flex items-center justify-between text-sm";
-      btn.querySelector('.opt-check-status').innerHTML = '<i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-400"></i>';
-    } else if (isTrue && !wasSel) {
-      btn.className = "w-full text-left p-4 rounded-xl border border-emerald-500/60 bg-emerald-500/5 text-emerald-300 flex items-center justify-between text-sm";
-      btn.querySelector('.opt-check-status').innerHTML = '<span class="text-[10px] font-bold text-emerald-400">[Réponse attendue]</span>';
-    } else if (!isTrue && wasSel) {
-      btn.className = "w-full text-left p-4 rounded-xl border border-rose-500 bg-rose-500/10 text-rose-200 flex items-center justify-between text-sm";
-      btn.querySelector('.opt-check-status').innerHTML = '<i data-lucide="x-circle" class="w-5 h-5 text-rose-400"></i>';
+    if (oIdx === idx) {
+      btn.classList.add('border-indigo-500', 'bg-indigo-500/10');
+      if (ind) ind.classList.add('bg-indigo-600', 'text-white', 'border-indigo-500');
+      if (chk) chk.innerHTML = '<i data-lucide="check" class="w-4 h-4 text-indigo-400"></i>';
     } else {
-      btn.classList.add('opacity-40');
+      btn.classList.remove('border-indigo-500', 'bg-indigo-500/10');
+      if (ind) ind.classList.remove('bg-indigo-600', 'text-white', 'border-indigo-500');
+      if (chk) chk.innerHTML = '';
     }
   });
 
-  document.getElementById('btn-dp-validate-qcm').classList.add('hidden');
-
-  const fbBox = document.getElementById('dp-step-feedback-box');
-  const banner = document.getElementById('dp-feedback-banner');
-  banner.className = isExact ? "p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300" : "p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300";
-  document.getElementById('dp-feedback-title').textContent = isExact ? "Étape validée avec succès !" : "Erreur sur cette étape !";
-  document.getElementById('dp-feedback-text').textContent = currentStep.explanation;
-  document.getElementById('dp-trap-text').textContent = currentStep.trap || "Penser à croiser les aspects macro, micro et phénotypiques.";
-  
-  const isLastStep = (session.currentStepIndex + 1 >= session.totalSteps);
-  if (isLastStep) {
-    document.getElementById('dp-case-meta').textContent = `${session.caseData.organ} > ${session.caseData.category} > ${session.caseData.entity}`;
+  if (valBtn) {
+    valBtn.disabled = false;
+    valBtn.innerHTML = `<span>${nextBtnText} (Option ${String.fromCharCode(65 + idx)} choisie)</span><i data-lucide="${isLastStep ? 'check' : 'arrow-right'}" class="w-4 h-4"></i>`;
   }
-  document.getElementById('btn-dp-next-step').innerHTML = isLastStep ? `<span>Clôturer le Dossier Clinique</span><i data-lucide="check" class="w-4 h-4"></i>` : `<span>Débloquer l'Étape Suivante</span><i data-lucide="arrow-right" class="w-4 h-4"></i>`;
-
-  fbBox.classList.remove('hidden');
   if (window.lucide) lucide.createIcons();
 }
+window.selectDPSingle = selectDPSingle;
 
-function nextDPStep() {
+function onDPOpenInput(val) {
+  const session = state.currentDPSession;
+  if (!session) return;
+  const isLastStep = (session.currentStepIndex + 1 >= session.totalSteps);
+  const nextBtnText = isLastStep ? "Valider et terminer le Dossier 🏁" : "Valider et passer à l'étape suivante ➔";
+  const valBtn = document.getElementById('btn-dp-validate-step');
+  if (valBtn) {
+    valBtn.disabled = !val || !val.trim();
+    valBtn.innerHTML = `<span>${nextBtnText}</span><i data-lucide="${isLastStep ? 'check' : 'arrow-right'}" class="w-4 h-4"></i>`;
+  }
+}
+window.onDPOpenInput = onDPOpenInput;
+
+function submitCurrentDPStep() {
   const session = state.currentDPSession;
   if (!session) return;
 
+  const currentStep = session.caseData.steps[session.currentStepIndex];
+  const sIdx = session.currentStepIndex;
+
+  if (currentStep.format === 'ouverte') {
+    const inputEl = document.getElementById('dp-step-open-input');
+    const userText = (inputEl ? inputEl.value : '').trim();
+    if (!userText) {
+      alert("Veuillez saisir votre réponse avant de valider l'étape.");
+      if (inputEl) inputEl.focus();
+      return;
+    }
+    const accepted = getDPStepAcceptedAnswers(currentStep);
+    const isMatch = accepted.some(target => isDiagnosticMatch(userText, target));
+
+    session.stepSubmissions[sIdx] = {
+      format: 'ouverte',
+      openAnswerText: userText,
+      accepted: accepted,
+      isCorrect: isMatch,
+      step: currentStep
+    };
+
+    if (isMatch) {
+      session.score += 1;
+      session.xpEarned += 25;
+    }
+  } else {
+    // QCM ou QCU
+    const selected = Array.from(session.selectedInCurrentStep);
+    if (selected.length === 0) {
+      alert("Veuillez sélectionner au moins une proposition avant de valider.");
+      return;
+    }
+
+    const corSet = new Set(currentStep.correct || []);
+    const selSet = new Set(selected);
+    const isExact = (selSet.size === corSet.size) && [...selSet].every(x => corSet.has(x));
+
+    session.stepSubmissions[sIdx] = {
+      format: currentStep.format,
+      selectedIndices: selected,
+      isCorrect: isExact,
+      step: currentStep
+    };
+
+    if (isExact) {
+      session.score += 1;
+      session.xpEarned += 25;
+    }
+  }
+
+  // Pas de révélation de correction pendant le déroulement !
   if (session.currentStepIndex + 1 < session.totalSteps) {
     session.currentStepIndex += 1;
     renderDPStep();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   } else {
-    confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
-    alert(`Bravo ! Vous avez terminé ce Dossier Progressif.\nScore : ${session.score} / ${session.totalSteps} étapes réussies (+${session.score * 20} XP).`);
-    switchTab(state.sessionReturnView || 'play');
+    // Dernier étape terminée !
+    finishDPSession();
   }
 }
+window.submitCurrentDPStep = submitCurrentDPStep;
+
+function finishDPSession() {
+  const session = state.currentDPSession;
+  if (!session) return;
+
+  session.isFinished = true;
+
+  // Enregistrer progression & XP
+  if (!state.stats) state.stats = {};
+  state.stats.xp = (state.stats.xp || 0) + session.xpEarned;
+  state.stats.totalAnswered = (state.stats.totalAnswered || 0) + session.totalSteps;
+  state.stats.totalCorrect = (state.stats.totalCorrect || 0) + session.score;
+  saveStats();
+  checkAndUnlockBadges();
+  updateTopBar();
+
+  const isPerfect = (session.score === session.totalSteps);
+  if (isPerfect) {
+    confetti({ particleCount: 120, spread: 90, origin: { y: 0.5 } });
+  } else {
+    confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
+  }
+
+  renderDPFinalReview();
+}
+window.finishDPSession = finishDPSession;
+
+function renderDPFinalReview() {
+  const session = state.currentDPSession;
+  if (!session) return;
+
+  const playingView = document.getElementById('dp-session-playing-view');
+  const reviewView = document.getElementById('dp-session-review-view');
+  if (playingView) playingView.classList.add('hidden');
+  if (reviewView) reviewView.classList.remove('hidden');
+
+  const caseData = session.caseData;
+  const percent = Math.round((session.score / session.totalSteps) * 100);
+  const isPerfect = (session.score === session.totalSteps);
+
+  let html = `
+    <!-- CARTE BILAN / SCORE DU CAS -->
+    <div class="bg-gradient-to-br from-slate-900 via-slate-900 ${isPerfect ? 'to-amber-950/40 border-amber-500/40' : 'to-indigo-950/40 border-indigo-500/40'} border rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+        <div>
+          <span class="text-xs font-mono font-bold uppercase tracking-wider text-indigo-400">Bilan du Dossier Progressif</span>
+          <h2 class="text-xl sm:text-2xl font-black text-white mt-1">${escapeHtml(caseData.title)}</h2>
+          <div class="flex items-center space-x-2 text-xs text-slate-300 mt-1.5 font-medium">
+            <span class="px-2 py-0.5 rounded bg-slate-800 text-teal-300 font-mono">${escapeHtml(caseData.organ)}</span>
+            <span>›</span>
+            <span class="text-slate-400">${escapeHtml(caseData.category)}</span>
+            <span>›</span>
+            <span class="text-amber-300 font-bold">${escapeHtml(caseData.entity)}</span>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-3 bg-slate-950/80 px-4 py-3 rounded-2xl border border-slate-800 shrink-0">
+          <div class="w-12 h-12 rounded-xl ${isPerfect ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'} flex items-center justify-center font-black text-xl">
+            ${isPerfect ? '🏆' : '📋'}
+          </div>
+          <div>
+            <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Score Global</div>
+            <div class="text-lg font-black text-white">${session.score} / ${session.totalSteps} <span class="text-xs text-indigo-400">(${percent}%)</span></div>
+            <div class="text-[11px] font-bold text-emerald-400">+${session.xpEarned} XP remportés</div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs sm:text-sm text-slate-300 leading-relaxed font-sans">${escapeHtml(caseData.synopsis)}</p>
+
+      <div class="flex items-center justify-between pt-2">
+        <span class="text-xs font-bold text-slate-400 flex items-center space-x-1.5">
+          <i data-lucide="check-circle" class="w-4 h-4 text-indigo-400"></i>
+          <span>Correction détaillée étape par étape ci-dessous :</span>
+        </span>
+        <button onclick="startDPSession('${caseData.id}')" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-indigo-300 font-bold transition flex items-center space-x-1.5 border border-slate-700">
+          <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+          <span>Recommencer ce cas</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- LISTE DÉTAILLÉE DES ÉTAPES CORRIGÉES -->
+    <div class="space-y-6">
+  `;
+
+  caseData.steps.forEach((step, sIdx) => {
+    const sub = session.stepSubmissions[sIdx] || { selectedIndices: [], isCorrect: false };
+    const isStepCorrect = !!sub.isCorrect;
+    const isQCM = (step.format === 'qcm');
+    const isOpen = (step.format === 'ouverte');
+
+    html += `
+      <div class="bg-slate-900 border ${isStepCorrect ? 'border-emerald-500/30' : 'border-rose-500/30'} rounded-3xl p-6 sm:p-7 shadow-xl space-y-5">
+        
+        <!-- En-tête de l'étape -->
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+          <div class="flex items-center space-x-3">
+            <span class="w-7 h-7 rounded-xl ${isStepCorrect ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'} flex items-center justify-center text-xs font-mono font-bold">
+              ${sIdx + 1}
+            </span>
+            <div>
+              <h3 class="text-sm sm:text-base font-bold text-white">${escapeHtml(step.title || `Étape ${sIdx + 1}`)}</h3>
+              <span class="text-[10px] font-mono text-slate-400">${isOpen ? '✍️ Question à remplir' : (isQCM ? '☑️ QCM' : '🔘 QCU')}</span>
+            </div>
+          </div>
+          <div>
+            ${isStepCorrect
+              ? '<span class="text-xs font-bold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center space-x-1"><i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i><span>Validée (+25 XP)</span></span>'
+              : '<span class="text-xs font-bold px-3 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center space-x-1"><i data-lucide="x-circle" class="w-3.5 h-3.5"></i><span>Non validée</span></span>'
+            }
+          </div>
+        </div>
+
+        <!-- Récit clinique & macro/micro -->
+        <div class="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 text-xs sm:text-sm text-slate-300 leading-relaxed font-sans whitespace-pre-line">
+          ${escapeHtml(step.narrative || '')}
+        </div>
+
+        <!-- Images de l'étape -->
+        ${step.images && step.images.length > 0 ? `
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            ${step.images.map((imgObj, iIdx) => `
+              <div onclick="openLightbox('${imgObj.url}', '${escapeHtml(imgObj.caption || `Cliché Étape ${sIdx + 1}`)}')" class="relative rounded-xl overflow-hidden border border-slate-700 bg-black cursor-zoom-in group max-h-56 flex flex-col justify-end">
+                <img src="${imgObj.url}" alt="Cliché" class="max-h-56 w-full object-contain">
+                <div class="bg-slate-900/90 backdrop-blur p-2 text-white text-[11px] font-medium flex items-center justify-between border-t border-slate-800">
+                  <span class="truncate">${escapeHtml(imgObj.caption || `Lame ${iIdx + 1}`)}</span>
+                  <i data-lucide="zoom-in" class="w-3.5 h-3.5 text-indigo-400"></i>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        <!-- Question posée -->
+        <div class="pt-2 border-t border-slate-800">
+          <div class="text-[11px] font-semibold text-slate-400 mb-1">Question de l'étape :</div>
+          <div class="text-sm font-bold text-white">${escapeHtml(step.question || '')}</div>
+        </div>
+
+        <!-- Propositions avec Justifications par proposition (ou Question ouverte) -->
+        <div class="space-y-2.5">
+          ${isOpen ? `
+            <div class="p-3.5 rounded-xl ${isStepCorrect ? 'bg-emerald-500/10 border border-emerald-500/40 text-emerald-200' : 'bg-rose-500/10 border border-rose-500/40 text-rose-200'} space-y-1">
+              <div class="text-xs font-semibold">Votre réponse saisie : <strong class="underline">${escapeHtml(sub.openAnswerText || '(Aucune réponse saisie)')}</strong></div>
+              <div class="text-xs text-slate-300">Réponse(s) attendue(s) : <strong class="text-teal-300 font-mono">${(getDPStepAcceptedAnswers(step)).join(' / ')}</strong></div>
+            </div>
+          ` : `
+            <div class="space-y-2">
+              ${(step.options || []).map((optText, oIdx) => {
+                const letter = String.fromCharCode(65 + oIdx);
+                const isExpected = (step.correct || []).includes(oIdx);
+                const wasChosen = (sub.selectedIndices || []).includes(oIdx);
+                const justification = (step.optionExplanations && step.optionExplanations[oIdx]) ? step.optionExplanations[oIdx].trim() : '';
+
+                let cardClass = "border-slate-800 bg-slate-950/60 text-slate-300";
+                let badge = "";
+
+                if (isExpected && wasChosen) {
+                  cardClass = "border-emerald-500 bg-emerald-500/10 text-emerald-200";
+                  badge = '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">✓ Votre choix (Correct)</span>';
+                } else if (isExpected && !wasChosen) {
+                  cardClass = "border-emerald-500/60 bg-emerald-500/5 text-emerald-300";
+                  badge = '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">[Réponse attendue non cochée]</span>';
+                } else if (!isExpected && wasChosen) {
+                  cardClass = "border-rose-500 bg-rose-500/10 text-rose-200";
+                  badge = '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">✗ Votre choix (Faux)</span>';
+                } else {
+                  cardClass = "border-slate-800 bg-slate-950/40 text-slate-400 opacity-80";
+                }
+
+                return `
+                  <div class="p-3 rounded-xl border ${cardClass} space-y-2 transition">
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center space-x-2.5">
+                        <span class="w-6 h-6 rounded-lg ${isExpected ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-900 border border-slate-700 text-slate-400'} flex items-center justify-center text-xs font-mono font-bold">${letter}</span>
+                        <span class="text-xs font-semibold ${isExpected ? 'text-white' : ''}">${escapeHtml(optText)}</span>
+                      </div>
+                      ${badge}
+                    </div>
+
+                    ${justification ? `
+                      <div class="ml-8 p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] text-slate-300 flex items-start space-x-2">
+                        <i data-lucide="info" class="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5"></i>
+                        <div class="leading-relaxed"><strong class="text-amber-300">Justification :</strong> ${escapeHtml(justification)}</div>
+                      </div>
+                    ` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+
+        <!-- Explication générale & Piège diagnostique -->
+        ${(step.explanation || step.trap) ? `
+          <div class="pt-3 border-t border-slate-800 grid grid-cols-1 ${step.explanation && step.trap ? 'sm:grid-cols-2' : ''} gap-3">
+            ${step.explanation ? `
+              <div class="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-200 space-y-1">
+                <div class="font-bold flex items-center space-x-1.5 text-indigo-300">
+                  <i data-lucide="book-open" class="w-4 h-4"></i>
+                  <span>Explication diagnostique :</span>
+                </div>
+                <p class="leading-relaxed pl-5 text-slate-300">${escapeHtml(step.explanation)}</p>
+              </div>
+            ` : ''}
+            ${step.trap ? `
+              <div class="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200 space-y-1">
+                <div class="font-bold flex items-center space-x-1.5 text-amber-400">
+                  <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+                  <span>Piège diagnostique :</span>
+                </div>
+                <p class="leading-relaxed pl-5 text-slate-300">${escapeHtml(step.trap)}</p>
+              </div>
+            ` : ''}
+          </div>
+        ` : ''}
+
+      </div>
+    `;
+  });
+
+  html += `
+    </div>
+
+    <!-- BOUTONS D'ACTION EN BAS DE PAGE -->
+    <div class="flex items-center justify-between pt-4 border-t border-slate-800">
+      <button onclick="switchTab(state.sessionReturnView || 'play')" class="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center space-x-2">
+        <i data-lucide="arrow-left" class="w-4 h-4"></i>
+        <span>Retourner aux cas cliniques</span>
+      </button>
+
+      <button onclick="startDPSession('${caseData.id}')" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center space-x-2 shadow-lg shadow-indigo-500/20">
+        <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+        <span>Recommencer ce Cas Clinique</span>
+      </button>
+    </div>
+  `;
+
+  reviewView.innerHTML = html;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (window.lucide) lucide.createIcons();
+}
+window.renderDPFinalReview = renderDPFinalReview;
 
 // --- DOSSIERS PROGRESSIFS SUR LA PAGE JOUER ---
 function renderDPCardsOnPlay() {
