@@ -1069,17 +1069,13 @@
       </div>
 
       <div class="flex flex-col gap-2 pt-2">
-        <button onclick="saveSupabaseSettings()" class="w-full py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-1.5 transition shadow-lg shadow-teal-500/20">
+        <button id="btn-force-sync" onclick="forceFullCloudSync()" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-teal-600 to-indigo-600 hover:from-teal-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-lg shadow-teal-500/20">
+          <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+          <span>Synchroniser mon compte maintenant (Justifications, Trophées, Révisions)</span>
+        </button>
+        <button onclick="saveSupabaseSettings()" class="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs flex items-center justify-center space-x-1.5 transition border border-slate-700">
           <i data-lucide="check-circle" class="w-4 h-4"></i>
-          <span>Enregistrer & Connecter</span>
-        </button>
-        <button id="btn-sync-to-cloud" onclick="syncLocalToSupabase()" class="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 font-semibold text-xs flex items-center justify-center space-x-1.5 transition border border-slate-700">
-          <i data-lucide="upload-cloud" class="w-4 h-4"></i>
-          <span>Envoyer mes données locales vers le Cloud</span>
-        </button>
-        <button id="btn-sync-from-cloud" onclick="syncSupabaseToLocal()" class="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 font-semibold text-xs flex items-center justify-center space-x-1.5 transition border border-slate-700">
-          <i data-lucide="download-cloud" class="w-4 h-4"></i>
-          <span>Recharger depuis le Cloud Supabase</span>
+          <span>Vérifier la connexion Supabase</span>
         </button>
       </div>
     </div>

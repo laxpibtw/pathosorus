@@ -412,6 +412,80 @@ async function syncLocalProgressToCloud() {
   }
 }
 
+async function pushAllLocalDataToAccountCloud() {
+  if (!supabaseClient || !state.currentUser) return;
+  console.log("☁️ Synchronisation complète du compte avec Supabase...");
+
+  // 1. Pousser les stats (XP, streak, badgeHistory, unlockedBadges, customBadges)
+  try {
+    await syncStatsToCloud();
+  } catch (e) {
+    console.warn("Erreur push stats vers cloud:", e);
+  }
+
+  // 2. Pousser la progression de révision espacée (user_progress)
+  try {
+    await syncLocalProgressToCloud();
+  } catch (e) {
+    console.warn("Erreur push user_progress vers cloud:", e);
+  }
+
+  // 3. Pousser les questions locales dont les justifications manquent sur Supabase
+  if (isCreator()) {
+    try {
+      const { data: cloudQs } = await supabaseClient.from('questions').select('id, optionexplanations');
+      const cloudMap = new Map((cloudQs || []).map(q => [q.id, q]));
+
+      const toPush = (state.questions || []).filter(localQ => {
+        const cloudQ = cloudMap.get(localQ.id);
+        const hasLocalNotes = Array.isArray(localQ.optionExplanations) && localQ.optionExplanations.some(e => e && e.trim());
+        const cloudMissing = !cloudQ || !cloudQ.optionexplanations || cloudQ.optionexplanations.length === 0 || cloudQ.optionexplanations.every(e => !e || !e.trim());
+        return hasLocalNotes && cloudMissing;
+      });
+
+      if (toPush.length > 0) {
+        console.log(`☁️ Auto-push de ${toPush.length} question(s) avec justifications vers Supabase...`);
+        for (const q of toPush) {
+          await dbUpsertQuestion(q);
+        }
+      }
+    } catch (e) {
+      console.warn("Erreur auto-push questions vers Supabase:", e);
+    }
+  }
+}
+
+async function forceFullCloudSync() {
+  if (!supabaseClient) {
+    alert("Supabase n'est pas initialisé.");
+    return;
+  }
+  if (!state.currentUser) {
+    alert("Veuillez d'abord vous connecter avec votre compte créateur (padoreau85@gmail.com) via 'Connexion' en haut à droite.");
+    return;
+  }
+  const btn = document.getElementById('btn-force-sync');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span>Synchronisation en cours...</span>`;
+  }
+  try {
+    await pushAllLocalDataToAccountCloud();
+    await fetchSupabaseData(true);
+    alert(`Synchronisation terminée avec succès 🎉 !\n\n• Questions & Justifications envoyées et synchronisées\n• Trophées & XP à jour (${state.stats.xp || 0} XP, Série ${state.stats.streak || 1}j)\n• Cartes de révision espacée à jour.`);
+  } catch (err) {
+    alert("Erreur lors de la synchronisation : " + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4"></i><span>Synchroniser mon compte maintenant</span>`;
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+}
+window.forceFullCloudSync = forceFullCloudSync;
+window.pushAllLocalDataToAccountCloud = pushAllLocalDataToAccountCloud;
+
 async function syncStatsToCloud() {
   if (!supabaseClient || !state.currentUser) return;
   try {
@@ -1520,66 +1594,7 @@ async function fetchSupabaseData(silent = false) {
 }
 
 async function syncLocalToSupabase() {
-  if (isLocalEnvironment()) {
-    alert("🛡️ Action bloquée : Vous êtes en environnement local de test. La base de données Supabase en ligne est protégée en écriture.");
-    return;
-  }
-  if (!supabaseClient) {
-    alert("Veuillez d'abord connecter votre projet Supabase.");
-    return;
-  }
-  if (!isCreator()) {
-    alert("Action réservée aux créateurs : seuls les créateurs peuvent synchroniser et modifier la base Cloud partagée.");
-    return;
-  }
-  const btn = document.getElementById('btn-sync-to-cloud');
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = `<span>Envoi en cours...</span>`;
-  }
-
-  try {
-    if (state.customTags.length > 0) {
-      const tagRows = state.customTags.map(t => ({ name: t }));
-      await supabaseClient.from('custom_tags').upsert(tagRows);
-    }
-    if (state.questions.length > 0) {
-      const formatted = state.questions.map(q => formatQuestionForSupabase(q));
-      let { error: qErr } = await supabaseClient.from('questions').upsert(formatted);
-      if (qErr && qErr.message && (qErr.message.toLowerCase().includes('column') || qErr.message.toLowerCase().includes('schema cache'))) {
-        const msg = qErr.message.toLowerCase();
-        const sanitized = formatted.map(q => {
-          const copy = { ...q };
-          if (msg.includes('difficulty')) delete copy.difficulty;
-          if (msg.includes('extremeclues')) delete copy.extremeclues;
-          if (msg.includes('optionexplanations')) delete copy.optionexplanations;
-          if (msg.includes('explanationimages')) delete copy.explanationimages;
-          if (msg.includes('acceptedanswers')) delete copy.acceptedanswers;
-          return copy;
-        });
-        const retryRes = await supabaseClient.from('questions').upsert(sanitized);
-        qErr = retryRes.error;
-      }
-      if (qErr) {
-        throw qErr;
-      }
-    }
-    if (state.cases.length > 0) {
-      await supabaseClient.from('cases').upsert(state.cases);
-    }
-
-    alert(`Synchronisation montante réussie !\n${state.questions.length} questions et ${state.cases.length} DP sauvegardés dans le Cloud.`);
-    closeSupabaseModal();
-  } catch (err) {
-    console.error("Erreur sync to supabase:", err);
-    alert("Erreur lors de l'envoi vers Supabase : " + err.message);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = `<i data-lucide="upload-cloud" class="w-4 h-4"></i><span>Envoyer mes données locales vers le Cloud</span>`;
-    }
-    if (window.lucide) lucide.createIcons();
-  }
+  await forceFullCloudSync();
 }
 
 async function syncSupabaseToLocal() {
