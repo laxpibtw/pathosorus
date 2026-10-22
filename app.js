@@ -16,11 +16,16 @@ let state = {
   customTags: [],
   stats: {
     xp: 0,
+    creatorXp: 0,
     streak: 1,
     lastActiveDate: new Date().toISOString().split('T')[0],
     totalAnswered: 0,
-    totalCorrect: 0
+    totalCorrect: 0,
+    completedCategories: [],
+    unlockedBadges: {},
+    badgeHistory: {}
   },
+  trophyFilter: 'all',
   playHierarchy: {
     selectedOrgan: null,
     selectedCategory: null,
@@ -40,7 +45,7 @@ let state = {
   bankSelectedOrgan: 'all',
   bankSelectedCategory: 'all',
   bankCollapsedOrgans: new Set(),
-  bankCollapsedLesions: new Set(),
+  bankExpandedLesions: new Set(),
   currentRenderedLesionKeys: []
 };
 
@@ -53,6 +58,11 @@ function isCreator() {
 
 function isReader() {
   return !isCreator();
+}
+
+function isLocalEnvironment() {
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || window.location.protocol === 'file:';
 }
 
 // --- SYNTHÈSE SONORE ---
@@ -161,10 +171,30 @@ function getTodayString() {
   return new Date().toISOString().split('T')[0];
 }
 
+function isQuestionDoneToday(q) {
+  if (!q || !q.stats || !q.stats.lastReviewed) return false;
+  try {
+    const lastDate = q.stats.lastReviewed.split('T')[0];
+    return lastDate === getTodayString();
+  } catch (e) {
+    return false;
+  }
+}
+
 function isQuestionDue(q) {
   if (q.mastered) return false;
-  if (!q.stats || !q.stats.nextReviewDate) return true;
+
+  // Règle d'or : si une question a été faite aujourd'hui (J1), elle n'apparaît PLUS dans le Jouer aujourd'hui !
+  if (isQuestionDoneToday(q)) return false;
+
+  // Si jamais faite : elle est due (à découvrir)
+  if (!q.stats || typeof q.stats.seen === 'undefined' || q.stats.seen === 0) return true;
+
+  // Si marquée en erreur / piège et pas encore refaite aujourd'hui
   if (q.flagged) return true;
+
+  // Si date d'échéance arrivée
+  if (!q.stats.nextReviewDate) return true;
   return q.stats.nextReviewDate <= getTodayString();
 }
 
@@ -206,6 +236,28 @@ function updateSupabaseUI(connected, errorMsg) {
   const text = document.getElementById('supabase-status-text');
   const banner = document.getElementById('supabase-status-banner');
   const bannerText = document.getElementById('supabase-status-banner-text');
+
+  const shield = document.getElementById('env-local-shield');
+  if (shield) {
+    if (isLocalEnvironment()) shield.classList.remove('hidden');
+    else shield.classList.add('hidden');
+  }
+
+  if (isLocalEnvironment()) {
+    if (dot) dot.className = "w-2 h-2 rounded-full bg-amber-400";
+    if (text) {
+      text.textContent = "Test Local (Cloud protégé 🛡️)";
+      text.className = "text-amber-300 font-semibold hidden md:inline text-xs";
+    }
+    if (banner) {
+      banner.className = "p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex items-center space-x-2";
+    }
+    if (bannerText) {
+      bannerText.textContent = "🛡️ Mode Test Local : La base Supabase en ligne est 100% protégée en écriture. Vos tests restent sur ce navigateur.";
+    }
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
 
   if (connected) {
     if (dot) {
@@ -304,6 +356,7 @@ async function initAuth() {
       state.currentUser = session.user;
       await fetchCurrentUserRole();
       await loadUserProgress();
+      if (isCreator()) autoSyncLocalQuestionsToCloud();
     } else {
       state.currentUser = null;
       state.currentRole = 'reader';
@@ -315,6 +368,7 @@ async function initAuth() {
         state.currentUser = session.user;
         await fetchCurrentUserRole();
         await loadUserProgress();
+        if (isCreator()) autoSyncLocalQuestionsToCloud();
       } else {
         state.currentUser = null;
         state.currentRole = 'reader';
@@ -395,6 +449,9 @@ async function dbSaveUserProgress(q) {
     stats: q.stats
   };
   localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
+
+  // Protection mode test local : ne pas modifier Supabase en ligne
+  if (isLocalEnvironment()) return;
 
   if (!supabaseClient) return;
 
@@ -546,7 +603,8 @@ async function handleAuthLoginSubmit(e) {
     const roleStr = isCreator() ? "Créateur 🦖" : "Lecteur 📖";
     alert(`Bienvenue ${email} !\nConnecté avec succès en tant que ${roleStr}.`);
     if (isCreator()) {
-      fetchSupabaseData(true);
+      await fetchSupabaseData(true);
+      await autoSyncLocalQuestionsToCloud();
     }
   } catch (err) {
     console.error("Erreur connexion:", err);
@@ -1122,7 +1180,7 @@ async function fetchSupabaseData(silent = false) {
     ]);
 
     if (!qRes.error && qRes.data) {
-      state.questions = qRes.data.map(q => ({
+      const cloudQuestions = qRes.data.map(q => ({
         ...q,
         options: q.options || [],
         correct: q.correct || [],
@@ -1131,8 +1189,16 @@ async function fetchSupabaseData(silent = false) {
         tags: q.tags || [],
         images: q.images || [],
         explanationImages: q.explanationImages || [],
+        difficulty: q.difficulty || 'facile',
+        extremeClues: q.extremeClues || '',
         stats: q.stats || { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 }
       }));
+
+      // Fusion intelligente : Ne JAMAIS écraser les questions créées localement qui ne sont pas encore sur Supabase
+      const cloudIds = new Set(cloudQuestions.map(q => q.id));
+      const localOnlyQuestions = (state.questions || []).filter(q => !cloudIds.has(q.id));
+
+      state.questions = [...cloudQuestions, ...localOnlyQuestions];
       localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
     }
 
@@ -1167,6 +1233,10 @@ async function fetchSupabaseData(silent = false) {
 }
 
 async function syncLocalToSupabase() {
+  if (isLocalEnvironment()) {
+    alert("🛡️ Action bloquée : Vous êtes en environnement local de test. La base de données Supabase en ligne est protégée en écriture.");
+    return;
+  }
   if (!supabaseClient) {
     alert("Veuillez d'abord connecter votre projet Supabase.");
     return;
@@ -1229,25 +1299,87 @@ async function syncSupabaseToLocal() {
 }
 
 async function dbUpsertQuestion(q) {
-  if (!supabaseClient) return;
-  if (!isCreator()) return;
+  // Protection absolue : sur l'environnement local de test, on n'écrit JAMAIS dans la base Supabase en ligne !
+  if (isLocalEnvironment()) {
+    console.log("🛡️ Mode Test Local : Question enregistrée dans votre navigateur. Supabase en ligne reste 100% protégé.");
+    return { success: true, localOnly: true, isLocalEnv: true };
+  }
+
+  if (!supabaseClient) return { success: true, localOnly: true };
+  if (!state.currentUser) {
+    console.warn("Utilisateur non connecté : question enregistrée en local.");
+    return { localOnly: true };
+  }
+  if (!isCreator()) {
+    console.warn("Compte non créateur : impossible de publier sur Supabase.");
+    return { error: { message: "Votre compte est en mode Lecteur. Seuls les Créateurs peuvent publier dans la banque collective en ligne." } };
+  }
   try {
-    const { error } = await supabaseClient.from('questions').upsert(q);
-    if (error && error.message && (error.message.includes('optionExplanations') || error.message.includes('explanationImages') || error.message.includes('acceptedAnswers'))) {
-      const fallback = { ...q };
-      if (error.message.includes('optionExplanations')) delete fallback.optionExplanations;
-      if (error.message.includes('explanationImages')) delete fallback.explanationImages;
-      if (error.message.includes('acceptedAnswers')) delete fallback.acceptedAnswers;
-      await supabaseClient.from('questions').upsert(fallback);
-    } else if (error) {
-      console.warn("Erreur upsert question supabase:", error);
+    const payload = { ...q };
+    let res = await supabaseClient.from('questions').upsert(payload);
+    
+    // En cas de colonnes non encore créées sur la table Supabase distante (rétrocompatibilité schéma)
+    if (res.error && (
+      res.error.code === 'PGRST204' ||
+      (res.error.message && (
+        res.error.message.toLowerCase().includes('column') ||
+        res.error.message.toLowerCase().includes('schema cache') ||
+        res.error.message.includes('difficulty') ||
+        res.error.message.includes('extremeClues') ||
+        res.error.message.includes('optionExplanations') ||
+        res.error.message.includes('explanationImages') ||
+        res.error.message.includes('acceptedAnswers')
+      ))
+    )) {
+      console.warn("Avertissement colonne Supabase manquante, repli sur schéma de base...", res.error.message);
+      const fallback = { ...payload };
+      delete fallback.difficulty;
+      delete fallback.extremeClues;
+      delete fallback.optionExplanations;
+      delete fallback.explanationImages;
+      delete fallback.acceptedAnswers;
+      res = await supabaseClient.from('questions').upsert(fallback);
     }
+
+    if (res.error) {
+      console.warn("Erreur upsert question supabase:", res.error);
+      return { error: res.error };
+    }
+    return { success: true };
   } catch (e) {
     console.warn("Erreur upsert question supabase:", e);
+    return { error: e };
+  }
+}
+
+async function autoSyncLocalQuestionsToCloud() {
+  if (isLocalEnvironment()) {
+    console.log("🛡️ Mode Test Local : autoSync désactivé pour ne pas toucher Supabase.");
+    return;
+  }
+  if (!supabaseClient || !isCreator()) return;
+  try {
+    const { data: cloudQuestions } = await supabaseClient.from('questions').select('id');
+    if (cloudQuestions) {
+      const cloudIds = new Set(cloudQuestions.map(c => c.id));
+      const unsynced = (state.questions || []).filter(q => !cloudIds.has(q.id));
+      if (unsynced.length > 0) {
+        console.log(`Synchronisation automatique de ${unsynced.length} question(s) vers Supabase...`);
+        for (const q of unsynced) {
+          await dbUpsertQuestion(q);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Erreur autoSyncLocalQuestionsToCloud:", e);
   }
 }
 
 async function dbDeleteQuestion(id) {
+  if (isLocalEnvironment()) {
+    console.log("🛡️ Mode Test Local : Suppression en local uniquement.");
+    return;
+  }
   if (!supabaseClient) return;
   if (!isCreator()) return;
   try {
@@ -1258,6 +1390,7 @@ async function dbDeleteQuestion(id) {
 }
 
 async function dbUpsertCase(c) {
+  if (isLocalEnvironment()) return;
   if (!supabaseClient) return;
   if (!isCreator()) return;
   try {
@@ -1268,6 +1401,7 @@ async function dbUpsertCase(c) {
 }
 
 async function dbDeleteCase(id) {
+  if (isLocalEnvironment()) return;
   if (!supabaseClient) return;
   if (!isCreator()) return;
   try {
@@ -1278,6 +1412,7 @@ async function dbDeleteCase(id) {
 }
 
 async function dbUpsertTag(name) {
+  if (isLocalEnvironment()) return;
   if (!supabaseClient) return;
   if (!isCreator()) return;
   try {
@@ -1384,10 +1519,30 @@ function saveStats() {
 }
 
 function updateTopBar() {
-  document.getElementById('top-streak').textContent = state.stats.streak;
-  document.getElementById('top-xp').textContent = state.stats.xp;
+  const streakEl = document.getElementById('top-streak');
+  if (streakEl) streakEl.textContent = state.stats.streak || 1;
+
+  const xpEl = document.getElementById('top-xp');
+  if (xpEl) xpEl.textContent = state.stats.xp || 0;
+
+  const levelEl = document.getElementById('top-level');
+  if (levelEl) levelEl.textContent = calculatePlayerLevel(state.stats.xp || 0).level;
+
   const totalCount = state.questions.length + state.cases.length;
-  document.getElementById('badge-bank-count').textContent = totalCount;
+  const bankBadge = document.getElementById('badge-bank-count');
+  if (bankBadge) bankBadge.textContent = totalCount;
+
+  // Pastille de badges contestés sur l'onglet Trophées
+  const contestedCount = getContestedBadgesCount();
+  const contestedBadge = document.getElementById('badge-contested-count');
+  if (contestedBadge) {
+    if (contestedCount > 0) {
+      contestedBadge.textContent = `⚡ ${contestedCount}`;
+      contestedBadge.classList.remove('hidden');
+    } else {
+      contestedBadge.classList.add('hidden');
+    }
+  }
 }
 
 // --- ONGLETS ---
@@ -1408,12 +1563,15 @@ function switchTab(viewId) {
   if (targetView) targetView.classList.remove('hidden');
 
   if (viewId === 'play') {
+    renderPlayNewQuestionsFeed();
     renderHierarchySelector();
     renderTagsCloud();
     renderDPCardsOnPlay();
     renderSpacedRepetitionDashboard();
   } else if (viewId === 'bank') {
     renderBank();
+  } else if (viewId === 'trophies') {
+    renderTrophiesView();
   } else if (viewId === 'create') {
     const lockedEl = document.getElementById('view-create-locked');
     const contentEl = document.getElementById('view-create-content');
@@ -1428,6 +1586,815 @@ function switchTab(viewId) {
   }
 
   if (window.lucide) lucide.createIcons();
+}
+
+// =========================================================================
+// --- SYSTÈME D'EXPÉRIENCE, NIVEAUX PLAYSTATION & TROPHÉES DYNAMIQUES ---
+// =========================================================================
+
+function getQuestionXp(q) {
+  const diff = q.difficulty || 'facile';
+  if (diff === 'intermediaire') return 5;
+  if (diff === 'difficile') return 10;
+  if (diff === 'extreme') return 100;
+  return 2; // Facile par défaut (+2 pts)
+}
+
+function calculatePlayerLevel(xp) {
+  let rem = Math.max(0, xp || 0);
+
+  // Tranche 1 : Niveaux 1 à 100 (30 pts par palier, 0 à 3000 XP)
+  if (rem < 3000) {
+    const lvl = 1 + Math.floor(rem / 30);
+    const curXp = rem % 30;
+    return {
+      level: Math.min(100, lvl),
+      currentTierXp: curXp,
+      tierMaxXp: 30,
+      percent: Math.min(100, Math.round((curXp / 30) * 100)),
+      tierName: 'Interne Novice',
+      tierBadge: '🥉 Bronze',
+      nextTierInfo: '30 XP / palier'
+    };
+  }
+  rem -= 3000;
+
+  // Tranche 2 : Niveaux 101 à 300 (45 pts par palier, 3000 à 12000 XP)
+  if (rem < 9000) {
+    const lvl = 101 + Math.floor(rem / 45);
+    const curXp = rem % 45;
+    return {
+      level: Math.min(300, lvl),
+      currentTierXp: curXp,
+      tierMaxXp: 45,
+      percent: Math.min(100, Math.round((curXp / 45) * 100)),
+      tierName: 'Praticien Confirmé',
+      tierBadge: '🥈 Argent',
+      nextTierInfo: '45 XP / palier'
+    };
+  }
+  rem -= 9000;
+
+  // Tranche 3 : Niveaux 301 à 600 (60 pts par palier, 12000 à 30000 XP)
+  if (rem < 18000) {
+    const lvl = 301 + Math.floor(rem / 60);
+    const curXp = rem % 60;
+    return {
+      level: Math.min(600, lvl),
+      currentTierXp: curXp,
+      tierMaxXp: 60,
+      percent: Math.min(100, Math.round((curXp / 60) * 100)),
+      tierName: 'Expert Hospitalo-Universitaire',
+      tierBadge: '🥇 Or',
+      nextTierInfo: '60 XP / palier'
+    };
+  }
+  rem -= 18000;
+
+  // Tranche 4 : Niveaux 601 à 1000 (90 pts par palier, 30000 à 66000 XP)
+  if (rem < 36000) {
+    const lvl = 601 + Math.floor(rem / 90);
+    const curXp = rem % 90;
+    return {
+      level: Math.min(1000, lvl),
+      currentTierXp: curXp,
+      tierMaxXp: 90,
+      percent: Math.min(100, Math.round((curXp / 90) * 100)),
+      tierName: 'Maître Émérite OMS',
+      tierBadge: '💎 Platine',
+      nextTierInfo: '90 XP / palier'
+    };
+  }
+
+  // Niveau Max 1000
+  return {
+    level: 1000,
+    currentTierXp: 90,
+    tierMaxXp: 90,
+    percent: 100,
+    tierName: 'Dieu Vivant de l’Anatomopathologie',
+    tierBadge: '👑 Légende Absolue',
+    nextTierInfo: 'Niveau Maximum Atteint'
+  };
+}
+
+function calculateCreatorLevel(creatorXp) {
+  let rem = Math.max(0, creatorXp || 0);
+
+  // Niveaux 1 à 10 : 15 pts par palier (0 à 150 XP)
+  if (rem < 150) {
+    const lvl = 1 + Math.floor(rem / 15);
+    const curXp = rem % 15;
+    return { level: Math.min(10, lvl), currentTierXp: curXp, tierMaxXp: 15, percent: Math.round((curXp / 15) * 100) };
+  }
+  rem -= 150;
+
+  // Niveaux 11 à 30 : 30 pts par palier (150 à 750 XP)
+  if (rem < 600) {
+    const lvl = 11 + Math.floor(rem / 30);
+    const curXp = rem % 30;
+    return { level: Math.min(30, lvl), currentTierXp: curXp, tierMaxXp: 30, percent: Math.round((curXp / 30) * 100) };
+  }
+  rem -= 600;
+
+  // Niveaux 31 à 60 : 60 pts par palier (750 à 2550 XP)
+  if (rem < 1800) {
+    const lvl = 31 + Math.floor(rem / 60);
+    const curXp = rem % 60;
+    return { level: Math.min(60, lvl), currentTierXp: curXp, tierMaxXp: 60, percent: Math.round((curXp / 60) * 100) };
+  }
+  rem -= 1800;
+
+  // Niveaux 61 à 100 : 90 pts par palier (2550 à 6150 XP)
+  if (rem < 3600) {
+    const lvl = 61 + Math.floor(rem / 90);
+    const curXp = rem % 90;
+    return { level: Math.min(100, lvl), currentTierXp: curXp, tierMaxXp: 90, percent: Math.round((curXp / 90) * 100) };
+  }
+
+  return { level: 100, currentTierXp: 90, tierMaxXp: 90, percent: 100 };
+}
+
+function getCreatorStats() {
+  const createdQuestions = state.questions.length;
+  const extremeQuestions = state.questions.filter(q => q.difficulty === 'extreme').length;
+  const creatorXp = (createdQuestions * 5) + (extremeQuestions * 50);
+  const lvlInfo = calculateCreatorLevel(creatorXp);
+  return {
+    createdQuestions,
+    extremeQuestions,
+    creatorXp,
+    ...lvlInfo
+  };
+}
+
+function checkDailyStreak() {
+  const today = getTodayString();
+  const lastActive = state.stats.lastActiveDate;
+
+  if (!lastActive) {
+    state.stats.streak = 1;
+    state.stats.lastActiveDate = today;
+    saveStats();
+    return;
+  }
+
+  if (lastActive === today) {
+    return;
+  }
+
+  const dLast = new Date(lastActive);
+  const dToday = new Date(today);
+  const diffTime = dToday.getTime() - dLast.getTime();
+  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 1) {
+    state.stats.streak = (state.stats.streak || 0) + 1;
+    state.stats.lastActiveDate = today;
+    state.stats.xp = (state.stats.xp || 0) + 10;
+    showRewardToast(`🔥 Connexion consécutive : ${state.stats.streak} jours actifs (+10 XP) !`, 'flame');
+  } else if (diffDays > 1) {
+    state.stats.streak = 1;
+    state.stats.lastActiveDate = today;
+  }
+  saveStats();
+}
+
+function showRewardToast(message, icon = 'trophy') {
+  let toastContainer = document.getElementById('reward-toast-container');
+  if (!toastContainer) {
+    toastContainer = document.createElement('div');
+    toastContainer.id = 'reward-toast-container';
+    toastContainer.className = 'fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none';
+    document.body.appendChild(toastContainer);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = 'pointer-events-auto bg-slate-900 border border-amber-500/50 shadow-2xl shadow-amber-500/20 text-white px-4 py-3 rounded-2xl flex items-center space-x-3 transform transition-all duration-300 translate-y-5 opacity-0';
+  toast.innerHTML = `
+    <div class="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold shrink-0">
+      <i data-lucide="${icon}" class="w-4 h-4"></i>
+    </div>
+    <div class="text-xs font-bold text-slate-100 pr-2">${escapeHtml(message)}</div>
+  `;
+  toastContainer.appendChild(toast);
+  if (window.lucide) lucide.createIcons();
+
+  requestAnimationFrame(() => {
+    toast.classList.remove('translate-y-5', 'opacity-0');
+  });
+
+  setTimeout(() => {
+    toast.classList.add('translate-y-5', 'opacity-0');
+    setTimeout(() => toast.remove(), 350);
+  }, 4500);
+}
+
+function checkCategoryCompletionBonus(organ, category) {
+  if (!organ || !category) return;
+  const catKey = `${organ}::${category}`;
+  if (!state.stats.completedCategories) state.stats.completedCategories = [];
+  if (state.stats.completedCategories.includes(catKey)) return;
+
+  const catQuestions = state.questions.filter(q => (q.organ || 'Autre') === organ && (q.category || 'Général') === category);
+  if (catQuestions.length === 0) return;
+
+  const allCompleted = catQuestions.every(q => q.stats && q.stats.seen > 0 && q.stats.correct > 0);
+  if (allCompleted) {
+    state.stats.completedCategories.push(catKey);
+    state.stats.xp = (state.stats.xp || 0) + 5; // Bonus strict de 5 pts (PDF)
+    showRewardToast(`🎉 Catégorie terminée : "${category}" (+5 XP Bonus permanent) !`, 'check-circle');
+    saveStats();
+  }
+}
+
+// --- DÉFINITIONS STATIQUES DES BADGES DU PDF ---
+const STATIC_BADGES_DEFINITIONS = [
+  // 1. Régularité (Streak)
+  { id: 'streak_7', category: 'streak', icon: 'flame', name: 'Semaine de Garde', description: 'Maintenir une série de 7 jours consécutifs de révision', target: 7, tier: 'bronze' },
+  { id: 'streak_30', category: 'streak', icon: 'calendar', name: 'Régularité Microscopique', description: 'Maintenir une série de 30 jours consécutifs de révision', target: 30, tier: 'silver' },
+  { id: 'streak_90', category: 'streak', icon: 'sparkles', name: 'L’Œil du Staff', description: '3 mois consécutifs (90 jours) de révisions quotidiennes', target: 90, tier: 'gold' },
+  { id: 'streak_180', category: 'streak', icon: 'shield-check', name: 'Maître du Microtome', description: '6 mois consécutifs (180 jours) de fidélité quotidienne', target: 180, tier: 'gold' },
+  { id: 'streak_365', category: 'streak', icon: 'crown', name: 'Lame d’Or Immortelle', description: '1 an complet (365 jours) consécutif de révisions', target: 365, tier: 'platinum' },
+
+  // 2. Check-points de Niveau Joueur (PDF)
+  { id: 'lvl_5', category: 'level', icon: 'award', name: 'Interne Novice (Nv 5)', description: 'Atteindre le niveau 5 de joueur', targetLevel: 5, tier: 'bronze' },
+  { id: 'lvl_15', category: 'level', icon: 'award', name: 'Chasseur de Mitoses (Nv 15)', description: 'Atteindre le niveau 15 de joueur', targetLevel: 15, tier: 'bronze' },
+  { id: 'lvl_30', category: 'level', icon: 'award', name: 'Compagnon Histologique (Nv 30)', description: 'Atteindre le niveau 30 de joueur', targetLevel: 30, tier: 'silver' },
+  { id: 'lvl_50', category: 'level', icon: 'award', name: 'Expert en Extemporanée (Nv 50)', description: 'Atteindre le niveau 50 de joueur', targetLevel: 50, tier: 'silver' },
+  { id: 'lvl_67', category: 'level', icon: 'alert-triangle', name: 'L’Accident de Cryostat (Nv 67)', description: 'Atteindre le palier mythique niveau 67 (PDF)', targetLevel: 67, tier: 'gold' },
+  { id: 'lvl_80', category: 'level', icon: 'award', name: 'Maître des Coupes Sériées (Nv 80)', description: 'Atteindre le niveau 80 de joueur', targetLevel: 80, tier: 'gold' },
+  { id: 'lvl_100', category: 'level', icon: 'trophy', name: 'Grand Référent OMS (Nv 100)', description: 'Atteindre le niveau 100 de joueur', targetLevel: 100, tier: 'platinum' },
+  { id: 'lvl_200', category: 'level', icon: 'trophy', name: 'Patriarche des Colorations (Nv 200)', description: 'Atteindre le niveau 200 de joueur', targetLevel: 200, tier: 'platinum' },
+  { id: 'lvl_300', category: 'level', icon: 'trophy', name: 'L’Oracle de la Biopsie (Nv 300)', description: 'Atteindre le niveau 300 de joueur', targetLevel: 300, tier: 'platinum' },
+  { id: 'lvl_500', category: 'level', icon: 'trophy', name: 'Titan du Microscope (Nv 500)', description: 'Atteindre le niveau 500 de joueur', targetLevel: 500, tier: 'platinum' },
+  { id: 'lvl_800', category: 'level', icon: 'trophy', name: 'Légende Vivante du Staff (Nv 800)', description: 'Atteindre le niveau 800 de joueur', targetLevel: 800, tier: 'platinum' },
+  { id: 'lvl_1000', category: 'level', icon: 'crown', name: 'Dieu de l’Anatomopathologie (Nv 1000)', description: 'Atteindre le niveau ultime 1000 de joueur', targetLevel: 1000, tier: 'platinum' },
+
+  // 3. Pathologies spécifiques (PDF)
+  { id: 'patho_phyllode_3', category: 'pathology', icon: 'microscope', name: 'Apprenti Phyllode', description: 'Répondre correctement à au moins 3 questions sur les tumeurs phyllodes', organ: 'Sein', entity: 'Tumeurs phyllodes', targetCount: 3, tier: 'bronze' },
+  { id: 'patho_phyllode_filou', category: 'pathology', icon: 'zap', name: 'Filou Phyllode', description: 'Atteindre au moins 80% de réussite sur les tumeurs phyllodes', organ: 'Sein', entity: 'Tumeurs phyllodes', minPercent: 80, tier: 'silver' },
+  { id: 'patho_colon_parasite', category: 'pathology', icon: 'shield', name: 'Guerrier de la Lumière (colique)', description: 'Répondre à toutes les questions en lien avec les parasitoses coliques', organ: 'Digestif', tagOrEntity: 'parasitose', tier: 'gold' },
+
+  // 4. Questions Extrêmes (PDF)
+  { id: 'extreme_first', category: 'extreme', icon: 'help-circle', name: 'Sherlock des Lames', description: 'Résoudre avec succès une énigme diagnostique de difficulté Extrême (+100 XP)', tier: 'gold' },
+
+  // 5. Voie du Créateur / Rédacteur (PDF Page 2)
+  { id: 'creator_1', category: 'creator', icon: 'edit-3', name: 'Première Encre', description: 'Rédiger et publier votre première question dans la banque collective', targetCount: 1, tier: 'bronze' },
+  { id: 'creator_10', category: 'creator', icon: 'feather', name: 'Plume d’Anapath', description: 'Rédiger 10 questions pour la banque de l’équipe', targetCount: 10, tier: 'silver' },
+  { id: 'creator_50', category: 'creator', icon: 'book-open', name: 'Bâtisseur de Banque', description: 'Rédiger 50 questions pour l’entraînement collectif', targetCount: 50, tier: 'gold' },
+  { id: 'creator_extreme', category: 'creator', icon: 'skull', name: 'Architecte Diabolique', description: 'Concevoir une question de difficulté Extrême avec indices (+50 XP Créateur)', targetCount: 1, tier: 'platinum' }
+];
+
+// --- MOTEUR D'ÉVALUATION DYNAMIQUE DES BADGES & GESTION DES BADGES CONTESTÉS ---
+function getBadgesStatus() {
+  if (!state.stats.badgeHistory) state.stats.badgeHistory = {};
+  const playerLvl = calculatePlayerLevel(state.stats.xp || 0).level;
+  const streak = state.stats.streak || 1;
+  const creatorStats = getCreatorStats();
+
+  const results = [];
+
+  // 1. Évaluation des badges statiques
+  STATIC_BADGES_DEFINITIONS.forEach(b => {
+    let isNowMet = false;
+    let progressPercent = 0;
+    let progressText = '';
+    let missingCount = 0;
+
+    if (b.category === 'streak') {
+      isNowMet = streak >= b.target;
+      progressPercent = Math.min(100, Math.round((streak / b.target) * 100));
+      progressText = `${streak} / ${b.target} jours`;
+    } else if (b.category === 'level') {
+      isNowMet = playerLvl >= b.targetLevel;
+      progressPercent = Math.min(100, Math.round((playerLvl / b.targetLevel) * 100));
+      progressText = `Niveau ${playerLvl} / ${b.targetLevel}`;
+    } else if (b.id === 'patho_phyllode_3') {
+      const correctPhyllodes = state.questions.filter(q => (q.entity || '').toLowerCase().includes('phyllode') && q.stats && q.stats.correct > 0).length;
+      isNowMet = correctPhyllodes >= 3;
+      progressPercent = Math.min(100, Math.round((correctPhyllodes / 3) * 100));
+      progressText = `${correctPhyllodes} / 3 questions`;
+    } else if (b.id === 'patho_phyllode_filou') {
+      const phyllodeQuestions = state.questions.filter(q => (q.entity || '').toLowerCase().includes('phyllode'));
+      const totalPhyllodes = phyllodeQuestions.length;
+      const correctPhyllodes = phyllodeQuestions.filter(q => q.stats && q.stats.correct > 0).length;
+      const targetCount = Math.max(1, Math.ceil(totalPhyllodes * 0.8));
+      isNowMet = totalPhyllodes > 0 && correctPhyllodes >= targetCount;
+      progressPercent = totalPhyllodes > 0 ? Math.min(100, Math.round((correctPhyllodes / targetCount) * 100)) : 0;
+      progressText = `${correctPhyllodes} / ${targetCount} réussies (80%)`;
+      missingCount = Math.max(0, targetCount - correctPhyllodes);
+    } else if (b.id === 'patho_colon_parasite') {
+      const parasiteQuestions = state.questions.filter(q => {
+        const text = `${q.organ} ${q.category} ${q.entity} ${q.question} ${(q.tags || []).join(' ')}`.toLowerCase();
+        return text.includes('parasit') || text.includes('amibe') || text.includes('oxyur');
+      });
+      const totalP = parasiteQuestions.length;
+      const correctP = parasiteQuestions.filter(q => q.stats && q.stats.correct > 0).length;
+      isNowMet = totalP > 0 && correctP >= totalP;
+      progressPercent = totalP > 0 ? Math.min(100, Math.round((correctP / totalP) * 100)) : 0;
+      progressText = `${correctP} / ${totalP || 1} questions`;
+      missingCount = Math.max(0, totalP - correctP);
+    } else if (b.category === 'extreme') {
+      const solvedExtreme = state.questions.filter(q => q.difficulty === 'extreme' && q.stats && q.stats.correct > 0).length;
+      isNowMet = solvedExtreme >= 1;
+      progressPercent = isNowMet ? 100 : 0;
+      progressText = isNowMet ? '1 / 1 résolue' : '0 / 1 résolue';
+    } else if (b.category === 'creator') {
+      if (b.id === 'creator_extreme') {
+        isNowMet = creatorStats.extremeQuestions >= 1;
+        progressPercent = isNowMet ? 100 : 0;
+        progressText = `${creatorStats.extremeQuestions} / 1 rédigée`;
+      } else {
+        isNowMet = creatorStats.createdQuestions >= b.targetCount;
+        progressPercent = Math.min(100, Math.round((creatorStats.createdQuestions / b.targetCount) * 100));
+        progressText = `${creatorStats.createdQuestions} / ${b.targetCount} rédigées`;
+      }
+    }
+
+    const wasUnlocked = !!(state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
+    let status = 'locked';
+
+    // Mécanique du badge contesté pour les badges de pathologie
+    if (wasUnlocked && !isNowMet && (b.id === 'patho_phyllode_filou' || b.id === 'patho_colon_parasite')) {
+      status = 'contested';
+    } else if (isNowMet) {
+      status = 'unlocked';
+      if (!state.stats.badgeHistory[b.id]) {
+        state.stats.badgeHistory[b.id] = { unlocked: true, unlockedAt: Date.now() };
+      }
+    }
+
+    results.push({
+      ...b,
+      status,
+      progressPercent,
+      progressText,
+      missingCount
+    });
+  });
+
+  // 2. Évaluation dynamique des badges d'accomplissement par Organe (10%, 25%, 50%, 80%, 100%)
+  const organs = new Set();
+  state.questions.forEach(q => { if (q.organ) organs.add(q.organ); });
+  state.cases.forEach(c => { if (c.organ) organs.add(c.organ); });
+
+  const sortedOrgans = Array.from(organs).sort();
+
+  sortedOrgans.forEach(org => {
+    const orgQuestions = state.questions.filter(q => (q.organ || "Autre") === org);
+    const totalInOrg = orgQuestions.length;
+    if (totalInOrg === 0) return;
+
+    const completedInOrg = orgQuestions.filter(q => q.mastered || (q.stats && q.stats.seen > 0 && q.stats.correct > 0)).length;
+
+    const tiers = [
+      { pct: 10, tier: 'bronze', label: `Curieux de : ${org}` },
+      { pct: 25, tier: 'bronze', label: `Initié de : ${org}` },
+      { pct: 50, tier: 'silver', label: `Connaisseur de : ${org}` },
+      { pct: 80, tier: 'gold', label: `Expert de : ${org}` },
+      { pct: 100, tier: 'platinum', label: org.toLowerCase() === 'sein' ? 'Saint des Seins' : `Maître Absolu de : ${org}` }
+    ];
+
+    tiers.forEach(t => {
+      const badgeId = `organ_${org.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${t.pct}`;
+      const targetCount = Math.max(1, Math.ceil((t.pct / 100) * totalInOrg));
+      const isNowMet = completedInOrg >= targetCount;
+      const wasUnlocked = !!(state.stats.badgeHistory[badgeId] && state.stats.badgeHistory[badgeId].unlocked);
+
+      let status = 'locked';
+      const missingCount = Math.max(0, targetCount - completedInOrg);
+
+      // Si le badge avait été obtenu, mais que de nouvelles questions ont été ajoutées dans cet organe
+      if (wasUnlocked && !isNowMet) {
+        status = 'contested'; // GRISÉ / CONTESTÉ !
+      } else if (isNowMet) {
+        status = 'unlocked';
+        if (!state.stats.badgeHistory[badgeId]) {
+          state.stats.badgeHistory[badgeId] = { unlocked: true, unlockedAt: Date.now() };
+        }
+      }
+
+      const progressPercent = Math.min(100, Math.round((completedInOrg / targetCount) * 100));
+
+      results.push({
+        id: badgeId,
+        category: 'organ',
+        organ: org,
+        icon: t.pct === 100 ? 'crown' : (t.pct >= 80 ? 'shield-check' : 'folder'),
+        name: t.label,
+        description: `Accomplir au moins ${t.pct}% des questions de la rubrique ${org} (${targetCount} Q)`,
+        tier: t.tier,
+        status,
+        progressPercent,
+        progressText: status === 'contested' ? `${completedInOrg} / ${targetCount} Q (Contesté)` : `${completedInOrg} / ${targetCount} Q (${t.pct}%)`,
+        missingCount
+      });
+    });
+  });
+
+  return results;
+}
+
+function getContestedBadgesCount() {
+  const badges = getBadgesStatus();
+  return badges.filter(b => b.status === 'contested').length;
+}
+
+function checkAndUnlockBadges() {
+  const badges = getBadgesStatus();
+  let newlyUnlocked = false;
+
+  badges.forEach(b => {
+    if (b.status === 'unlocked') {
+      if (!state.stats.unlockedBadges) state.stats.unlockedBadges = {};
+      if (!state.stats.unlockedBadges[b.id]) {
+        state.stats.unlockedBadges[b.id] = Date.now();
+        newlyUnlocked = true;
+        showRewardToast(`🏆 Trophée Débloqué : "${b.name}" !`, 'award');
+      }
+    }
+  });
+
+  if (newlyUnlocked) {
+    saveStats();
+  }
+}
+
+// --- VUE PALMARÈS & TROPHÉES (VIEW-TROPHIES) ---
+function renderTrophiesView() {
+  checkAndUnlockBadges();
+  const player = calculatePlayerLevel(state.stats.xp || 0);
+  const creator = getCreatorStats();
+  const allBadges = getBadgesStatus();
+  const unlockedBadges = allBadges.filter(b => b.status === 'unlocked');
+  const contestedBadges = allBadges.filter(b => b.status === 'contested');
+
+  // 1. Rendu Carte Joueur
+  const playerCard = document.getElementById('trophies-player-card');
+  if (playerCard) {
+    playerCard.innerHTML = `
+      <div class="flex items-start justify-between">
+        <div class="flex items-center space-x-3.5">
+          <div class="w-12 h-12 rounded-2xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex items-center justify-center font-black text-xl shadow-inner">
+            ${player.level}
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 uppercase tracking-wider">
+                ${player.tierBadge}
+              </span>
+              <span class="text-xs text-slate-400 font-mono">${player.nextTierInfo}</span>
+            </div>
+            <h2 class="text-lg font-black text-white mt-0.5 tracking-tight">${player.tierName}</h2>
+          </div>
+        </div>
+        <div class="text-right">
+          <span class="text-xl font-black text-white font-mono">${state.stats.xp || 0}</span>
+          <span class="text-xs text-indigo-400 font-bold block">XP Totale</span>
+        </div>
+      </div>
+
+      <div class="space-y-1.5 pt-1">
+        <div class="flex items-center justify-between text-xs font-semibold text-slate-300">
+          <span>Progression vers Niveau ${Math.min(1000, player.level + 1)}</span>
+          <span class="font-mono text-indigo-300 font-bold">${player.currentTierXp} / ${player.tierMaxXp} XP (${player.percent}%)</span>
+        </div>
+        <div class="w-full h-3 rounded-full bg-slate-950 border border-slate-800 overflow-hidden shadow-inner p-0.5">
+          <div class="h-full rounded-full bg-gradient-to-r from-teal-500 via-sky-500 to-indigo-500 transition-all duration-500" style="width: ${player.percent}%;"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-center">
+        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+          <span class="text-xs font-bold text-amber-400 font-mono block">${unlockedBadges.length}</span>
+          <span class="text-[10px] text-slate-400">Trophées</span>
+        </div>
+        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+          <span class="text-xs font-bold text-teal-400 font-mono block">${state.stats.streak || 1} j</span>
+          <span class="text-[10px] text-slate-400">Série (Streak)</span>
+        </div>
+        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+          <span class="text-xs font-bold text-sky-400 font-mono block">${state.stats.totalCorrect || 0}</span>
+          <span class="text-[10px] text-slate-400">Réussies</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // 2. Rendu Carte Créateur (Voie du Rédacteur)
+  const creatorCard = document.getElementById('trophies-creator-card');
+  if (creatorCard) {
+    creatorCard.innerHTML = `
+      <div class="flex items-start justify-between">
+        <div class="flex items-center space-x-3.5">
+          <div class="w-12 h-12 rounded-2xl bg-teal-500/20 text-teal-300 border border-teal-500/40 flex items-center justify-center font-black text-xl shadow-inner">
+            ${creator.level}
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 uppercase tracking-wider">
+                ✍️ Voie du Rédacteur
+              </span>
+              <span class="text-xs text-slate-400 font-mono">Max Nv 100</span>
+            </div>
+            <h2 class="text-lg font-black text-white mt-0.5 tracking-tight">Maître Rédacteur</h2>
+          </div>
+        </div>
+        <div class="text-right">
+          <span class="text-xl font-black text-white font-mono">${creator.creatorXp}</span>
+          <span class="text-xs text-teal-400 font-bold block">XP Rédacteur</span>
+        </div>
+      </div>
+
+      <div class="space-y-1.5 pt-1">
+        <div class="flex items-center justify-between text-xs font-semibold text-slate-300">
+          <span>Progression Rédacteur Nv ${Math.min(100, creator.level + 1)}</span>
+          <span class="font-mono text-teal-300 font-bold">${creator.currentTierXp} / ${creator.tierMaxXp} XP (${creator.percent}%)</span>
+        </div>
+        <div class="w-full h-3 rounded-full bg-slate-950 border border-slate-800 overflow-hidden shadow-inner p-0.5">
+          <div class="h-full rounded-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-500" style="width: ${creator.percent}%;"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-center">
+        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+          <span class="text-xs font-bold text-teal-300 font-mono block">${creator.createdQuestions}</span>
+          <span class="text-[10px] text-slate-400">Questions créées</span>
+        </div>
+        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+          <span class="text-xs font-bold text-purple-300 font-mono block">${creator.extremeQuestions}</span>
+          <span class="text-[10px] text-slate-400">Énigmes Extrêmes</span>
+        </div>
+        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+          <span class="text-xs font-bold text-indigo-300 font-mono block">+5 pts</span>
+          <span class="text-[10px] text-slate-400">Fixe / QCM créé</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // 3. Bandeau Trophées Contestés
+  const contestedBanner = document.getElementById('trophies-contested-banner');
+  if (contestedBanner) {
+    if (contestedBadges.length > 0) {
+      contestedBanner.className = "bg-gradient-to-r from-amber-500/20 via-slate-900 to-amber-500/20 border border-amber-500/40 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl";
+      contestedBanner.innerHTML = `
+        <div class="flex items-center space-x-3.5">
+          <div class="w-11 h-11 rounded-2xl bg-amber-500/30 text-amber-300 border border-amber-500/50 flex items-center justify-center text-xl font-bold shrink-0 animate-pulse">
+            ⚡
+          </div>
+          <div>
+            <h4 class="font-extrabold text-sm sm:text-base text-white flex items-center space-x-2">
+              <span>${contestedBadges.length} Trophée(s) contesté(s) par de nouvelles questions !</span>
+            </h4>
+            <p class="text-xs text-amber-300/80 mt-0.5 leading-relaxed">
+              Des co-internes ou référents ont ajouté de nouvelles lames dans des rubriques que vous aviez terminées. Relevez le défi pour reprendre vos couronnes !
+            </p>
+          </div>
+        </div>
+        <div class="shrink-0 self-start sm:self-auto">
+          <button onclick="recaptureFirstContestedBadge()" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center space-x-1.5 transition shadow-lg shadow-amber-500/25">
+            <i data-lucide="play" class="w-3.5 h-3.5 fill-slate-950"></i>
+            <span>Reconquérir maintenant</span>
+          </button>
+        </div>
+      `;
+    } else {
+      contestedBanner.className = "hidden";
+      contestedBanner.innerHTML = '';
+    }
+  }
+
+  // 4. Résumé
+  const summaryText = document.getElementById('trophies-summary-text');
+  if (summaryText) {
+    summaryText.textContent = `${unlockedBadges.length} débloqué(s) sur ${allBadges.length} trophées${contestedBadges.length > 0 ? ` • ${contestedBadges.length} contesté(s) ⚡` : ''}`;
+  }
+
+  renderTrophiesGrid();
+  if (window.lucide) lucide.createIcons();
+}
+
+function setTrophyFilter(filter) {
+  state.trophyFilter = filter;
+  ['all', 'unlocked', 'contested', 'locked'].forEach(f => {
+    const btn = document.getElementById(`btn-trophy-filter-${f}`);
+    if (btn) {
+      if (f === filter) {
+        btn.className = "px-3 py-1.5 rounded-xl text-xs font-bold transition bg-amber-500 text-slate-950 shadow-sm";
+      } else {
+        btn.className = "px-3 py-1.5 rounded-xl text-xs font-semibold transition bg-slate-950 text-slate-400 hover:text-white border border-slate-800";
+      }
+    }
+  });
+  renderTrophiesGrid();
+}
+
+function renderTrophiesGrid() {
+  const grid = document.getElementById('trophies-grid');
+  if (!grid) return;
+
+  const allBadges = getBadgesStatus();
+  const filter = state.trophyFilter || 'all';
+
+  const filtered = allBadges.filter(b => {
+    if (filter === 'unlocked') return b.status === 'unlocked';
+    if (filter === 'contested') return b.status === 'contested';
+    if (filter === 'locked') return b.status === 'locked';
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `
+      <div class="col-span-full py-12 text-center text-slate-500 bg-slate-900 rounded-2xl border border-slate-800">
+        <p class="text-xs">Aucun trophée ne correspond à ce filtre.</p>
+      </div>
+    `;
+    return;
+  }
+
+  grid.innerHTML = filtered.map(b => {
+    const isUnlocked = b.status === 'unlocked';
+    const isContested = b.status === 'contested';
+
+    const cardBorder = isUnlocked
+      ? 'border-amber-500/40 bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/20 shadow-md shadow-amber-500/5'
+      : isContested
+      ? 'border-amber-500 ring-2 ring-amber-500/30 bg-slate-900 shadow-lg shadow-amber-500/20'
+      : 'border-slate-800 bg-slate-900/60 opacity-60 hover:opacity-90';
+
+    const iconBg = isUnlocked
+      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+      : isContested
+      ? 'bg-amber-500/30 text-amber-300 border border-amber-500 animate-pulse'
+      : 'bg-slate-800 text-slate-500';
+
+    const statusBadge = isUnlocked
+      ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">🏆 Débloqué</span>'
+      : isContested
+      ? '<span class="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 shadow-sm animate-pulse">⚡ Titre contesté</span>'
+      : '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">🔒 À conquérir</span>';
+
+    return `
+      <div class="rounded-2xl p-4 sm:p-5 border transition flex flex-col justify-between space-y-4 ${cardBorder}">
+        <div class="space-y-3">
+          <div class="flex items-start justify-between">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${iconBg}">
+              <i data-lucide="${b.icon || 'award'}" class="w-5 h-5"></i>
+            </div>
+            ${statusBadge}
+          </div>
+
+          <div>
+            <h4 class="font-extrabold text-sm text-white ${isContested ? 'text-amber-300' : ''}">${escapeHtml(b.name)}</h4>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">${escapeHtml(b.description)}</p>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-800/80 space-y-2">
+          <div class="flex items-center justify-between text-[11px] font-mono text-slate-400">
+            <span>Progression</span>
+            <span class="${isContested ? 'text-amber-400 font-bold' : ''}">${b.progressText}</span>
+          </div>
+          <div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-300 ${
+              isUnlocked ? 'bg-amber-400' : isContested ? 'bg-amber-500 animate-pulse' : 'bg-teal-500'
+            }" style="width: ${b.progressPercent}%;"></div>
+          </div>
+
+          ${isContested ? `
+            <button onclick="startContestedBadgeSession('${escapeJsString(b.id)}')" class="w-full mt-2 py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center space-x-1.5 transition shadow-sm">
+              <i data-lucide="play" class="w-3.5 h-3.5 fill-slate-950"></i>
+              <span>Recapturer mon titre (${b.missingCount} Q)</span>
+            </button>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  if (window.lucide) lucide.createIcons();
+}
+
+function startContestedBadgeSession(badgeId) {
+  const badge = getBadgesStatus().find(b => b.id === badgeId);
+  if (!badge) return;
+
+  let pool = [];
+  if (badge.organ) {
+    pool = state.questions.filter(q => {
+      const matchOrg = (q.organ || 'Autre') === badge.organ;
+      const matchEnt = !badge.entity || (q.entity || '').toLowerCase().includes(badge.entity.toLowerCase());
+      const notCompleted = !q.stats || q.stats.correct === 0;
+      return matchOrg && matchEnt && notCompleted;
+    });
+  }
+
+  if (pool.length === 0) {
+    alert("Bravo ! Vous êtes déjà à jour sur ce trophée.");
+    checkAndUnlockBadges();
+    renderTrophiesView();
+    return;
+  }
+
+  state.sessionReturnView = 'trophies';
+  launchQuizSession(pool, `Reconquête : ${badge.name}`);
+}
+
+function recaptureFirstContestedBadge() {
+  const contested = getBadgesStatus().filter(b => b.status === 'contested');
+  if (contested.length > 0) {
+    startContestedBadgeSession(contested[0].id);
+  }
+}
+
+// --- MODULE "NOUVEAUTÉS DE L'ÉQUIPE" SUR L'ÉCRAN JOUER ---
+function renderPlayNewQuestionsFeed() {
+  const container = document.getElementById('play-new-questions-container');
+  if (!container) return;
+
+  const unplayedQuestions = state.questions.filter(q => !q.stats || q.stats.seen === 0);
+  const totalQuestions = state.questions.length;
+
+  if (unplayedQuestions.length === 0) {
+    if (totalQuestions > 0) {
+      container.innerHTML = `
+        <div class="p-3.5 px-4 rounded-2xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <div class="flex items-center space-x-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
+            <span>Vous êtes à jour sur l'ensemble de la banque de l'équipe (<strong>${totalQuestions}/${totalQuestions}</strong> questions découvertes).</span>
+          </div>
+          <button onclick="switchTab('trophies')" class="text-amber-400 hover:text-amber-300 font-semibold flex items-center space-x-1 shrink-0 ml-2">
+            <span>Voir mes trophées</span>
+            <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      `;
+      if (window.lucide) lucide.createIcons();
+    } else {
+      container.innerHTML = '';
+    }
+    return;
+  }
+
+  const organCounts = {};
+  unplayedQuestions.forEach(q => {
+    const o = q.organ || "Autre";
+    organCounts[o] = (organCounts[o] || 0) + 1;
+  });
+
+  const organPills = Object.entries(organCounts)
+    .map(([org, cnt]) => `<span class="px-2 py-0.5 rounded-lg bg-orange-500/20 text-orange-300 border border-orange-500/30 text-[11px] font-semibold">${escapeHtml(org)} (${cnt})</span>`)
+    .join(' ');
+
+  container.innerHTML = `
+    <div class="bg-gradient-to-r from-orange-500/10 via-slate-900 to-amber-500/10 border border-orange-500/30 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg">
+      <div class="space-y-1.5 flex-1">
+        <div class="flex items-center space-x-2">
+          <span class="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/40 text-[10px] font-black uppercase tracking-wider animate-pulse">
+            <i data-lucide="flame" class="w-3 h-3 fill-orange-400"></i>
+            <span>Nouveautés de l'Équipe</span>
+          </span>
+          <span class="text-xs font-bold text-white">${unplayedQuestions.length} question(s) inédite(s)</span>
+        </div>
+        <p class="text-xs text-slate-300 leading-relaxed">
+          Des cas cliniques et QCM ont été rédigés par vos collègues que vous n'avez pas encore testés. Découvrez-les pour gagner de l'XP !
+        </p>
+        <div class="flex flex-wrap gap-1.5 pt-1">
+          ${organPills}
+        </div>
+      </div>
+
+      <div class="shrink-0 self-start sm:self-center">
+        <button onclick="startUnplayedQuestionsSession()" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-slate-950 font-black text-xs flex items-center space-x-2 transition shadow-lg shadow-orange-500/20">
+          <i data-lucide="play" class="w-4 h-4 fill-slate-950"></i>
+          <span>Découvrir les nouveautés (${unplayedQuestions.length})</span>
+        </button>
+      </div>
+    </div>
+  `;
+  if (window.lucide) lucide.createIcons();
+}
+
+function startUnplayedQuestionsSession() {
+  const unplayedQuestions = state.questions.filter(q => !q.stats || q.stats.seen === 0);
+  if (unplayedQuestions.length === 0) {
+    alert("Toutes les questions actuelles ont déjà été jouées !");
+    return;
+  }
+  state.sessionReturnView = 'play';
+  launchQuizSession(unplayedQuestions, "Nouveautés de l'Équipe (Inédites)");
+}
+
+function onDifficultyChange() {
+  const diffEl = document.getElementById('form-q-difficulty');
+  const diff = diffEl ? diffEl.value : 'facile';
+  const container = document.getElementById('form-q-extreme-clues-container');
+  if (container) {
+    if (diff === 'extreme') container.classList.remove('hidden');
+    else container.classList.add('hidden');
+  }
 }
 
 // --- DASHBOARD DE RÉPÉTITION ESPACÉE ---
@@ -1508,7 +2475,8 @@ function chooseReviewInterval(days) {
   const q = session.questions[session.currentIndex];
 
   const targetDate = new Date();
-  targetDate.setDate(targetDate.getDate() + days);
+  // Règle J1 : si faite aujourd'hui, elle n'apparaît plus aujourd'hui (au minimum demain si "Aujourd'hui" est choisi)
+  targetDate.setDate(targetDate.getDate() + (days === 0 ? 1 : days));
   const nextDateStr = targetDate.toISOString().split('T')[0];
 
   if (!q.stats) q.stats = { seen: 0, correct: 0, consecutiveCorrect: 0 };
@@ -1740,14 +2708,28 @@ function startHierarchySession(level, organ, category, entity) {
   const isFromBank = document.getElementById('view-bank') && !document.getElementById('view-bank').classList.contains('hidden');
   state.sessionReturnView = isFromBank ? 'bank' : 'play';
 
-  let pool = [];
   const activeQuestions = state.questions.filter(q => !q.mastered);
 
-  if (level === 'organ') pool = activeQuestions.filter(q => (organ === 'all' || q.organ === organ));
-  else if (level === 'category') pool = activeQuestions.filter(q => (organ === 'all' || q.organ === organ) && (category === 'all' || q.category === category));
-  else if (level === 'entity') pool = activeQuestions.filter(q => (organ === 'all' || q.organ === organ) && (category === 'all' || q.category === category) && q.entity === entity);
+  let matchingQuestions = [];
+  if (level === 'organ') matchingQuestions = activeQuestions.filter(q => (organ === 'all' || q.organ === organ));
+  else if (level === 'category') matchingQuestions = activeQuestions.filter(q => (organ === 'all' || q.organ === organ) && (category === 'all' || q.category === category));
+  else if (level === 'entity') matchingQuestions = activeQuestions.filter(q => (organ === 'all' || q.organ === organ) && (category === 'all' || q.category === category) && q.entity === entity);
+
+  // Si on lance depuis l'onglet JOUER : exclure les questions déjà faites aujourd'hui (règle J1)
+  let pool = matchingQuestions;
+  if (!isFromBank) {
+    pool = matchingQuestions.filter(q => !isQuestionDoneToday(q));
+  }
 
   if (pool.length === 0) {
+    if (matchingQuestions.length > 0 && !isFromBank) {
+      if (confirm(`Vous avez déjà validé toutes les questions (${matchingQuestions.length}) de cette sélection aujourd'hui 🎉 !\n\nVoulez-vous quand même les refaire en révision libre ?`)) {
+        launchQuizSession(matchingQuestions, `Entraînement : ${entity || category || organ}`);
+        return;
+      }
+      return;
+    }
+
     // Vérifier si des questions neutralisées (maîtrisées) existent
     const allMatching = state.questions.filter(q => {
       if (level === 'organ') return (organ === 'all' || q.organ === organ);
@@ -1767,7 +2749,7 @@ function startHierarchySession(level, organ, category, entity) {
     alert("Aucune question disponible pour cette sélection.");
     return;
   }
-  launchQuizSession(pool, `Entraînement : ${entity || category || organ}`);
+  launchQuizSession(pool, `Entraînement : ${entity || category || organ} (${pool.length} à faire)`);
 }
 
 // --- SESSIONS DE QUIZ SIMPLE ---
@@ -1829,13 +2811,13 @@ function launchQuizSession(pool, title) {
 }
 
 function startGlobalSprint() {
-  const activeQuestions = state.questions.filter(q => !q.mastered);
+  const activeQuestions = state.questions.filter(q => !q.mastered && !isQuestionDoneToday(q));
   if (activeQuestions.length === 0) {
-    alert("Toutes vos questions sont maîtrisées ou votre banque est vide.");
+    alert("Vous avez déjà terminé toutes vos révisions pour aujourd'hui 🎉 !\nRevenez demain pour de nouvelles échéances.");
     return;
   }
   const pool = [...activeQuestions].sort(() => 0.5 - Math.random()).slice(0, 10);
-  launchQuizSession(pool, "Sprint Quotidien (Questions Actives)");
+  launchQuizSession(pool, `Sprint Quotidien (${pool.length} questions restantes)`);
 }
 
 function renderSessionQuestion() {
@@ -2132,25 +3114,36 @@ function evaluateSessionAnswer(selectedIndices) {
   q.stats.lastReviewed = new Date().toISOString();
   state.stats.totalAnswered += 1;
 
+  const earnedXp = getQuestionXp(q);
+
   if (isExact) {
     q.stats.correct += 1;
     q.stats.consecutiveCorrect = (q.stats.consecutiveCorrect || 0) + 1;
     state.stats.totalCorrect += 1;
     session.score += 1;
-    session.xpEarned += 15;
-    state.stats.xp += 15;
+    session.xpEarned += earnedXp;
+    state.stats.xp += earnedXp;
     playSound('correct');
-    confetti({ particleCount: 30, spread: 60, origin: { y: 0.8 } });
+    confetti({ particleCount: q.difficulty === 'extreme' ? 80 : 35, spread: 65, origin: { y: 0.8 } });
+    checkCategoryCompletionBonus(q.organ, q.category);
+    checkAndUnlockBadges();
   } else {
     q.stats.consecutiveCorrect = 0;
     q.flagged = true;
     playSound('wrong');
   }
 
+  // Règle J1 : Planification automatique pour que la question sorte des cartes du jour
+  const targetDate = new Date();
+  targetDate.setDate(targetDate.getDate() + (isExact ? 3 : 1));
+  q.stats.nextReviewDate = targetDate.toISOString().split('T')[0];
+  q.stats.intervalDays = isExact ? 3 : 1;
+
   const globalQ = state.questions.find(item => item.id === q.id);
   if (globalQ) {
     globalQ.stats = q.stats;
     globalQ.flagged = q.flagged;
+    dbSaveUserProgress(globalQ);
   }
 
   saveQuestions();
@@ -2248,10 +3241,17 @@ function validateOpenAnswer() {
     playSound('wrong');
   }
 
+  // Règle J1 : Planification automatique pour que la question sorte des cartes du jour
+  const targetDate = new Date();
+  targetDate.setDate(targetDate.getDate() + (isMatch ? 3 : 1));
+  q.stats.nextReviewDate = targetDate.toISOString().split('T')[0];
+  q.stats.intervalDays = isMatch ? 3 : 1;
+
   const globalQ = state.questions.find(item => item.id === q.id);
   if (globalQ) {
     globalQ.stats = q.stats;
     globalQ.flagged = q.flagged;
+    dbSaveUserProgress(globalQ);
   }
 
   saveQuestions();
@@ -2330,11 +3330,18 @@ function overrideOpenAnswerCorrect() {
   q.stats.correct += 1;
   q.stats.consecutiveCorrect = 1;
   q.flagged = false;
+  q.stats.lastReviewed = new Date().toISOString();
+
+  const targetDate = new Date();
+  targetDate.setDate(targetDate.getDate() + 3);
+  q.stats.nextReviewDate = targetDate.toISOString().split('T')[0];
+  q.stats.intervalDays = 3;
 
   const globalQ = state.questions.find(item => item.id === q.id);
   if (globalQ) {
     globalQ.stats = q.stats;
     globalQ.flagged = q.flagged;
+    dbSaveUserProgress(globalQ);
   }
 
   saveQuestions();
@@ -2463,6 +3470,11 @@ function resetQuestionForm() {
   document.getElementById('form-create-question').reset();
   document.getElementById('form-q-edit-id').value = "";
   document.getElementById('form-q-format').value = "qcm";
+  const diffEl = document.getElementById('form-q-difficulty');
+  if (diffEl) diffEl.value = 'facile';
+  const cluesEl = document.getElementById('form-q-extreme-clues');
+  if (cluesEl) cluesEl.value = '';
+  onDifficultyChange();
   state.editorUploadedImages = [];
   state.editorUploadedExplanationImages = [];
   state.editorSelectedTags.clear();
@@ -3086,7 +4098,7 @@ function renderEditorUploadedImages() {
   if (window.lucide) lucide.createIcons();
 }
 
-function handleSaveQuestionForm(e) {
+async function handleSaveQuestionForm(e) {
   e.preventDefault();
 
   const editId = document.getElementById('form-q-edit-id').value;
@@ -3099,6 +4111,10 @@ function handleSaveQuestionForm(e) {
   const explanation = document.getElementById('form-q-explanation').value.trim();
   const trap = document.getElementById('form-q-trap').value.trim();
   const tags = Array.from(state.editorSelectedTags);
+  const diffEl = document.getElementById('form-q-difficulty');
+  const difficulty = diffEl ? diffEl.value : 'facile';
+  const cluesEl = document.getElementById('form-q-extreme-clues');
+  const extremeClues = cluesEl ? cluesEl.value.trim() : '';
 
   if (!organ) {
     alert("Veuillez renseigner le Niveau 1 : Organe.");
@@ -3167,7 +4183,7 @@ function handleSaveQuestionForm(e) {
     }
   }
 
-  // L'explication globale et le piège sont désormais strictement optionnels !
+  let savedQuestion = null;
 
   if (editId) {
     const idx = state.questions.findIndex(q => q.id === editId);
@@ -3175,16 +4191,18 @@ function handleSaveQuestionForm(e) {
       state.questions[idx] = {
         ...state.questions[idx],
         format, organ, category, entity, question, context, explanation, trap, tags, options, correct, optionExplanations,
+        difficulty, extremeClues,
         acceptedAnswers: [...acceptedAnswers],
         images: [...state.editorUploadedImages],
         explanationImages: [...(state.editorUploadedExplanationImages || [])]
       };
-      dbUpsertQuestion(state.questions[idx]);
+      savedQuestion = state.questions[idx];
     }
   } else {
     const newQ = {
       id: "q_" + Date.now(),
       format, organ, category, entity, question, context, explanation, trap, tags, options, correct, optionExplanations,
+      difficulty, extremeClues,
       acceptedAnswers: [...acceptedAnswers],
       images: [...state.editorUploadedImages],
       explanationImages: [...(state.editorUploadedExplanationImages || [])],
@@ -3193,14 +4211,90 @@ function handleSaveQuestionForm(e) {
       stats: { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 }
     };
     state.questions.push(newQ);
-    dbUpsertQuestion(newQ);
+    savedQuestion = newQ;
   }
 
   saveQuestions();
-  alert("Question enregistrée avec succès !");
+
+  // Synchronisation Cloud Supabase avec feedback précis
+  let cloudFeedback = "";
+  if (supabaseClient && savedQuestion) {
+    const res = await dbUpsertQuestion(savedQuestion);
+    if (res && res.error) {
+      cloudFeedback = `\n\n⚠️ Information Cloud : La question est enregistrée dans votre navigateur, mais Supabase n'a pas pu la synchroniser :\n"${res.error.message}"\n\n(Vérifiez que votre compte est bien connecté et qu'il possède le rôle Créateur).`;
+    } else if (res && res.localOnly) {
+      cloudFeedback = `\n\n💡 Note : Vous n'êtes pas connecté. La question est bien sauvegardée sur cet appareil. Connectez-vous via 'Connexion' en haut à droite pour la publier en ligne dans la banque partagée.`;
+    }
+  }
+
+  alert("Question enregistrée avec succès !" + cloudFeedback);
   resetQuestionForm();
+
+  // Positionner immédiatement la Banque sur l'organe de la question pour qu'elle s'affiche tout de suite !
+  state.bankSelectedOrgan = organ;
+  state.bankSelectedCategory = 'all';
+  const organSelect = document.getElementById('bank-filter-organ');
+  if (organSelect) organSelect.value = organ;
+
+  // Déplier automatiquement la lésion de la question pour qu'elle soit directement visible
+  const savedLesionKey = `${organ}__${category}__${entity}`;
+  state.bankExpandedLesions.add(savedLesionKey);
+
   switchTab('bank');
 }
+
+function createQuestionForLesion(organ, category, entity) {
+  if (isReader()) {
+    alert("La rédaction de questions est réservée aux comptes Créateurs.");
+    switchTab('create');
+    return;
+  }
+
+  switchTab('create');
+  setCreatorMode('simple');
+  resetQuestionForm();
+
+  // Pré-remplir directement Organe, Catégorie et Lésion
+  const organEl = document.getElementById('form-q-organ');
+  const catEl = document.getElementById('form-q-category');
+  const entEl = document.getElementById('form-q-entity');
+
+  if (organEl) organEl.value = organ || '';
+  if (catEl) catEl.value = category || '';
+  if (entEl) entEl.value = entity || '';
+
+  // Pré-remplir aussi le mode Dossier Progressif au cas où
+  const dpOrgan = document.getElementById('form-dp-organ');
+  const dpCategory = document.getElementById('form-dp-category');
+  const dpEntity = document.getElementById('form-dp-entity');
+  if (dpOrgan) dpOrgan.value = organ || '';
+  if (dpCategory) dpCategory.value = category || '';
+  if (dpEntity) dpEntity.value = entity || '';
+
+  updateEditorDatalists();
+
+  // Mémoriser pour le positionnement dans Ma Banque
+  state.bankSelectedOrgan = organ;
+  state.bankSelectedCategory = category;
+
+  // Ouvrir automatiquement cette lésion dans Ma Banque pour le retour
+  const lesionKey = `${organ}__${category}__${entity}`;
+  state.bankExpandedLesions.add(lesionKey);
+
+  // Focus direct sur l'énoncé de la question
+  setTimeout(() => {
+    const qText = document.getElementById('form-q-text');
+    if (qText) {
+      qText.focus();
+      qText.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, 120);
+
+  if (typeof showRewardToast === 'function') {
+    showRewardToast(`Lésion prête : ${entity}`, 'plus-circle');
+  }
+}
+window.createQuestionForLesion = createQuestionForLesion;
 
 function editQuestion(id) {
   if (!isCreator()) {
@@ -3222,6 +4316,12 @@ function editQuestion(id) {
   document.getElementById('form-q-context').value = q.context || '';
   document.getElementById('form-q-explanation').value = q.explanation || '';
   document.getElementById('form-q-trap').value = q.trap || '';
+
+  const diffEl = document.getElementById('form-q-difficulty');
+  if (diffEl) diffEl.value = q.difficulty || 'facile';
+  const cluesEl = document.getElementById('form-q-extreme-clues');
+  if (cluesEl) cluesEl.value = q.extremeClues || '';
+  onDifficultyChange();
 
   state.editorUploadedImages = q.images ? [...q.images] : [];
   state.editorUploadedExplanationImages = q.explanationImages ? [...q.explanationImages] : [];
@@ -3983,23 +5083,23 @@ function onBankOrganSelectChange() {
 }
 
 function toggleBankLesionCollapse(lesionKey) {
-  if (state.bankCollapsedLesions.has(lesionKey)) {
-    state.bankCollapsedLesions.delete(lesionKey);
+  if (state.bankExpandedLesions.has(lesionKey)) {
+    state.bankExpandedLesions.delete(lesionKey);
   } else {
-    state.bankCollapsedLesions.add(lesionKey);
+    state.bankExpandedLesions.add(lesionKey);
   }
   renderBank();
 }
 
 function expandAllBankLesions() {
-  state.bankCollapsedLesions.clear();
+  if (Array.isArray(state.currentRenderedLesionKeys)) {
+    state.currentRenderedLesionKeys.forEach(k => state.bankExpandedLesions.add(k));
+  }
   renderBank();
 }
 
 function collapseAllBankLesions() {
-  if (Array.isArray(state.currentRenderedLesionKeys)) {
-    state.currentRenderedLesionKeys.forEach(k => state.bankCollapsedLesions.add(k));
-  }
+  state.bankExpandedLesions.clear();
   renderBank();
 }
 
@@ -4343,7 +5443,8 @@ function renderBank() {
   lesionKeys.forEach(key => {
     const lesion = lesionMap[key];
     const totalInLesion = lesion.questions.length + lesion.cases.length;
-    const isCollapsed = state.bankCollapsedLesions.has(key) && !search;
+    const isExpanded = state.bankExpandedLesions.has(key) || (search && search.length > 0);
+    const isCollapsed = !isExpanded;
 
     const dueInLesion = lesion.questions.filter(q => isQuestionDue(q)).length;
     const masteredInLesion = lesion.questions.filter(q => q.mastered).length;
@@ -4380,18 +5481,30 @@ function renderBank() {
         </div>
       </div>
 
-      <div class="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+      <div class="flex flex-wrap items-center gap-2 shrink-0 self-end sm:self-auto">
+        <button class="btn-create-lesion-q px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 text-teal-300 hover:text-teal-200 border border-teal-500/30 hover:border-teal-500/60 text-xs font-bold flex items-center space-x-1.5 transition shadow-sm" title="Créer une question pour cette lésion">
+          <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-teal-400"></i>
+          <span>+ Créer question</span>
+        </button>
         <button class="btn-test-lesion px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center space-x-1.5 transition shadow-sm shadow-teal-500/20">
           <i data-lucide="play" class="w-3.5 h-3.5"></i>
           <span>⚡ Taffer cette lésion (${activeInLesion || totalInLesion})</span>
         </button>
-        <button class="btn-toggle-lesion p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition">
+        <button class="btn-toggle-lesion p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition" title="${isCollapsed ? 'Déplier' : 'Replier'}">
           <i data-lucide="${isCollapsed ? 'chevron-down' : 'chevron-up'}" class="w-4 h-4"></i>
         </button>
       </div>
     `;
 
     header.querySelector('h3').textContent = lesion.entity;
+
+    const createBtn = header.querySelector('.btn-create-lesion-q');
+    if (createBtn) {
+      createBtn.onclick = (e) => {
+        e.stopPropagation();
+        createQuestionForLesion(lesion.organ, lesion.category, lesion.entity);
+      };
+    }
 
     const testBtn = header.querySelector('.btn-test-lesion');
     if (testBtn) {
