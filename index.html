@@ -80,11 +80,6 @@
 
       <!-- Stats Pill, Comptes & Auth -->
       <div class="flex items-center space-x-2">
-        <button id="btn-supabase-modal" onclick="openSupabaseModal()" class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition bg-slate-800 text-slate-300 border-slate-700 hover:border-teal-500" title="Configurer la synchronisation Cloud Supabase">
-          <span class="w-2 h-2 rounded-full bg-slate-500" id="supabase-status-dot"></span>
-          <span id="supabase-status-text" class="hidden md:inline">Cloud Hôpital</span>
-        </button>
-
         <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold" title="Série de jours actifs">
           <i data-lucide="flame" class="w-3.5 h-3.5 fill-amber-400"></i>
           <span id="top-streak">1</span> j
@@ -112,7 +107,7 @@
   </header>
 
   <!-- ================= MAIN CONTAINER ================= -->
-  <main class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
     <!-- ================= 1. VUE JOUER ================= -->
     <div id="view-play" class="app-view space-y-6">
@@ -237,7 +232,7 @@
     </div>
 
     <!-- ================= 2. VUE SESSION EN COURS ================= -->
-    <div id="view-session" class="app-view hidden max-w-3xl mx-auto space-y-6">
+    <div id="view-session" class="app-view hidden max-w-5xl mx-auto space-y-6">
       
       <!-- Barre d'état -->
       <div class="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl px-5 py-3">
@@ -404,7 +399,7 @@
     </div>
 
     <!-- ================= 3. VUE SESSION DOSSIER PROGRESSIF (DP) ================= -->
-    <div id="view-dp-session" class="app-view hidden max-w-3xl mx-auto space-y-6">
+    <div id="view-dp-session" class="app-view hidden max-w-5xl mx-auto space-y-6">
       
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
         <div class="flex items-center justify-between">
@@ -536,7 +531,7 @@
     </div>
 
     <!-- ================= 5. VUE CRÉATEUR MODULAIRE (QUESTION OU DP) ================= -->
-    <div id="view-create" class="app-view hidden max-w-3xl mx-auto space-y-6">
+    <div id="view-create" class="app-view hidden max-w-5xl mx-auto space-y-6">
 
       <!-- Écran Verrouillé pour les Comptes Lecteurs -->
       <div id="view-create-locked" class="hidden text-center py-16 px-6 bg-slate-900 border border-slate-800 rounded-3xl max-w-xl mx-auto space-y-5 shadow-2xl">
