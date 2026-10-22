@@ -27,6 +27,7 @@ let state = {
     badgeHistory: {}
   },
   trophyFilter: 'all',
+  trophyCategoryFilter: 'all',
   playHierarchy: {
     selectedOrgan: null,
     selectedCategory: null,
@@ -3555,6 +3556,36 @@ async function renderLeaderboard() {
 }
 window.renderLeaderboard = renderLeaderboard;
 
+function getTrophyPillar(b) {
+  if (b.category === 'creator') return 'creator';
+  if (b.category === 'organ' || b.category === 'pathology' || b.category === 'extreme') return 'organ';
+  if (b.category === 'level' || b.category === 'streak') return 'progression';
+  if (b.category === 'custom') {
+    if (b.conditionType === 'organ_mastery') return 'organ';
+    if (b.conditionType === 'creator') return 'creator';
+    return 'progression';
+  }
+  return 'organ';
+}
+window.getTrophyPillar = getTrophyPillar;
+
+function setTrophyCategoryFilter(cat) {
+  state.trophyCategoryFilter = cat;
+  ['all', 'organ', 'creator', 'progression'].forEach(c => {
+    const btn = document.getElementById(`btn-trophy-cat-${c}`);
+    if (btn) {
+      const isSel = (c === cat);
+      if (isSel) {
+        btn.className = "p-3.5 rounded-2xl border transition text-left flex items-center space-x-3 bg-slate-900 border-amber-500 shadow-md shadow-amber-500/10 ring-1 ring-amber-500/30";
+      } else {
+        btn.className = "p-3.5 rounded-2xl border transition text-left flex items-center space-x-3 bg-slate-950/80 border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100";
+      }
+    }
+  });
+  renderTrophiesGrid();
+}
+window.setTrophyCategoryFilter = setTrophyCategoryFilter;
+
 function setTrophyFilter(filter) {
   state.trophyFilter = filter;
   ['all', 'unlocked', 'contested', 'locked'].forEach(f => {
@@ -3575,19 +3606,51 @@ function renderTrophiesGrid() {
   if (!grid) return;
 
   const allBadges = getBadgesStatus();
-  const filter = state.trophyFilter || 'all';
+
+  // 1. Calcul dynamique des compteurs de chaque pilier thématique
+  const counts = {
+    all: { total: allBadges.length, unlocked: allBadges.filter(b => b.status === 'unlocked').length },
+    organ: { total: 0, unlocked: 0 },
+    creator: { total: 0, unlocked: 0 },
+    progression: { total: 0, unlocked: 0 }
+  };
+
+  allBadges.forEach(b => {
+    const p = getTrophyPillar(b);
+    if (counts[p]) {
+      counts[p].total += 1;
+      if (b.status === 'unlocked') counts[p].unlocked += 1;
+    }
+  });
+
+  ['all', 'organ', 'creator', 'progression'].forEach(c => {
+    const el = document.getElementById(`trophy-cat-count-${c}`);
+    if (el) {
+      el.textContent = `${counts[c].unlocked} / ${counts[c].total} débloqués`;
+    }
+  });
+
+  // 2. Filtrage combiné (Pilier thématique + Statut débloqué/verrouillé)
+  const categoryFilter = state.trophyCategoryFilter || 'all';
+  const statusFilter = state.trophyFilter || 'all';
 
   const filtered = allBadges.filter(b => {
-    if (filter === 'unlocked') return b.status === 'unlocked';
-    if (filter === 'contested') return b.status === 'contested';
-    if (filter === 'locked') return b.status === 'locked';
+    // Filtre thématique
+    if (categoryFilter !== 'all') {
+      const p = getTrophyPillar(b);
+      if (p !== categoryFilter) return false;
+    }
+    // Filtre de statut
+    if (statusFilter === 'unlocked') return b.status === 'unlocked';
+    if (statusFilter === 'contested') return b.status === 'contested';
+    if (statusFilter === 'locked') return b.status === 'locked';
     return true;
   });
 
   if (filtered.length === 0) {
     grid.innerHTML = `
       <div class="col-span-full py-12 text-center text-slate-500 bg-slate-900 rounded-2xl border border-slate-800">
-        <p class="text-xs">Aucun trophée ne correspond à ce filtre.</p>
+        <p class="text-xs">Aucun trophée ne correspond à cette combinaison de filtres.</p>
       </div>
     `;
     return;
@@ -3596,6 +3659,7 @@ function renderTrophiesGrid() {
   grid.innerHTML = filtered.map(b => {
     const isUnlocked = b.status === 'unlocked';
     const isContested = b.status === 'contested';
+    const pillar = getTrophyPillar(b);
 
     const cardBorder = isUnlocked
       ? 'border-amber-500/40 bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/20 shadow-md shadow-amber-500/5'
@@ -3615,18 +3679,25 @@ function renderTrophiesGrid() {
       ? '<span class="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 shadow-sm animate-pulse">⚡ Titre contesté</span>'
       : '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">🔒 À conquérir</span>';
 
+    // Badge de pilier thématique
+    let pillarBadge = '';
+    if (pillar === 'organ') {
+      const label = b.organ ? b.organ : 'Organes & Lésions';
+      pillarBadge = `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/25 flex items-center space-x-1 shrink-0"><i data-lucide="microscope" class="w-3 h-3 text-rose-400"></i><span>${escapeHtml(label)}</span></span>`;
+    } else if (pillar === 'creator') {
+      pillarBadge = `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-300 border border-teal-500/25 flex items-center space-x-1 shrink-0"><i data-lucide="edit-3" class="w-3 h-3 text-teal-400"></i><span>Voie du Rédacteur</span></span>`;
+    } else {
+      const isStreak = (b.category === 'streak');
+      pillarBadge = `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/25 flex items-center space-x-1 shrink-0"><i data-lucide="${isStreak ? 'flame' : 'award'}" class="w-3 h-3 text-indigo-400"></i><span>${isStreak ? 'Série de Jours' : 'Niveau Joueur'}</span></span>`;
+    }
+
     return `
       <div class="rounded-2xl p-4 sm:p-5 border transition flex flex-col justify-between space-y-4 ${cardBorder}">
         <div class="space-y-3">
-          <div class="flex items-start justify-between">
-            <div class="flex items-center space-x-2.5">
-              <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${iconBg}">
-                ${(b.icon && b.icon.length > 2) ? `<i data-lucide="${b.icon}" class="w-5 h-5"></i>` : `<span class="text-xl">${b.icon || '🏆'}</span>`}
-              </div>
-              <div>
-                <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold border border-amber-500/20 block w-fit">+${getTrophyXpReward(b)} XP</span>
-              </div>
-            </div>
+          
+          <!-- En-tête de carte avec le Pilier thématique et le Statut -->
+          <div class="flex items-center justify-between pb-2 border-b border-slate-800/80">
+            ${pillarBadge}
             <div class="flex items-center space-x-1.5">
               ${statusBadge}
               ${(b.isCustom && isCreator()) ? `
@@ -3634,6 +3705,16 @@ function renderTrophiesGrid() {
                   <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
                 </button>
               ` : ''}
+            </div>
+          </div>
+
+          <!-- Icône & Récompense XP -->
+          <div class="flex items-center space-x-2.5">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${iconBg}">
+              ${(b.icon && b.icon.length > 2) ? `<i data-lucide="${b.icon}" class="w-5 h-5"></i>` : `<span class="text-xl">${b.icon || '🏆'}</span>`}
+            </div>
+            <div>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold border border-amber-500/20 block w-fit">+${getTrophyXpReward(b)} XP</span>
             </div>
           </div>
 
