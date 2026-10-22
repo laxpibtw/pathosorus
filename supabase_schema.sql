@@ -25,7 +25,7 @@ as $$
     select 1
     from public.profiles
     where id = auth.uid() and role = 'creator'
-  ) or lower(coalesce((auth.jwt() ->> 'email'), '')) = 'padoreau85@gmail.com';
+  ) or lower(coalesce((auth.jwt() ->> 'email'), '')) in ('padoreau85@gmail.com', 'belhadef.samy@gmail.com');
 $$;
 
 revoke all on function public.is_creator() from public;
@@ -44,14 +44,14 @@ begin
     new.id,
     new.email,
     case
-      when lower(new.email) = 'padoreau85@gmail.com' then 'creator'
+      when lower(new.email) in ('padoreau85@gmail.com', 'belhadef.samy@gmail.com') then 'creator'
       else coalesce(new.raw_user_meta_data->>'role', 'reader')
     end
   )
   on conflict (id) do update set
     email = excluded.email,
     role = case
-      when lower(excluded.email) = 'padoreau85@gmail.com' then 'creator'
+      when lower(excluded.email) in ('padoreau85@gmail.com', 'belhadef.samy@gmail.com') then 'creator'
       else coalesce(public.profiles.role, excluded.role)
     end;
   return new;

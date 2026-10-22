@@ -50,9 +50,17 @@ let state = {
   currentRenderedLesionKeys: []
 };
 
+const AUTHORIZED_CREATOR_EMAILS = new Set([
+  'padoreau85@gmail.com',
+  'belhadef.samy@gmail.com'
+]);
+
 function isCreator() {
-  if (state.currentUser && state.currentUser.email && state.currentUser.email.toLowerCase() === 'padoreau85@gmail.com') {
-    return true;
+  if (state.currentUser && state.currentUser.email) {
+    const em = state.currentUser.email.toLowerCase();
+    if (AUTHORIZED_CREATOR_EMAILS.has(em)) {
+      return true;
+    }
   }
   return state.currentRole === 'creator';
 }
@@ -607,7 +615,7 @@ async function fetchCurrentUserRole() {
   // Métadonnées du compte auth Supabase
   const metaRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role);
 
-  if (isAdminUser) {
+  if (isAdminUser || AUTHORIZED_CREATOR_EMAILS.has(email)) {
     state.currentRole = 'creator';
   } else if (tagRole) {
     state.currentRole = tagRole;
@@ -1419,12 +1427,17 @@ async function loadColleaguesList() {
 
   const accountsMap = new Map();
 
-  // 0. Compte Master padoreau85@gmail.com
+  // 0. Compte Master padoreau85@gmail.com et Rédacteurs autorisés
   accountsMap.set('padoreau85@gmail.com', {
     email: 'padoreau85@gmail.com',
     role: 'creator',
     isMaster: true,
     source: 'master'
+  });
+  accountsMap.set('belhadef.samy@gmail.com', {
+    email: 'belhadef.samy@gmail.com',
+    role: 'creator',
+    source: 'creator'
   });
 
   // 1. Lire les tags de rôle dans custom_tags
