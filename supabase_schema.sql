@@ -141,6 +141,18 @@ create table if not exists public.custom_badges (
   targetCount integer default 5
 );
 
+-- 9. Table des Fiches de Cours & Critères OMS par Lésion
+create table if not exists public.lesion_notes (
+  key text primary key,
+  organ text not null default '',
+  category text not null default '',
+  entity text not null default '',
+  content text not null default '',
+  updated_at timestamptz default now(),
+  author_name text default '',
+  author_email text default ''
+);
+
 -- =========================================================
 -- ROW LEVEL SECURITY (RLS) ET POLITIQUES D'ACCÈS
 -- =========================================================
@@ -226,6 +238,21 @@ create policy "Écriture custom_badges réservée aux créateurs"
   to authenticated
   using (public.is_creator())
   with check (public.is_creator());
+
+-- Politiques Fiches OMS / Topos de Lésions
+alter table public.lesion_notes enable row level security;
+
+drop policy if exists "Lecture publique des topos de lésions" on public.lesion_notes;
+create policy "Lecture publique des topos de lésions"
+  on public.lesion_notes for select
+  using (true);
+
+drop policy if exists "Écriture des topos pour utilisateurs connectés" on public.lesion_notes;
+create policy "Écriture des topos pour utilisateurs connectés"
+  on public.lesion_notes for all
+  to authenticated
+  using (true)
+  with check (true);
 
 -- =========================================================
 -- CONFIGURATION DU STOCKAGE SUPABASE (STORAGE PHOTOS)

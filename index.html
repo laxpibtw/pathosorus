@@ -411,6 +411,18 @@
             <p id="session-trap-text" class="leading-relaxed pl-5 text-slate-300"></p>
           </div>
 
+          <!-- Topo de cours & Critères OMS associé à la lésion -->
+          <div id="session-lesion-topo-box" class="hidden p-4 rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/30 border border-indigo-500/30 text-xs space-y-2.5">
+            <div class="flex items-center justify-between border-b border-indigo-500/20 pb-2">
+              <div class="flex items-center space-x-2 font-bold text-teal-300">
+                <i data-lucide="book-open" class="w-4 h-4 text-teal-400"></i>
+                <span id="session-lesion-topo-title">📘 Fiche de cours & Critères OMS</span>
+              </div>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-teal-500/10 text-teal-300 border border-teal-500/20">Synthèse diagnostique</span>
+            </div>
+            <div id="session-lesion-topo-content" class="leading-relaxed text-slate-200"></div>
+          </div>
+
           <!-- SÉLECTEUR DE DÉLAI DE RÉPÉTITION ESPACÉE (ANKI STYLE) -->
           <div class="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2.5">
             <div class="flex items-center justify-between text-xs">
@@ -540,16 +552,18 @@
         <div class="flex flex-1 flex-wrap items-center gap-2">
           <div class="relative flex-1 min-w-[180px]">
             <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
-            <input type="text" id="bank-search-input" oninput="renderBank()" placeholder="Rechercher organe, lésion, #tag..." class="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+            <input type="text" id="bank-search-input" oninput="renderBank()" placeholder="Rechercher organe, lésion, critères OMS, #tag..." class="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
           </div>
           
-          <!-- Filtre Statut avec option Échues aujourd'hui -->
+          <!-- Filtre Statut avec option Échues aujourd'hui & Fiches OMS -->
           <select id="bank-filter-status" onchange="renderBank()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-teal-300 font-semibold focus:outline-none focus:border-teal-500">
             <option value="all">Tous les statuts</option>
             <option value="due">📅 À revoir aujourd'hui (Dues)</option>
             <option value="active">⏳ En apprentissage (Actives)</option>
             <option value="errors">🚩 À revoir / Erreurs</option>
             <option value="mastered">🎓 Maîtrisées (Neutralisées)</option>
+            <option value="with_topo">📘 Avec Fiche OMS rédigée</option>
+            <option value="without_topo">📝 Sans Fiche OMS (À rédiger)</option>
           </select>
 
           <select id="bank-filter-format" onchange="renderBank()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500">
@@ -1508,6 +1522,18 @@
           </span>
           <p id="detail-trap-text" class="text-amber-200/90 leading-relaxed"></p>
         </div>
+
+        <!-- Fiche de cours OMS associée à la lésion -->
+        <div id="detail-lesion-topo-container" class="p-3.5 rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/30 border border-indigo-500/30 text-xs space-y-2 hidden">
+          <div class="flex items-center justify-between border-b border-indigo-500/20 pb-2">
+            <span class="font-bold text-teal-300 flex items-center space-x-2">
+              <i data-lucide="book-open" class="w-4 h-4 text-teal-400"></i>
+              <span id="detail-lesion-topo-title">Critères diagnostiques OMS & Fiche de cours</span>
+            </span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-teal-500/10 text-teal-300 border border-teal-500/20">Fiche de synthèse</span>
+          </div>
+          <div id="detail-lesion-topo-content" class="text-slate-200 leading-relaxed"></div>
+        </div>
       </div>
 
       <div class="flex items-center justify-between pt-2">
@@ -1629,7 +1655,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="seed_data.js?v=20261022_1848"></script>
-  <script src="app.js?v=20261022_1848"></script>
+  <script src="seed_data.js?v=20261022_2300"></script>
+  <script src="app.js?v=20261022_2300"></script>
 </body>
 </html>

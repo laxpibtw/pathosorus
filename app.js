@@ -6,6 +6,7 @@ const STORAGE_KEY_QUESTIONS = "pathotrainer_custom_questions_v3";
 const STORAGE_KEY_CASES = "pathotrainer_custom_cases_v3";
 const STORAGE_KEY_TAGS = "pathotrainer_custom_tags_v3";
 const STORAGE_KEY_STATS = "pathotrainer_custom_stats_v3";
+const STORAGE_KEY_LESION_NOTES = "pathotrainer_custom_lesion_notes_v1";
 
 let state = {
   currentUser: null,
@@ -15,6 +16,7 @@ let state = {
   cases: [],
   customTags: [],
   customBadges: [],
+  lesionNotes: {}, // map "Organ::Category::Entity" -> { key, organ, category, entity, content, updatedAt, authorName, authorEmail }
   stats: {
     xp: 0,
     creatorXp: 0,
@@ -1790,6 +1792,24 @@ function openQuestionDetail(id) {
     }
   }
 
+  // Fiche OMS & Topo de cours lié à cette lésion
+  const topoContainer = document.getElementById('detail-lesion-topo-container');
+  const topoTitle = document.getElementById('detail-lesion-topo-title');
+  const topoContent = document.getElementById('detail-lesion-topo-content');
+  const lesionKey = `${q.organ || 'Autre'}::${q.category || 'Général'}::${q.entity || 'Lésion non spécifiée'}`;
+  const topoNote = (state.lesionNotes && state.lesionNotes[lesionKey]) ? state.lesionNotes[lesionKey] : null;
+
+  if (topoContainer && topoContent) {
+    if (topoNote && topoNote.content && topoNote.content.trim()) {
+      topoContainer.classList.remove('hidden');
+      if (topoTitle) topoTitle.textContent = `📘 Critères OMS & Topo : ${escapeHtml(q.entity)}`;
+      topoContent.innerHTML = renderLesionTopoHtml(topoNote.content);
+    } else {
+      topoContainer.classList.add('hidden');
+      topoContent.innerHTML = '';
+    }
+  }
+
   const tagsContainer = document.getElementById('detail-tags-container');
   if (tagsContainer) {
     tagsContainer.innerHTML = (q.tags || []).map(t => `<span class="text-[10px] text-teal-400 bg-teal-500/10 px-2.5 py-1 rounded-full font-mono border border-teal-500/20">#${escapeHtml(t)}</span>`).join('');
@@ -2011,6 +2031,29 @@ async function fetchSupabaseData(silent = false) {
         const localOnly = (state.customBadges || []).filter(b => !cloudIds.has(b.id));
         state.customBadges = [...bRes.data, ...localOnly];
         localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+      }
+    } catch(e) {}
+
+    // Récupérer les fiches de cours OMS / topos par lésion
+    try {
+      const lnRes = await supabaseClient.from('lesion_notes').select('*');
+      if (!lnRes.error && lnRes.data && Array.isArray(lnRes.data)) {
+        if (!state.lesionNotes) state.lesionNotes = {};
+        lnRes.data.forEach(item => {
+          if (item && item.key) {
+            state.lesionNotes[item.key] = {
+              key: item.key,
+              organ: item.organ || '',
+              category: item.category || '',
+              entity: item.entity || '',
+              content: item.content || '',
+              updatedAt: item.updated_at || '',
+              authorName: item.author_name || '',
+              authorEmail: item.author_email || ''
+            };
+          }
+        });
+        localStorage.setItem(STORAGE_KEY_LESION_NOTES, JSON.stringify(state.lesionNotes));
       }
     } catch(e) {}
 
@@ -2302,6 +2345,13 @@ function initApp() {
 
   const storedCustomBadges = localStorage.getItem('pathosorus_custom_badges');
   state.customBadges = storedCustomBadges ? JSON.parse(storedCustomBadges) : [];
+
+  const storedLesionNotes = localStorage.getItem(STORAGE_KEY_LESION_NOTES);
+  try {
+    state.lesionNotes = storedLesionNotes ? JSON.parse(storedLesionNotes) : {};
+  } catch(e) {
+    state.lesionNotes = {};
+  }
 
   const storedStats = localStorage.getItem(STORAGE_KEY_STATS);
   if (storedStats) state.stats = Object.assign(state.stats, JSON.parse(storedStats));
@@ -5335,6 +5385,24 @@ function revealSessionFeedback(isExact, q) {
     streakText.textContent = `Réussite consécutive : ${q.stats.consecutiveCorrect} fois`;
   }
 
+  // Révéler la Fiche OMS & Topo de cours associé à la lésion lors de la correction
+  const sessionTopoBox = document.getElementById('session-lesion-topo-box');
+  const sessionTopoTitle = document.getElementById('session-lesion-topo-title');
+  const sessionTopoContent = document.getElementById('session-lesion-topo-content');
+  const sLesionKey = `${q.organ || 'Autre'}::${q.category || 'Général'}::${q.entity || 'Lésion non spécifiée'}`;
+  const sTopoNote = (state.lesionNotes && state.lesionNotes[sLesionKey]) ? state.lesionNotes[sLesionKey] : null;
+
+  if (sessionTopoBox && sessionTopoContent) {
+    if (sTopoNote && sTopoNote.content && sTopoNote.content.trim()) {
+      sessionTopoBox.classList.remove('hidden');
+      if (sessionTopoTitle) sessionTopoTitle.textContent = `📘 Critères OMS & Topo : ${escapeHtml(q.entity)}`;
+      sessionTopoContent.innerHTML = renderLesionTopoHtml(sTopoNote.content);
+    } else {
+      sessionTopoBox.classList.add('hidden');
+      sessionTopoContent.innerHTML = '';
+    }
+  }
+
   fbBox.classList.remove('hidden');
   if (window.lucide) lucide.createIcons();
 }
@@ -7684,6 +7752,392 @@ function collapseAllBankLesions() {
   renderBank();
 }
 
+// --- FICHES DE COURS & CRITÈRES OMS PAR LÉSION ---
+
+function safeLesionId(key) {
+  return encodeURIComponent(key || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function renderLesionTopoHtml(rawText) {
+  if (!rawText || !rawText.trim()) return '';
+  const lines = rawText.split('\n');
+  let html = '';
+  let inList = false;
+
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += '<div class="h-2"></div>';
+      return;
+    }
+
+    // Titres de sections (Critères OMS, Profil IHC, Pièges, etc.)
+    if (/^(📌|🔬|⚠️|💡|📋|⭐|###|##|#)\s*(.*)/.test(trimmed) || /^[A-Z0-9\s\(\)\/]{4,}\s*:/.test(trimmed)) {
+      if (inList) { html += '</ul>'; inList = false; }
+      const safeLine = escapeHtml(trimmed);
+      let badgeColor = 'bg-slate-800 text-teal-300 border-teal-500/30';
+      if (trimmed.includes('📌') || trimmed.toLowerCase().includes('critère')) {
+        badgeColor = 'bg-teal-500/10 text-teal-300 border-teal-500/30';
+      } else if (trimmed.includes('🔬') || trimmed.toLowerCase().includes('ihc') || trimmed.toLowerCase().includes('profil')) {
+        badgeColor = 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30';
+      } else if (trimmed.includes('⚠️') || trimmed.toLowerCase().includes('piège') || trimmed.toLowerCase().includes('différentiel')) {
+        badgeColor = 'bg-amber-500/10 text-amber-300 border-amber-500/30';
+      } else if (trimmed.includes('💡') || trimmed.toLowerCase().includes('note') || trimmed.toLowerCase().includes('clinique')) {
+        badgeColor = 'bg-sky-500/10 text-sky-300 border-sky-500/30';
+      }
+
+      html += `<div class="mt-3 mb-1.5 flex items-center gap-2 font-bold text-xs px-2.5 py-1 rounded-lg border ${badgeColor}">${safeLine}</div>`;
+      return;
+    }
+
+    // Puces de listes
+    if (/^[•\-\*]\s+(.*)/.test(trimmed)) {
+      if (!inList) { html += '<ul class="space-y-1.5 my-1 ml-1">'; inList = true; }
+      const bulletContent = trimmed.replace(/^[•\-\*]\s+/, '');
+      const formatted = escapeHtml(bulletContent).replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-bold">$1</strong>');
+      html += `<li class="flex items-start text-xs text-slate-300 leading-relaxed"><span class="text-teal-400 mr-2 shrink-0 select-none">•</span><span>${formatted}</span></li>`;
+      return;
+    }
+
+    if (inList) { html += '</ul>'; inList = false; }
+    const formatted = escapeHtml(trimmed).replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-bold">$1</strong>');
+    html += `<p class="text-xs text-slate-300 leading-relaxed my-0.5">${formatted}</p>`;
+  });
+
+  if (inList) html += '</ul>';
+  return html;
+}
+
+function formatLesionNoteDate(isoString) {
+  if (!isoString) return 'Enregistré';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return 'Enregistré';
+    return `Mis à jour le ${d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })} à ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+  } catch(e) {
+    return 'Enregistré';
+  }
+}
+
+function createLesionTopoCard(organ, category, entity, key) {
+  const sid = safeLesionId(key);
+  const note = (state.lesionNotes && state.lesionNotes[key]) ? state.lesionNotes[key] : null;
+  const hasNote = Boolean(note && note.content && note.content.trim().length > 0);
+
+  const card = document.createElement('div');
+  card.id = `lesion-topo-card-${sid}`;
+  card.className = `rounded-2xl border transition duration-200 overflow-hidden shadow-lg mb-3 ${
+    hasNote 
+      ? 'bg-gradient-to-br from-slate-900/95 via-slate-900 to-indigo-950/30 border-indigo-500/30 hover:border-indigo-500/50' 
+      : 'bg-slate-900/50 border border-dashed border-slate-800 hover:border-slate-700/80'
+  }`;
+
+  // Container View Mode
+  const viewContainer = document.createElement('div');
+  viewContainer.id = `lesion-topo-view-${sid}`;
+  viewContainer.className = "p-4 space-y-3";
+
+  if (hasNote) {
+    viewContainer.innerHTML = `
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-indigo-500/20 pb-2.5">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/25 flex items-center justify-center font-bold shrink-0">
+            <i data-lucide="book-open" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h4 class="font-extrabold text-sm text-white flex items-center gap-2">
+              <span>📘 Topo de cours & Critères OMS</span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-500/15 text-teal-300 border border-teal-500/30 font-bold">Fiche validée</span>
+            </h4>
+            <div class="flex flex-wrap items-center gap-x-2 text-[11px] text-slate-400 mt-0.5">
+              <span>${formatLesionNoteDate(note.updatedAt)}</span>
+              ${note.authorName ? `<span class="text-teal-400 font-medium">• Rédigé par ${escapeHtml(note.authorName)}</span>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+          <button type="button" onclick="copyLesionNoteToClipboard('${escapeJsString(key)}')" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center space-x-1.5 transition border border-slate-700/80" title="Copier le topo dans le presse-papier">
+            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+            <span>Copier</span>
+          </button>
+          <button type="button" onclick="openLesionNoteEditor('${escapeJsString(key)}')" class="px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 text-xs font-bold flex items-center space-x-1.5 transition shadow-sm" title="Modifier cette fiche">
+            <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+            <span>Modifier</span>
+          </button>
+        </div>
+      </div>
+      <div class="topo-content-body py-1 text-xs text-slate-200 font-sans leading-relaxed">
+        ${renderLesionTopoHtml(note.content)}
+      </div>
+    `;
+  } else {
+    viewContainer.innerHTML = `
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 py-2">
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 rounded-xl bg-slate-800/80 text-teal-400 border border-slate-700 flex items-center justify-center shrink-0">
+            <i data-lucide="file-text" class="w-4.5 h-4.5"></i>
+          </div>
+          <div>
+            <h4 class="font-bold text-sm text-slate-200 flex items-center gap-2">
+              <span>📘 Fiche de synthèse & Critères OMS</span>
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 font-mono">À rédiger</span>
+            </h4>
+            <p class="text-xs text-slate-400 mt-0.5 max-w-xl leading-relaxed">
+              Rédigez un topo de cours pour <strong>${escapeHtml(entity)}</strong> : critères diagnostiques majeurs OMS, profil IHC et pièges différentiels.
+            </p>
+          </div>
+        </div>
+        <button type="button" onclick="openLesionNoteEditor('${escapeJsString(key)}')" class="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center space-x-1.5 transition shadow-sm shadow-teal-500/20 shrink-0">
+          <i data-lucide="pen-tool" class="w-3.5 h-3.5"></i>
+          <span>✍️ Rédiger la fiche OMS</span>
+        </button>
+      </div>
+    `;
+  }
+  card.appendChild(viewContainer);
+
+  // Container Edit Mode
+  const editContainer = document.createElement('div');
+  editContainer.id = `lesion-topo-edit-${sid}`;
+  editContainer.className = "p-4 space-y-3.5 hidden";
+  editContainer.innerHTML = `
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-800 pb-3">
+      <div class="flex items-center space-x-2.5">
+        <div class="w-8 h-8 rounded-xl bg-teal-500/20 text-teal-400 border border-teal-500/30 flex items-center justify-center font-bold shrink-0">
+          <i data-lucide="edit-3" class="w-4 h-4"></i>
+        </div>
+        <div>
+          <h4 class="font-bold text-sm text-white flex items-center gap-2">
+            <span>✍️ Rédiger la fiche OMS : ${escapeHtml(entity)}</span>
+          </h4>
+          <span class="text-[11px] text-slate-400">${escapeHtml(organ)} › ${escapeHtml(category)}</span>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-1.5 self-end sm:self-auto">
+        <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider mr-1">Canevas :</span>
+        <button type="button" onclick="insertTemplateToLesionEditor('${escapeJsString(key)}', 'standard')" class="px-2.5 py-1 rounded-lg bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 border border-teal-500/30 text-[11px] font-bold transition flex items-center space-x-1" title="Insérer le canevas complet OMS">
+          <span>⚡ Canevas Type OMS</span>
+        </button>
+        <button type="button" onclick="insertTemplateToLesionEditor('${escapeJsString(key)}', 'criteres')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-semibold transition" title="Ajouter la section Critères OMS">
+          <span>+ Critères</span>
+        </button>
+        <button type="button" onclick="insertTemplateToLesionEditor('${escapeJsString(key)}', 'ihc')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-semibold transition" title="Ajouter la section IHC">
+          <span>+ IHC</span>
+        </button>
+        <button type="button" onclick="insertTemplateToLesionEditor('${escapeJsString(key)}', 'pieges')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-semibold transition" title="Ajouter la section Pièges">
+          <span>+ Pièges</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="relative">
+      <textarea id="lesion-topo-textarea-${sid}" class="w-full min-h-[200px] max-h-[550px] p-3.5 rounded-xl bg-slate-950/90 border border-slate-700 text-xs sm:text-sm text-slate-100 placeholder-slate-500 font-sans leading-relaxed focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition resize-y" placeholder="Notez ici les critères diagnostiques majeurs de l'OMS, l'architecture histologique, le profil IHC indispensable, et les pièges diagnostiques..."></textarea>
+    </div>
+
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-slate-800/80">
+      <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+        <div class="flex items-center space-x-1 text-teal-400">
+          <i data-lucide="shield-check" class="w-3.5 h-3.5 shrink-0"></i>
+          <span>Sauvegarde locale & cloud partagée</span>
+        </div>
+        <span>•</span>
+        <span class="text-slate-500">Astuce : <strong>Ctrl+Entrée</strong> pour enregistrer</span>
+        ${hasNote ? `
+          <span>•</span>
+          <button type="button" onclick="deleteLesionNoteWithConfirm('${escapeJsString(key)}')" class="text-rose-400 hover:text-rose-300 hover:underline transition font-semibold">
+            Supprimer la fiche
+          </button>
+        ` : ''}
+      </div>
+      <div class="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+        <button type="button" onclick="closeLesionNoteEditor('${escapeJsString(key)}')" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition">
+          Annuler
+        </button>
+        <button type="button" onclick="saveLesionNoteFromEditor('${escapeJsString(key)}', '${escapeJsString(organ)}', '${escapeJsString(category)}', '${escapeJsString(entity)}')" class="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center space-x-1.5 transition shadow-sm shadow-teal-500/20">
+          <i data-lucide="save" class="w-3.5 h-3.5"></i>
+          <span>Enregistrer la fiche OMS</span>
+        </button>
+      </div>
+    </div>
+  `;
+  card.appendChild(editContainer);
+
+  return card;
+}
+
+function openLesionNoteEditor(key) {
+  const sid = safeLesionId(key);
+  const viewEl = document.getElementById(`lesion-topo-view-${sid}`);
+  const editEl = document.getElementById(`lesion-topo-edit-${sid}`);
+  const taEl = document.getElementById(`lesion-topo-textarea-${sid}`);
+  if (!viewEl || !editEl || !taEl) return;
+
+  const note = (state.lesionNotes && state.lesionNotes[key]) ? state.lesionNotes[key] : null;
+  taEl.value = (note && note.content) ? note.content : '';
+
+  viewEl.classList.add('hidden');
+  editEl.classList.remove('hidden');
+
+  taEl.onkeydown = (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      const parts = key.split('::');
+      saveLesionNoteFromEditor(key, parts[0] || '', parts[1] || '', parts[2] || '');
+    }
+  };
+
+  taEl.focus();
+  if (window.lucide) lucide.createIcons();
+}
+
+function closeLesionNoteEditor(key) {
+  const sid = safeLesionId(key);
+  const viewEl = document.getElementById(`lesion-topo-view-${sid}`);
+  const editEl = document.getElementById(`lesion-topo-edit-${sid}`);
+  if (!viewEl || !editEl) return;
+
+  editEl.classList.add('hidden');
+  viewEl.classList.remove('hidden');
+  if (window.lucide) lucide.createIcons();
+}
+
+function insertTemplateToLesionEditor(key, type) {
+  const sid = safeLesionId(key);
+  const taEl = document.getElementById(`lesion-topo-textarea-${sid}`);
+  if (!taEl) return;
+
+  const curVal = taEl.value;
+  let insertion = '';
+
+  if (type === 'standard') {
+    insertion = `📌 CRITÈRES DIAGNOSTIQUES OMS :
+• 
+• 
+
+🔬 PROFIL IHC & BIOMARQUEURS :
+• 
+
+⚠️ PIÈGES & DIAGNOSTICS DIFFÉRENTIELS :
+• 
+
+💡 NOTES CLINIQUES & PRONOSTIC :
+• `;
+    if (!curVal.trim()) {
+      taEl.value = insertion;
+      taEl.focus();
+      return;
+    }
+  } else if (type === 'criteres') {
+    insertion = `📌 CRITÈRES DIAGNOSTIQUES OMS :\n• `;
+  } else if (type === 'ihc') {
+    insertion = `🔬 PROFIL IHC & BIOMARQUEURS :\n• `;
+  } else if (type === 'pieges') {
+    insertion = `⚠️ PIÈGES & DIAGNOSTICS DIFFÉRENTIELS :\n• `;
+  }
+
+  taEl.value = curVal + (curVal.endsWith('\n') ? '' : '\n\n') + insertion;
+  taEl.focus();
+}
+
+async function saveLesionNoteFromEditor(key, organ, category, entity) {
+  const sid = safeLesionId(key);
+  const taEl = document.getElementById(`lesion-topo-textarea-${sid}`);
+  if (!taEl) return;
+
+  const content = taEl.value;
+  await saveLesionNote(key, content, organ, category, entity);
+}
+
+async function saveLesionNote(key, content, organ, category, entity) {
+  if (!state.lesionNotes) state.lesionNotes = {};
+  const cleanContent = (content || '').trim();
+  const authorName = state.currentUser
+    ? (state.currentUser.user_metadata?.display_name || state.currentUser.email?.split('@')[0] || 'Rédacteur')
+    : (isCreator() ? 'Rédacteur' : 'Pathologiste');
+  const authorEmail = state.currentUser ? (state.currentUser.email || '') : '';
+  const now = new Date().toISOString();
+
+  if (!cleanContent) {
+    delete state.lesionNotes[key];
+  } else {
+    state.lesionNotes[key] = {
+      key: key,
+      organ: organ || '',
+      category: category || '',
+      entity: entity || '',
+      content: cleanContent,
+      updatedAt: now,
+      authorName: authorName,
+      authorEmail: authorEmail
+    };
+  }
+
+  try {
+    localStorage.setItem(STORAGE_KEY_LESION_NOTES, JSON.stringify(state.lesionNotes));
+  } catch(e) {
+    console.error("Erreur sauvegarde locale lesion_notes:", e);
+  }
+
+  if (supabaseClient) {
+    try {
+      if (!cleanContent) {
+        await supabaseClient.from('lesion_notes').delete().eq('key', key);
+      } else {
+        await supabaseClient.from('lesion_notes').upsert({
+          key: key,
+          organ: organ || '',
+          category: category || '',
+          entity: entity || '',
+          content: cleanContent,
+          updated_at: now,
+          author_name: authorName,
+          author_email: authorEmail
+        });
+      }
+    } catch(err) {
+      console.warn("Supabase sync lesion_notes warning:", err);
+    }
+  }
+
+  showToast(cleanContent ? "✓ Fiche OMS enregistrée avec succès !" : "Fiche OMS supprimée", "success");
+
+  state.bankExpandedLesions.add(key);
+  const scrollY = window.scrollY;
+  renderBank();
+  window.scrollTo(0, scrollY);
+}
+
+async function deleteLesionNoteWithConfirm(key) {
+  if (!confirm("Voulez-vous vraiment supprimer cette fiche de cours / critères OMS ?")) {
+    return;
+  }
+  const parts = key.split('::');
+  await saveLesionNote(key, '', parts[0] || '', parts[1] || '', parts[2] || '');
+}
+
+function copyLesionNoteToClipboard(key) {
+  const note = (state.lesionNotes && state.lesionNotes[key]) ? state.lesionNotes[key] : null;
+  if (!note || !note.content) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(note.content).then(() => {
+      showToast("📋 Fiche OMS copiée dans le presse-papier !", "info");
+    }).catch(() => {
+      showToast("Erreur lors de la copie", "error");
+    });
+  }
+}
+
+window.safeLesionId = safeLesionId;
+window.createLesionTopoCard = createLesionTopoCard;
+window.openLesionNoteEditor = openLesionNoteEditor;
+window.closeLesionNoteEditor = closeLesionNoteEditor;
+window.insertTemplateToLesionEditor = insertTemplateToLesionEditor;
+window.saveLesionNoteFromEditor = saveLesionNoteFromEditor;
+window.saveLesionNote = saveLesionNote;
+window.deleteLesionNoteWithConfirm = deleteLesionNoteWithConfirm;
+window.copyLesionNoteToClipboard = copyLesionNoteToClipboard;
+
 function renderBank() {
   const searchInput = document.getElementById('bank-search-input');
   const search = (searchInput ? searchInput.value : '').toLowerCase().trim();
@@ -7730,6 +8184,13 @@ function renderBank() {
     if (statusFilter === 'due' && !isQuestionDue(q)) return false;
     if (statusFilter === 'errors' && (!q.flagged && !(q.stats && q.stats.seen > 0 && q.stats.correct < q.stats.seen))) return false;
 
+    const lesionKey = `${q.organ || 'Autre'}::${q.category || 'Général'}::${q.entity || 'Lésion non spécifiée'}`;
+    const lNote = (state.lesionNotes && state.lesionNotes[lesionKey]) ? state.lesionNotes[lesionKey] : null;
+    const hasNote = Boolean(lNote && lNote.content && lNote.content.trim());
+
+    if (statusFilter === 'with_topo' && !hasNote) return false;
+    if (statusFilter === 'without_topo' && hasNote) return false;
+
     if (search) {
       const matchQ = (q.question || '').toLowerCase().includes(search);
       const matchCtx = (q.context || '').toLowerCase().includes(search);
@@ -7737,7 +8198,8 @@ function renderBank() {
       const matchCat = (q.category || '').toLowerCase().includes(search);
       const matchEnt = (q.entity || '').toLowerCase().includes(search);
       const matchTags = (q.tags || []).some(t => t.toLowerCase().includes(search));
-      if (!matchQ && !matchCtx && !matchOrg && !matchCat && !matchEnt && !matchTags) return false;
+      const matchNote = Boolean(lNote && lNote.content && lNote.content.toLowerCase().includes(search));
+      if (!matchQ && !matchCtx && !matchOrg && !matchCat && !matchEnt && !matchTags && !matchNote) return false;
     }
     return true;
   });
@@ -7746,6 +8208,14 @@ function renderBank() {
     if (formatFilter !== 'all' && formatFilter !== 'dp') return false;
     if (statusFilter === 'mastered' || statusFilter === 'due') return false;
     if (tagFilter !== 'all' && !(c.tags || []).includes(tagFilter)) return false;
+
+    const lesionKey = `${c.organ || 'Autre'}::${c.category || 'Général'}::${c.entity || 'Lésion non spécifiée'}`;
+    const lNote = (state.lesionNotes && state.lesionNotes[lesionKey]) ? state.lesionNotes[lesionKey] : null;
+    const hasNote = Boolean(lNote && lNote.content && lNote.content.trim());
+
+    if (statusFilter === 'with_topo' && !hasNote) return false;
+    if (statusFilter === 'without_topo' && hasNote) return false;
+
     if (search) {
       const matchT = (c.title || '').toLowerCase().includes(search);
       const matchSyn = (c.synopsis || '').toLowerCase().includes(search);
@@ -7753,7 +8223,8 @@ function renderBank() {
       const matchCat = (c.category || '').toLowerCase().includes(search);
       const matchEnt = (c.entity || '').toLowerCase().includes(search);
       const matchTags = (c.tags || []).some(t => t.toLowerCase().includes(search));
-      if (!matchT && !matchSyn && !matchOrg && !matchCat && !matchEnt && !matchTags) return false;
+      const matchNote = Boolean(lNote && lNote.content && lNote.content.toLowerCase().includes(search));
+      if (!matchT && !matchSyn && !matchOrg && !matchCat && !matchEnt && !matchTags && !matchNote) return false;
     }
     return true;
   });
@@ -8031,6 +8502,9 @@ function renderBank() {
     const masteredInLesion = lesion.questions.filter(q => q.mastered).length;
     const activeInLesion = lesion.questions.filter(q => !q.mastered).length;
 
+    const note = (state.lesionNotes && state.lesionNotes[key]) ? state.lesionNotes[key] : null;
+    const hasNote = Boolean(note && note.content && note.content.trim().length > 0);
+
     const lesionBox = document.createElement('div');
     lesionBox.className = "bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-2xl overflow-hidden transition shadow-lg space-y-0";
 
@@ -8058,11 +8532,20 @@ function renderBank() {
             ${dueInLesion > 0 ? `<span class="text-amber-400 font-semibold">• ${dueInLesion} à revoir</span>` : ''}
             ${masteredInLesion > 0 ? `<span class="text-emerald-400 font-semibold">• ${masteredInLesion} maîtrisée(s)</span>` : ''}
             ${lesion.cases.length > 0 ? `<span class="text-indigo-400 font-semibold">• ${lesion.cases.length} DP</span>` : ''}
+            ${hasNote ? `<span class="inline-flex items-center gap-1 text-teal-300 font-bold bg-teal-500/15 border border-teal-500/30 px-2 py-0.5 rounded-full text-[10px]"><i data-lucide="book-open" class="w-3 h-3 text-teal-400"></i><span>Fiche OMS</span></span>` : ''}
           </div>
         </div>
       </div>
 
       <div class="flex flex-wrap items-center gap-2 shrink-0 self-end sm:self-auto">
+        <button class="btn-toggle-lesion-topo px-3 py-1.5 rounded-xl ${
+          hasNote 
+            ? 'bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' 
+            : 'bg-slate-800 hover:bg-slate-700/80 text-slate-300 hover:text-white border border-slate-700'
+        } text-xs font-bold flex items-center space-x-1.5 transition shadow-sm" title="${hasNote ? 'Consulter / modifier la fiche OMS' : 'Rédiger une fiche de cours OMS'}">
+          <i data-lucide="${hasNote ? 'book-open' : 'file-edit'}" class="w-3.5 h-3.5 ${hasNote ? 'text-indigo-400' : 'text-slate-400'}"></i>
+          <span>${hasNote ? 'Fiche OMS' : '+ Topo OMS'}</span>
+        </button>
         <button class="btn-create-lesion-q px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 text-teal-300 hover:text-teal-200 border border-teal-500/30 hover:border-teal-500/60 text-xs font-bold flex items-center space-x-1.5 transition shadow-sm" title="Créer une question pour cette lésion">
           <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-teal-400"></i>
           <span>+ Créer question</span>
@@ -8078,6 +8561,24 @@ function renderBank() {
     `;
 
     header.querySelector('h3').textContent = lesion.entity;
+
+    const topoBtn = header.querySelector('.btn-toggle-lesion-topo');
+    if (topoBtn) {
+      topoBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (!state.bankExpandedLesions.has(key)) {
+          state.bankExpandedLesions.add(key);
+          renderBank();
+        }
+        if (!hasNote) {
+          openLesionNoteEditor(key);
+        } else {
+          const sid = safeLesionId(key);
+          const cEl = document.getElementById(`lesion-topo-card-${sid}`);
+          if (cEl) cEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      };
+    }
 
     const createBtn = header.querySelector('.btn-create-lesion-q');
     if (createBtn) {
@@ -8109,6 +8610,10 @@ function renderBank() {
     const bodyContainer = document.createElement('div');
     bodyContainer.className = `p-3.5 sm:p-4 space-y-3 bg-slate-950/40 ${isCollapsed ? 'hidden' : ''}`;
     lesionBox.appendChild(bodyContainer);
+
+    // Fiche OMS & Topo de cours pour cette lésion
+    const topoCard = createLesionTopoCard(lesion.organ, lesion.category, lesion.entity, key);
+    bodyContainer.appendChild(topoCard);
 
     // Insérer les DP de cette lésion
     lesion.cases.forEach(c => {
@@ -8259,6 +8764,7 @@ function exportCustomBankJSON() {
     questions: state.questions,
     cases: state.cases,
     customTags: state.customTags,
+    lesionNotes: state.lesionNotes || {},
     stats: state.stats
   };
   const str = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
@@ -8280,6 +8786,12 @@ function importCustomBankJSON(e) {
       if (parsed.questions && Array.isArray(parsed.questions)) state.questions = parsed.questions;
       if (parsed.cases && Array.isArray(parsed.cases)) state.cases = parsed.cases;
       if (parsed.customTags && Array.isArray(parsed.customTags)) state.customTags = parsed.customTags;
+      if (parsed.lesionNotes && typeof parsed.lesionNotes === 'object') {
+        state.lesionNotes = Object.assign(state.lesionNotes || {}, parsed.lesionNotes);
+        try {
+          localStorage.setItem(STORAGE_KEY_LESION_NOTES, JSON.stringify(state.lesionNotes));
+        } catch(e) {}
+      }
       saveQuestions();
       saveCases();
       saveCustomTags();
