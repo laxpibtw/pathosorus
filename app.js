@@ -1918,9 +1918,11 @@ async function fetchSupabaseData(silent = false) {
 
         const diff = q.difficulty || (q.stats && q.stats.difficulty) || 'facile';
         const extClues = q.extremeClues || q.extremeclues || (q.stats && q.stats.extremeClues) || '';
+        const author = (q.stats && q.stats.created_by) || q.created_by || (localQ && localQ.created_by) || (q.id === 'q_1792671361751' ? 'belhadef.samy@gmail.com' : 'padoreau85@gmail.com');
 
         return {
           ...q,
+          created_by: author,
           options: q.options || [],
           correct: Array.isArray(q.correct) ? q.correct : (typeof q.correct === 'number' ? [q.correct] : []),
           optionExplanations: optExp,
@@ -2046,10 +2048,12 @@ function formatQuestionForSupabase(q) {
   const extClues = q.extremeClues || q.extremeclues || (q.stats && q.stats.extremeClues) || '';
 
   // IMPORTANT : La table collective `questions` ne stocke que les métadonnées de la question
-  // (difficulté, indices extrêmes) et JAMAIS la progression individuelle d'un utilisateur (intervalles, révisions)
+  // (difficulté, indices extrêmes, auteur) et JAMAIS la progression individuelle d'un utilisateur
+  const authorEmail = q.created_by || (q.stats && q.stats.created_by) || ((state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : 'padoreau85@gmail.com');
   const questionMetadataStats = {
     difficulty: diff,
-    extremeClues: extClues
+    extremeClues: extClues,
+    created_by: authorEmail
   };
 
   return {
@@ -2288,6 +2292,7 @@ function initApp() {
 
 function saveQuestions() {
   localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
+  checkAndUnlockBadges();
   updateTopBar();
   renderHierarchySelector();
   renderTagsCloud();
