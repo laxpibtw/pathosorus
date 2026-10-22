@@ -272,9 +272,20 @@
             <span id="session-format-badge" class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">☑️ QCM</span>
             <div id="session-tags-box" class="flex flex-wrap gap-1"></div>
           </div>
-          <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-xs font-mono font-semibold text-teal-300 flex items-center space-x-1.5">
-            <i data-lucide="folder-tree" class="w-3.5 h-3.5 text-teal-400 shrink-0"></i>
-            <span id="session-breadcrumb" class="truncate">Organe > Catégorie > Entité</span>
+          <!-- Zone Classification : Masquée par défaut pendant l'entraînement pour ne pas donner d'indice -->
+          <div id="session-breadcrumb-wrapper" class="space-y-1">
+            <button type="button" id="btn-toggle-organ-hint" onclick="toggleSessionOrganHint()" class="w-full text-left p-2.5 rounded-xl bg-slate-950/70 hover:bg-slate-950 border border-slate-800 hover:border-slate-700 text-xs text-slate-400 hover:text-teal-300 transition flex items-center justify-between group" title="Cliquez si vous avez besoin d'un indice sur l'organe">
+              <span class="flex items-center space-x-2">
+                <i data-lucide="eye-off" id="icon-organ-hint" class="w-3.5 h-3.5 text-slate-500 group-hover:text-teal-400 shrink-0"></i>
+                <span id="text-organ-hint" class="font-medium text-slate-400 group-hover:text-slate-300">Organe masqué pour l'entraînement</span>
+              </span>
+              <span id="label-organ-hint-action" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-900 text-slate-500 group-hover:text-teal-400 border border-slate-800">Afficher l'indice</span>
+            </button>
+
+            <div id="session-breadcrumb-container" class="hidden p-2.5 rounded-xl bg-slate-950/90 border border-teal-500/30 text-xs font-mono font-semibold text-teal-300 flex items-center space-x-1.5 transition">
+              <i data-lucide="folder-tree" class="w-3.5 h-3.5 text-teal-400 shrink-0"></i>
+              <span id="session-breadcrumb" class="truncate">Organe > Catégorie > Entité</span>
+            </div>
           </div>
         </div>
 
@@ -302,6 +313,13 @@
             <div class="flex-1">
               <h4 id="session-feedback-title" class="font-bold text-sm"></h4>
               <p id="session-feedback-text" class="text-xs mt-1 leading-relaxed text-slate-300"></p>
+              
+              <!-- Révélation de la Classification Complète lors de la Correction -->
+              <div class="mt-2.5 pt-2 border-t border-slate-700/50 flex items-center space-x-1.5 text-xs font-mono font-semibold text-teal-300">
+                <i data-lucide="folder-tree" class="w-3.5 h-3.5 text-teal-400 shrink-0"></i>
+                <span id="session-feedback-hierarchy"></span>
+              </div>
+
               <div class="mt-2 text-[11px] text-slate-400 font-mono" id="session-stat-streak"></div>
             </div>
           </div>

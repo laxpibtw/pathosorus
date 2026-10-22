@@ -1603,21 +1603,47 @@ function renderSessionQuestion() {
   document.getElementById('session-progress-text').textContent = `Question ${curNum} / ${total}`;
   document.getElementById('session-progress-bar').style.width = `${(curNum / total) * 100}%`;
 
-  document.getElementById('session-breadcrumb').textContent = `${q.organ} > ${q.category} > ${q.entity}`;
+  // Masquer l'organe et la classification par défaut pour l'entraînement
+  session.showOrganHint = false;
+  const hintBtn = document.getElementById('btn-toggle-organ-hint');
+  const breadcrumbContainer = document.getElementById('session-breadcrumb-container');
+  const breadcrumbEl = document.getElementById('session-breadcrumb');
+
+  if (breadcrumbEl) {
+    breadcrumbEl.textContent = `${q.organ} > ${q.category} > ${q.entity}`;
+  }
+  if (hintBtn) {
+    hintBtn.classList.remove('hidden');
+    const textHint = document.getElementById('text-organ-hint');
+    const labelHint = document.getElementById('label-organ-hint-action');
+    if (textHint) textHint.textContent = "Organe masqué pour l'entraînement";
+    if (labelHint) labelHint.textContent = "Afficher l'indice";
+  }
+  if (breadcrumbContainer) {
+    breadcrumbContainer.classList.add('hidden');
+  }
 
   const isQCM = (q.format === 'qcm');
   const formatBadge = document.getElementById('session-format-badge');
   formatBadge.textContent = isQCM ? "☑️ QCM (Choix Multiples)" : (q.format === 'piege' ? "⚠️ Vrai / Faux" : "🔘 QCU (Choix Unique)");
   formatBadge.className = isQCM ? "text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" : "text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20";
 
+  // Filtrer les tags pour ne pas trahir l'organe ou l'entité pendant la phase de réflexion
   const tagsBox = document.getElementById('session-tags-box');
   tagsBox.innerHTML = '';
-  (q.tags || []).forEach(t => {
-    const chip = document.createElement('span');
-    chip.className = "text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300";
-    chip.textContent = `#${t}`;
-    tagsBox.appendChild(chip);
-  });
+  const organLower = (q.organ || '').toLowerCase().trim();
+  const entityLower = (q.entity || '').toLowerCase().trim();
+  (q.tags || [])
+    .filter(t => {
+      const tl = t.toLowerCase().trim();
+      return tl !== organLower && tl !== entityLower;
+    })
+    .forEach(t => {
+      const chip = document.createElement('span');
+      chip.className = "text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300";
+      chip.textContent = `#${t}`;
+      tagsBox.appendChild(chip);
+    });
 
   const flagBtn = document.getElementById('btn-session-flag');
   flagBtn.className = q.flagged ? "text-amber-400 p-1.5 rounded-lg bg-slate-800" : "text-slate-400 hover:text-amber-400 p-1.5 rounded-lg";
@@ -1710,6 +1736,30 @@ function toggleCurrentSessionQuestionMastered() {
   if (!session) return;
   const q = session.questions[session.currentIndex];
   toggleQuestionMastered(q.id);
+}
+
+function toggleSessionOrganHint() {
+  const session = state.currentSession;
+  if (!session) return;
+  session.showOrganHint = !session.showOrganHint;
+
+  const breadcrumbContainer = document.getElementById('session-breadcrumb-container');
+  const textHint = document.getElementById('text-organ-hint');
+  const labelHint = document.getElementById('label-organ-hint-action');
+  const iconHint = document.getElementById('icon-organ-hint');
+
+  if (session.showOrganHint) {
+    if (breadcrumbContainer) breadcrumbContainer.classList.remove('hidden');
+    if (textHint) textHint.textContent = "Indice organe révélé :";
+    if (labelHint) labelHint.textContent = "Masquer l'indice";
+    if (iconHint) iconHint.setAttribute('data-lucide', 'eye');
+  } else {
+    if (breadcrumbContainer) breadcrumbContainer.classList.add('hidden');
+    if (textHint) textHint.textContent = "Organe masqué pour l'entraînement";
+    if (labelHint) labelHint.textContent = "Afficher l'indice";
+    if (iconHint) iconHint.setAttribute('data-lucide', 'eye-off');
+  }
+  if (window.lucide) lucide.createIcons();
 }
 
 function toggleQCMSelection(idx) {
@@ -1809,6 +1859,30 @@ function evaluateSessionAnswer(selectedIndices) {
   });
 
   document.getElementById('btn-session-validate-qcm').classList.add('hidden');
+
+  // Révélation automatique de la classification et de l'organe lors de la correction
+  const breadcrumbContainer = document.getElementById('session-breadcrumb-container');
+  if (breadcrumbContainer) breadcrumbContainer.classList.remove('hidden');
+
+  const hintBtn = document.getElementById('btn-toggle-organ-hint');
+  if (hintBtn) hintBtn.classList.add('hidden');
+
+  const fbHierarchy = document.getElementById('session-feedback-hierarchy');
+  if (fbHierarchy) {
+    fbHierarchy.textContent = `${q.organ} > ${q.category} > ${q.entity}`;
+  }
+
+  // Révéler tous les tags lors de la correction
+  const tagsBox = document.getElementById('session-tags-box');
+  if (tagsBox) {
+    tagsBox.innerHTML = '';
+    (q.tags || []).forEach(t => {
+      const chip = document.createElement('span');
+      chip.className = "text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-teal-300";
+      chip.textContent = `#${t}`;
+      tagsBox.appendChild(chip);
+    });
+  }
 
   const fbBox = document.getElementById('session-feedback-box');
   const banner = document.getElementById('session-feedback-banner');
@@ -2512,7 +2586,8 @@ function renderDPStep() {
   session.selectedInCurrentStep.clear();
 
   document.getElementById('dp-case-title').textContent = session.caseData.title;
-  document.getElementById('dp-case-meta').textContent = `${session.caseData.organ} > ${session.caseData.category} > ${session.caseData.entity}`;
+  // Organe & entité masqués pendant le cas clinique pour ne pas spoiler l'enquête diagnostique
+  document.getElementById('dp-case-meta').textContent = "Dossier Clinique Progressif • Organe masqué";
   document.getElementById('dp-step-indicator').textContent = `Étape ${session.currentStepIndex + 1} / ${session.totalSteps}`;
   document.getElementById('dp-progress-bar').style.width = `${((session.currentStepIndex + 1) / session.totalSteps) * 100}%`;
 
@@ -2669,6 +2744,9 @@ function evaluateDPStep(selectedIndices) {
   document.getElementById('dp-trap-text').textContent = currentStep.trap || "Penser à croiser les aspects macro, micro et phénotypiques.";
   
   const isLastStep = (session.currentStepIndex + 1 >= session.totalSteps);
+  if (isLastStep) {
+    document.getElementById('dp-case-meta').textContent = `${session.caseData.organ} > ${session.caseData.category} > ${session.caseData.entity}`;
+  }
   document.getElementById('btn-dp-next-step').innerHTML = isLastStep ? `<span>Clôturer le Dossier Clinique</span><i data-lucide="check" class="w-4 h-4"></i>` : `<span>Débloquer l'Étape Suivante</span><i data-lucide="arrow-right" class="w-4 h-4"></i>`;
 
   fbBox.classList.remove('hidden');
