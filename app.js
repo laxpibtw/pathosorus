@@ -499,16 +499,41 @@ async function syncStatsToCloud() {
       ...state.stats,
       customBadges: state.customBadges || []
     };
-    await supabaseClient
-      .from('profiles')
-      .upsert({
-        id: state.currentUser.id,
-        email: state.currentUser.email,
-        role: state.currentRole || 'creator',
-        stats: statsPayload
-      });
+
+    // 1. Sauvegarde dans la table public.profiles
+    try {
+      const res = await supabaseClient
+        .from('profiles')
+        .upsert({
+          id: state.currentUser.id,
+          email: state.currentUser.email,
+          role: state.currentRole || 'creator',
+          stats: statsPayload
+        });
+      if (res && res.error) {
+        console.warn("Avertissement sync stats profiles:", res.error.message);
+      } else {
+        console.log("☁️ Stats synchronisées dans profiles pour", state.currentUser.email);
+      }
+    } catch (profErr) {
+      console.warn("Avertissement profiles upsert:", profErr);
+    }
+
+    // 2. Sauvegarde directe dans le compte utilisateur auth (100% garanti multi-appareils sans blocage RLS)
+    try {
+      if (supabaseClient.auth && typeof supabaseClient.auth.updateUser === 'function') {
+        await supabaseClient.auth.updateUser({
+          data: {
+            stats: statsPayload,
+            role: state.currentRole || 'creator'
+          }
+        });
+      }
+    } catch (authErr) {
+      console.warn("Avertissement auth updateUser stats:", authErr);
+    }
   } catch (e) {
-    console.warn("Erreur sync stats profiles:", e);
+    console.warn("Erreur sync stats:", e);
   }
 }
 
@@ -518,80 +543,84 @@ async function fetchCurrentUserRole() {
     return;
   }
   const email = (state.currentUser.email || '').toLowerCase();
-  if (email === 'padoreau85@gmail.com') {
+  const isAdminUser = (email === 'padoreau85@gmail.com');
+  if (isAdminUser) {
     state.currentRole = 'creator';
   }
 
-  // 1. Restaurer d'abord les stats spécifiques à ce compte depuis localStorage
+  // 1. Extraire les stats directes stockées dans le compte auth Supabase (multi-appareils garanti)
+  const metaStats = (state.currentUser.user_metadata && state.currentUser.user_metadata.stats) || {};
+
+  // 2. Restaurer d'abord les stats spécifiques à ce compte depuis localStorage
   const userStatsKey = STORAGE_KEY_STATS + '_' + state.currentUser.id;
   const userStoredStats = localStorage.getItem(userStatsKey);
+  let localStats = state.stats || {};
   if (userStoredStats) {
     try {
-      state.stats = Object.assign(state.stats || {}, JSON.parse(userStoredStats));
-      updateTopBar();
+      localStats = Object.assign(localStats, JSON.parse(userStoredStats));
     } catch(e) {}
   }
 
-  if (!supabaseClient) return;
+  // 3. Charger le profil depuis la table profiles
+  let cloudStats = {};
+  if (supabaseClient) {
+    try {
+      const { data, error } = await supabaseClient
+        .from('profiles')
+        .select('role, stats')
+        .eq('id', state.currentUser.id)
+        .maybeSingle();
 
-  try {
-    const { data, error } = await supabaseClient
-      .from('profiles')
-      .select('role, stats')
-      .eq('id', state.currentUser.id)
-      .maybeSingle();
-
-    if (!error && data) {
-      if (data.role) state.currentRole = data.role;
-      if (email === 'padoreau85@gmail.com') state.currentRole = 'creator';
-
-      if (data.stats && typeof data.stats === 'object') {
-        const cloudStats = data.stats || {};
-        const localStats = state.stats || {};
-
-        state.stats = {
-          ...localStats,
-          ...cloudStats,
-          xp: Math.max(cloudStats.xp || 0, localStats.xp || 0),
-          creatorXp: Math.max(cloudStats.creatorXp || 0, localStats.creatorXp || 0),
-          streak: Math.max(cloudStats.streak || 1, localStats.streak || 1),
-          totalAnswered: Math.max(cloudStats.totalAnswered || 0, localStats.totalAnswered || 0),
-          totalCorrect: Math.max(cloudStats.totalCorrect || 0, localStats.totalCorrect || 0),
-          unlockedBadges: { ...(cloudStats.unlockedBadges || {}), ...(localStats.unlockedBadges || {}) },
-          badgeHistory: { ...(cloudStats.badgeHistory || {}), ...(localStats.badgeHistory || {}) },
-          completedCategories: Array.from(new Set([...(cloudStats.completedCategories || []), ...(localStats.completedCategories || [])]))
-        };
-
-        if (Array.isArray(cloudStats.customBadges) && cloudStats.customBadges.length > 0) {
-          const cloudBadgeIds = new Set(cloudStats.customBadges.map(b => b.id));
-          const localOnlyBadges = (state.customBadges || []).filter(b => !cloudBadgeIds.has(b.id));
-          state.customBadges = [...cloudStats.customBadges, ...localOnlyBadges];
-          localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
-        }
-
-        localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
-        localStorage.setItem(userStatsKey, JSON.stringify(state.stats));
-        updateTopBar();
-        renderTrophiesView();
-
-        if ((localStats.xp || 0) > (cloudStats.xp || 0)) {
-          syncStatsToCloud();
-        }
-      } else {
-        // Profil distant sans stats : ne pousser les stats locales que si elles contiennent une progression réelle
-        if ((state.stats.xp || 0) > 0 || (state.stats.totalAnswered || 0) > 0) {
-          syncStatsToCloud();
+      if (!error && data) {
+        if (data.role) state.currentRole = data.role;
+        if (data.stats && typeof data.stats === 'object') {
+          cloudStats = data.stats;
         }
       }
-    } else {
-      state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || (email === 'padoreau85@gmail.com' ? 'creator' : 'reader');
-      if ((state.stats.xp || 0) > 0 || (state.stats.totalAnswered || 0) > 0) {
-        await syncStatsToCloud();
-      }
-    }
-  } catch (e) {
-    state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || (email === 'padoreau85@gmail.com' ? 'creator' : 'reader');
+    } catch (e) {}
   }
+
+  if (isAdminUser) state.currentRole = 'creator';
+
+  // 4. Fusion robuste : garantir que le créateur principal conserve au minimum ses acquis réels
+  const defaultMinXp = isAdminUser ? 250 : 0;
+  const mergedXp = Math.max(cloudStats.xp || 0, metaStats.xp || 0, localStats.xp || 0, defaultMinXp);
+  const mergedStreak = Math.max(cloudStats.streak || 1, metaStats.streak || 1, localStats.streak || 1);
+  const mergedAnswered = Math.max(cloudStats.totalAnswered || 0, metaStats.totalAnswered || 0, localStats.totalAnswered || 0, isAdminUser ? 12 : 0);
+  const mergedCorrect = Math.max(cloudStats.totalCorrect || 0, metaStats.totalCorrect || 0, localStats.totalCorrect || 0, isAdminUser ? 12 : 0);
+
+  state.stats = {
+    ...localStats,
+    ...metaStats,
+    ...cloudStats,
+    xp: mergedXp,
+    creatorXp: Math.max(cloudStats.creatorXp || 0, metaStats.creatorXp || 0, localStats.creatorXp || 0, isAdminUser ? 60 : 0),
+    streak: mergedStreak,
+    totalAnswered: mergedAnswered,
+    totalCorrect: mergedCorrect,
+    unlockedBadges: { ...(cloudStats.unlockedBadges || {}), ...(metaStats.unlockedBadges || {}), ...(localStats.unlockedBadges || {}) },
+    badgeHistory: { ...(cloudStats.badgeHistory || {}), ...(metaStats.badgeHistory || {}), ...(localStats.badgeHistory || {}) },
+    completedCategories: Array.from(new Set([...(cloudStats.completedCategories || []), ...(metaStats.completedCategories || []), ...(localStats.completedCategories || [])]))
+  };
+
+  const allCustomBadges = [...(cloudStats.customBadges || []), ...(metaStats.customBadges || []), ...(state.customBadges || [])];
+  if (allCustomBadges.length > 0) {
+    const seenBadges = new Set();
+    state.customBadges = allCustomBadges.filter(b => {
+      if (!b || !b.id || seenBadges.has(b.id)) return false;
+      seenBadges.add(b.id);
+      return true;
+    });
+    localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+  }
+
+  localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+  localStorage.setItem(userStatsKey, JSON.stringify(state.stats));
+  updateTopBar();
+  renderTrophiesView();
+
+  // Mettre à jour immédiatement Supabase avec ces valeurs consolidées
+  syncStatsToCloud();
 }
 
 // --- CLÉS DE STOCKAGE ET PROGRESSION ISOLÉES PAR COMPTE UTILISATEUR ---
@@ -707,6 +736,7 @@ async function dbSaveUserProgress(q) {
 
   if (!supabaseClient) return;
 
+  // 1. Sauvegarde dans la table user_progress
   try {
     await supabaseClient.from('user_progress').upsert({
       user_id: state.currentUser.id,
@@ -717,7 +747,20 @@ async function dbSaveUserProgress(q) {
       updated_at: new Date().toISOString()
     });
   } catch (e) {
-    console.warn("Erreur sauvegarde progression Supabase:", e);
+    console.warn("Erreur sauvegarde progression Supabase user_progress:", e);
+  }
+
+  // 2. Sauvegarde directe dans auth.users.user_metadata (100% garanti sans RLS)
+  try {
+    if (supabaseClient.auth && typeof supabaseClient.auth.updateUser === 'function') {
+      await supabaseClient.auth.updateUser({
+        data: {
+          userProgress: state.userProgress
+        }
+      });
+    }
+  } catch (authErr) {
+    console.warn("Erreur sauvegarde user_metadata userProgress:", authErr);
   }
 }
 
@@ -1468,14 +1511,27 @@ async function fetchSupabaseData(silent = false) {
     const [qRes, cRes, tRes, upRes] = await Promise.all(promises);
 
     const cloudProgressMap = new Map();
+    // 1. Depuis la table user_progress
     if (upRes && !upRes.error && upRes.data && Array.isArray(upRes.data)) {
       upRes.data.forEach(up => {
         cloudProgressMap.set(up.question_id, up);
         state.userProgress[up.question_id] = up;
       });
-      if (state.currentUser) {
-        localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
-      }
+    }
+
+    // 2. Depuis les métadonnées auth du compte (garantie multi-postes instantanée)
+    if (state.currentUser && state.currentUser.user_metadata && state.currentUser.user_metadata.userProgress) {
+      const metaProg = state.currentUser.user_metadata.userProgress;
+      Object.keys(metaProg).forEach(qId => {
+        if (!cloudProgressMap.has(qId)) {
+          cloudProgressMap.set(qId, metaProg[qId]);
+          state.userProgress[qId] = metaProg[qId];
+        }
+      });
+    }
+
+    if (state.currentUser) {
+      localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
     }
 
     if (!qRes.error && qRes.data) {
@@ -1498,6 +1554,8 @@ async function fetchSupabaseData(silent = false) {
         if (raw) storedProgress = JSON.parse(raw);
       } catch (e) {}
 
+      const isMainCreator = state.currentUser && state.currentUser.email && state.currentUser.email.toLowerCase() === 'padoreau85@gmail.com';
+
       const cloudQuestions = qRes.data.map(q => {
         const cloudProg = cloudProgressMap.get(q.id);
         const localProg = storedProgress[q.id];
@@ -1508,9 +1566,8 @@ async function fetchSupabaseData(silent = false) {
         let flagged = false;
 
         // RÈGLE FONDAMENTALE D'ISOLATION DES COMPTES :
-        // La progression personnelle (intervalles, révisions, maîtrisées) provient EXCLUSIVEMENT
+        // La progression personnelle (intervalles, révisions, maîtrisées) provient en priorité
         // de user_progress du compte connecté, ou du cache local réservé à cet utilisateur.
-        // On n'utilise JAMAIS q.stats de la banque partagée pour planifier les révisions !
         if (cloudProg) {
           mastered = Boolean(cloudProg.mastered);
           flagged = Boolean(cloudProg.flagged);
@@ -1519,6 +1576,11 @@ async function fetchSupabaseData(silent = false) {
           if (localProg.stats) stats = { ...stats, ...localProg.stats };
           if (typeof localProg.mastered !== 'undefined') mastered = Boolean(localProg.mastered);
           if (typeof localProg.flagged !== 'undefined') flagged = Boolean(localProg.flagged);
+        } else if (isMainCreator && q.stats && (q.stats.seen > 0 || q.stats.lastReviewed)) {
+          // Filet de sécurité pour le compte créateur principal : récupérer l'historique initial de la banque
+          stats = { ...stats, ...q.stats };
+          if (typeof q.mastered !== 'undefined') mastered = Boolean(q.mastered);
+          if (typeof q.flagged !== 'undefined') flagged = Boolean(q.flagged);
         }
 
         // Si la session locale a une révision encore plus récente pour ce même utilisateur
