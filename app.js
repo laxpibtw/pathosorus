@@ -563,6 +563,7 @@ async function fetchCurrentUserRole() {
 
   // 3. Charger le profil depuis la table profiles
   let cloudStats = {};
+  let cloudProfileRole = null;
   if (supabaseClient) {
     try {
       const { data, error } = await supabaseClient
@@ -572,7 +573,7 @@ async function fetchCurrentUserRole() {
         .maybeSingle();
 
       if (!error && data) {
-        if (data.role) state.currentRole = data.role;
+        if (data.role) cloudProfileRole = data.role;
         if (data.stats && typeof data.stats === 'object') {
           cloudStats = data.stats;
         }
@@ -580,7 +581,61 @@ async function fetchCurrentUserRole() {
     } catch (e) {}
   }
 
-  if (isAdminUser) state.currentRole = 'creator';
+  // 3bis. Vérifier si ce compte a reçu une attribution de rôle dans custom_tags (ex: ROLE_CREATOR:email)
+  let tagRole = null;
+  if (supabaseClient && email) {
+    try {
+      const { data: creatorTag } = await supabaseClient
+        .from('custom_tags')
+        .select('name')
+        .eq('name', 'ROLE_CREATOR:' + email)
+        .maybeSingle();
+
+      if (creatorTag) {
+        tagRole = 'creator';
+      } else {
+        const { data: readerTag } = await supabaseClient
+          .from('custom_tags')
+          .select('name')
+          .eq('name', 'ROLE_READER:' + email)
+          .maybeSingle();
+        if (readerTag) tagRole = 'reader';
+      }
+    } catch (tagErr) {}
+  }
+
+  // Métadonnées du compte auth Supabase
+  const metaRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role);
+
+  if (isAdminUser) {
+    state.currentRole = 'creator';
+  } else if (tagRole) {
+    state.currentRole = tagRole;
+  } else if (cloudProfileRole) {
+    state.currentRole = cloudProfileRole;
+  } else if (metaRole) {
+    state.currentRole = metaRole;
+  } else {
+    state.currentRole = 'reader';
+  }
+
+  // 3ter. Enregistrement / mise à jour automatique dans public.profiles pour tout compte connecté
+  if (supabaseClient && state.currentUser) {
+    try {
+      await supabaseClient.from('profiles').upsert({
+        id: state.currentUser.id,
+        email: state.currentUser.email,
+        role: state.currentRole,
+        stats: Object.keys(cloudStats).length > 0 ? cloudStats : (state.stats || {})
+      });
+    } catch (profUpsertErr) {
+      console.warn("Profil auto-upsert:", profUpsertErr);
+    }
+  }
+
+  if (email) {
+    addKnownColleague(email, state.currentRole);
+  }
 
   // 4. Fusion robuste : garantir que le créateur principal conserve son palier Niveau 25 (750 XP) partout
   const defaultMinXp = isAdminUser ? 750 : 0;
@@ -993,7 +1048,9 @@ function openAccountsModal() {
   }
   const modal = document.getElementById('modal-accounts');
   const alertBox = document.getElementById('acc-create-alert');
+  const promoteAlertBox = document.getElementById('promote-alert-box');
   if (alertBox) alertBox.classList.add('hidden');
+  if (promoteAlertBox) promoteAlertBox.classList.add('hidden');
 
   const sKeyInput = document.getElementById('input-local-service-key');
   if (sKeyInput) {
@@ -1003,7 +1060,7 @@ function openAccountsModal() {
   if (modal) {
     modal.classList.remove('hidden');
     modal.classList.add('flex');
-    switchAccountModalTab('create');
+    switchAccountModalTab('list');
   }
   if (window.lucide) lucide.createIcons();
 }
@@ -1017,7 +1074,7 @@ function closeAccountsModal() {
 }
 
 function switchAccountModalTab(tab) {
-  const views = ['create', 'list', 'settings'];
+  const views = ['list', 'create', 'settings'];
   views.forEach(v => {
     const el = document.getElementById('acc-view-' + v);
     const btn = document.getElementById('tab-btn-acc-' + v);
@@ -1077,6 +1134,10 @@ async function handleCreateColleagueSubmit(e) {
 
   try {
     const result = await createColleagueAccount(email, password, role);
+    try {
+      await setColleagueRole(email, role);
+    } catch(e) {}
+
     if (alertBox) {
       alertBox.className = "p-3.5 rounded-xl text-xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 flex items-start space-x-2";
       alertBox.innerHTML = `
@@ -1087,7 +1148,7 @@ async function handleCreateColleagueSubmit(e) {
             Identifiants pour votre collègue :<br>
             • E-mail : <code class="text-teal-300 font-mono">${email}</code><br>
             • Mot de passe : <code class="text-teal-300 font-mono">${password}</code><br>
-            • Droits : <strong>${role === 'creator' ? 'Créateur 🦖' : 'Lecteur 📖'}</strong>
+            • Droits : <strong>${role === 'creator' ? 'Rédacteur (Créateur) 🦖' : 'Lecteur 📖'}</strong>
           </span>
         </div>
       `;
@@ -1208,83 +1269,301 @@ async function createColleagueAccount(email, password, role) {
   throw new Error("Impossible d'accéder au service de création de compte. Lancez l'application via Lancer-Local.command ou fournissez la clé Service Role.");
 }
 
-async function loadColleaguesList() {
-  const container = document.getElementById('colleagues-list-container');
-  if (!container) return;
-  container.innerHTML = `<div class="text-center py-6 text-slate-500 text-xs">Chargement des utilisateurs...</div>`;
+function addKnownColleague(email, role) {
+  try {
+    email = (email || '').trim().toLowerCase();
+    if (!email || !email.includes('@')) return;
+    const key = 'pathosorus_known_colleagues';
+    const list = JSON.parse(localStorage.getItem(key) || '[]');
+    const idx = list.findIndex(c => c && c.email && c.email.toLowerCase() === email);
+    if (idx >= 0) {
+      list[idx].role = role;
+      list[idx].updatedAt = new Date().toISOString();
+    } else {
+      list.push({ email, role, addedAt: new Date().toISOString() });
+    }
+    localStorage.setItem(key, JSON.stringify(list));
+  } catch (e) {}
+}
 
-  if (!supabaseClient) {
-    container.innerHTML = `<div class="text-center py-6 text-slate-500 text-xs">Supabase non connecté</div>`;
+async function setColleagueRole(email, newRole) {
+  email = (email || '').trim().toLowerCase();
+  if (!email || !email.includes('@')) {
+    throw new Error("Veuillez saisir une adresse e-mail valide.");
+  }
+  if (!isCreator()) {
+    throw new Error("Action réservée aux créateurs.");
+  }
+  if (email === 'padoreau85@gmail.com') {
+    throw new Error("Le rôle du créateur master padoreau85@gmail.com est toujours Créateur.");
+  }
+
+  // 1. Sauvegarder dans custom_tags (partagé dans Supabase pour tous les utilisateurs sans contrainte de clé étrangère)
+  if (supabaseClient) {
+    try {
+      if (newRole === 'creator') {
+        await supabaseClient.from('custom_tags').upsert({ name: 'ROLE_CREATOR:' + email });
+        await supabaseClient.from('custom_tags').delete().eq('name', 'ROLE_READER:' + email);
+      } else {
+        await supabaseClient.from('custom_tags').upsert({ name: 'ROLE_READER:' + email });
+        await supabaseClient.from('custom_tags').delete().eq('name', 'ROLE_CREATOR:' + email);
+      }
+    } catch (tagErr) {
+      console.warn("Avertissement sync custom_tags role:", tagErr);
+    }
+
+    // 2. Si le profil existe déjà dans profiles, le mettre à jour
+    try {
+      const { data: profs } = await supabaseClient
+        .from('profiles')
+        .select('id, email')
+        .ilike('email', email);
+
+      if (profs && profs.length > 0) {
+        for (const p of profs) {
+          await supabaseClient.from('profiles').update({ role: newRole }).eq('id', p.id);
+        }
+      }
+    } catch (profErr) {
+      console.warn("Avertissement profiles update role:", profErr);
+    }
+  }
+
+  // 3. Mémoriser localement
+  addKnownColleague(email, newRole);
+
+  return true;
+}
+
+async function handlePromoteColleagueSubmit(e) {
+  e.preventDefault();
+  const input = document.getElementById('input-promote-email');
+  const roleSelect = document.getElementById('select-promote-role');
+  const alertBox = document.getElementById('promote-alert-box');
+  const btn = document.getElementById('btn-promote-submit');
+
+  const email = (input ? input.value : '').trim().toLowerCase();
+  const role = (roleSelect ? roleSelect.value : 'creator');
+
+  if (!email || !email.includes('@')) {
+    alert("Veuillez saisir une adresse e-mail valide.");
     return;
   }
 
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span>Application...</span>`;
+  }
+  if (alertBox) alertBox.classList.add('hidden');
+
   try {
-    const { data, error } = await supabaseClient
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      container.innerHTML = `<div class="p-3 text-xs text-amber-300 bg-amber-500/10 rounded-xl">La table 'profiles' n'est pas encore créée. Avez-vous exécuté le script SQL dans Supabase ?</div>`;
-      return;
-    }
-
-    if (!data || data.length === 0) {
-      container.innerHTML = `<div class="text-center py-6 text-slate-400 text-xs">Aucun collègue enregistré pour l'instant.</div>`;
-      return;
-    }
-
-    container.innerHTML = data.map(u => {
-      const isMaster = u.email && u.email.toLowerCase() === 'padoreau85@gmail.com';
-      const isUserCreator = u.role === 'creator' || isMaster;
-      const badgeColor = isUserCreator ? 'bg-teal-500/20 text-teal-300 border-teal-500/30' : 'bg-sky-500/20 text-sky-300 border-sky-500/30';
-      const roleLabel = isUserCreator ? 'Créateur 🦖' : 'Lecteur 📖';
-
-      return `
-        <div class="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-          <div class="flex items-center space-x-2.5">
-            <div class="w-7 h-7 rounded-lg ${isUserCreator ? 'bg-teal-500/20 text-teal-400' : 'bg-sky-500/20 text-sky-400'} flex items-center justify-center font-bold text-[11px] uppercase">
-              ${(u.email || '?')[0]}
-            </div>
-            <div>
-              <div class="font-bold text-white">${escapeHtml(u.email)}</div>
-              <div class="text-[10px] text-slate-500">${u.created_at ? new Date(u.created_at).toLocaleDateString('fr-FR') : ''}</div>
-            </div>
-          </div>
-          <div class="flex items-center space-x-2">
-            <span class="px-2 py-0.5 rounded-full border text-[10px] font-bold ${badgeColor}">
-              ${roleLabel}
-            </span>
-            ${!isMaster ? `
-            <button onclick="toggleColleagueRole('${u.id}', '${isUserCreator ? 'reader' : 'creator'}')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold transition" title="Basculer le rôle">
-              Passer en ${isUserCreator ? 'Lecteur' : 'Créateur'}
-            </button>
-            ` : ''}
-          </div>
+    await setColleagueRole(email, role);
+    if (alertBox) {
+      alertBox.className = "p-3 rounded-xl text-xs bg-teal-500/10 border border-teal-500/30 text-teal-300 flex items-start space-x-2";
+      alertBox.innerHTML = `
+        <i data-lucide="check-circle" class="w-4 h-4 shrink-0 mt-0.5"></i>
+        <div>
+          <strong>Rôle attribué avec succès !</strong><br>
+          Le compte <code class="text-teal-200 font-mono">${escapeHtml(email)}</code> dispose désormais des droits <strong>${role === 'creator' ? 'Rédacteur / Créateur 🦖' : 'Lecteur 📖'}</strong>.
+          <span class="block text-[11px] text-slate-400 mt-1">Actif immédiatement sur tous ses appareils dès connexion ou actualisation.</span>
         </div>
       `;
-    }).join('');
-    if (window.lucide) lucide.createIcons();
-  } catch (e) {
-    container.innerHTML = `<div class="p-3 text-xs text-rose-300 bg-rose-500/10 rounded-xl">Erreur : ${e.message}</div>`;
+      alertBox.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    }
+    if (input) input.value = '';
+    await loadColleaguesList();
+  } catch (err) {
+    if (alertBox) {
+      alertBox.className = "p-3 rounded-xl text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start space-x-2";
+      alertBox.innerHTML = `
+        <i data-lucide="alert-triangle" class="w-4 h-4 shrink-0 mt-0.5"></i>
+        <div><strong>Erreur :</strong> ${escapeHtml(err.message)}</div>
+      `;
+      alertBox.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5"></i><span>Attribuer le rôle</span>`;
+      if (window.lucide) lucide.createIcons();
+    }
   }
 }
 
-async function toggleColleagueRole(userId, newRole) {
-  if (!isCreator()) return;
-  if (!supabaseClient) return;
-  try {
-    const { error } = await supabaseClient
-      .from('profiles')
-      .update({ role: newRole })
-      .eq('id', userId);
-
-    if (error) throw error;
-    alert(`Rôle mis à jour en '${newRole === 'creator' ? 'Créateur' : 'Lecteur'}' !`);
-    loadColleaguesList();
-  } catch (e) {
-    alert("Erreur modification rôle : " + e.message);
+async function toggleColleagueRole(email, newRole) {
+  if (!isCreator()) {
+    alert("Action réservée aux créateurs.");
+    return;
   }
+  const roleLabel = (newRole === 'creator') ? 'Rédacteur (Créateur) 🦖' : 'Lecteur 📖';
+  if (!confirm(`Voulez-vous passer le compte ${email} en rôle "${roleLabel}" ?`)) return;
+
+  try {
+    await setColleagueRole(email, newRole);
+    alert(`Rôle mis à jour avec succès : ${email} est désormais ${roleLabel} !`);
+    await loadColleaguesList();
+  } catch (e) {
+    alert("Erreur lors de la mise à jour du rôle : " + e.message);
+  }
+}
+
+async function loadColleaguesList() {
+  const container = document.getElementById('colleagues-list-container');
+  if (!container) return;
+  container.innerHTML = `<div class="text-center py-6 text-slate-500 text-xs flex items-center justify-center space-x-2">
+    <div class="w-3.5 h-3.5 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin"></div>
+    <span>Chargement des comptes...</span>
+  </div>`;
+
+  const accountsMap = new Map();
+
+  // 0. Compte Master padoreau85@gmail.com
+  accountsMap.set('padoreau85@gmail.com', {
+    email: 'padoreau85@gmail.com',
+    role: 'creator',
+    isMaster: true,
+    source: 'master'
+  });
+
+  // 1. Lire les tags de rôle dans custom_tags
+  if (supabaseClient) {
+    try {
+      const { data: tagsData } = await supabaseClient
+        .from('custom_tags')
+        .select('name')
+        .or('name.like.ROLE_CREATOR:%,name.like.ROLE_READER:%');
+
+      if (tagsData && Array.isArray(tagsData)) {
+        tagsData.forEach(t => {
+          if (t.name.startsWith('ROLE_CREATOR:')) {
+            const email = t.name.replace('ROLE_CREATOR:', '').trim().toLowerCase();
+            if (email && email.includes('@')) {
+              accountsMap.set(email, { email, role: 'creator', source: 'tag' });
+            }
+          } else if (t.name.startsWith('ROLE_READER:')) {
+            const email = t.name.replace('ROLE_READER:', '').trim().toLowerCase();
+            if (email && email.includes('@')) {
+              accountsMap.set(email, { email, role: 'reader', source: 'tag' });
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("custom_tags lecture rôles:", e);
+    }
+  }
+
+  // 2. Lire les comptes mémorisés localement
+  try {
+    const localKnown = JSON.parse(localStorage.getItem('pathosorus_known_colleagues') || '[]');
+    if (Array.isArray(localKnown)) {
+      localKnown.forEach(c => {
+        if (c && c.email) {
+          const em = c.email.trim().toLowerCase();
+          if (em && !accountsMap.has(em)) {
+            accountsMap.set(em, { email: em, role: c.role || 'reader', source: 'local' });
+          }
+        }
+      });
+    }
+  } catch(e) {}
+
+  // 3. Lire les profils de Supabase
+  if (supabaseClient) {
+    try {
+      const { data: profs, error } = await supabaseClient
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (profs && Array.isArray(profs)) {
+        profs.forEach(p => {
+          if (p && p.email) {
+            const em = p.email.trim().toLowerCase();
+            const existing = accountsMap.get(em) || {};
+            accountsMap.set(em, {
+              ...existing,
+              id: p.id,
+              email: em,
+              role: p.role || existing.role || 'reader',
+              stats: p.stats,
+              created_at: p.created_at,
+              source: 'profile'
+            });
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("profiles lecture:", e);
+    }
+  }
+
+  const accounts = Array.from(accountsMap.values());
+
+  if (accounts.length === 0) {
+    container.innerHTML = `<div class="text-center py-6 text-slate-400 text-xs">Aucun collègue enregistré pour l'instant. Utilisez le champ ci-dessus pour ajouter un compte.</div>`;
+    return;
+  }
+
+  // Trier : Master en tête, puis créateurs, puis lecteurs
+  accounts.sort((a, b) => {
+    if (a.email === 'padoreau85@gmail.com') return -1;
+    if (b.email === 'padoreau85@gmail.com') return 1;
+    if (a.role === 'creator' && b.role !== 'creator') return -1;
+    if (a.role !== 'creator' && b.role === 'creator') return 1;
+    return a.email.localeCompare(b.email);
+  });
+
+  const currentUserEmail = (state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : '';
+
+  container.innerHTML = accounts.map(u => {
+    const isMaster = (u.email === 'padoreau85@gmail.com');
+    const isUserCreator = (u.role === 'creator') || isMaster;
+    const isSelf = (currentUserEmail && currentUserEmail === u.email);
+    const xp = (u.stats && typeof u.stats.xp === 'number') ? u.stats.xp : null;
+
+    return `
+      <div class="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-3">
+        <div class="flex items-center space-x-2.5 min-w-0">
+          <div class="w-8 h-8 shrink-0 rounded-xl ${isUserCreator ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30' : 'bg-sky-500/10 text-sky-400 border border-sky-500/30'} flex items-center justify-center font-bold text-sm shadow-sm">
+            ${isUserCreator ? '🦖' : '📖'}
+          </div>
+          <div class="min-w-0">
+            <div class="text-xs font-bold text-white flex items-center space-x-1.5 truncate">
+              <span class="truncate">${escapeHtml(u.email)}</span>
+              ${isMaster ? '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">Master</span>' : ''}
+              ${isSelf && !isMaster ? '<span class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Vous</span>' : ''}
+            </div>
+            <div class="text-[11px] flex items-center space-x-2 mt-0.5">
+              <span class="font-semibold ${isUserCreator ? 'text-teal-400' : 'text-sky-400'}">
+                ${isUserCreator ? '🦖 Rédacteur (Créateur)' : '📖 Lecteur'}
+              </span>
+              ${xp !== null ? `<span class="text-slate-500">• ${xp} XP</span>` : ''}
+            </div>
+          </div>
+        </div>
+
+        <div class="shrink-0 flex items-center space-x-1.5">
+          ${!isMaster ? `
+            <button type="button" onclick="toggleColleagueRole('${escapeHtml(u.email)}', '${isUserCreator ? 'reader' : 'creator'}')" class="px-2.5 py-1.5 rounded-xl ${
+              isUserCreator
+                ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                : 'bg-teal-600/20 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/40'
+            } text-xs font-bold transition flex items-center space-x-1 shadow-sm">
+              <i data-lucide="${isUserCreator ? 'user-minus' : 'shield-check'}" class="w-3.5 h-3.5"></i>
+              <span>${isUserCreator ? 'Passer en Lecteur' : 'Passer en Rédacteur 🦖'}</span>
+            </button>
+          ` : `
+            <span class="text-[10px] text-slate-500 font-mono px-2 py-1">Admin Principal</span>
+          `}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  if (window.lucide) lucide.createIcons();
 }
 
 function saveLocalServiceKey() {
