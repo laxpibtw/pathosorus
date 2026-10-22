@@ -3111,9 +3111,424 @@ function renderTrophiesView() {
     summaryText.textContent = `${unlockedBadges.length} débloqué(s) sur ${allBadges.length} trophées${contestedBadges.length > 0 ? ` • ${contestedBadges.length} contesté(s) ⚡` : ''}`;
   }
 
-  renderTrophiesGrid();
+  // Sous-onglet actif (Trophées ou Classement)
+  if (state.trophiesSubtab === 'leaderboard') {
+    const gallery = document.getElementById('trophies-gallery-content');
+    const leaderboard = document.getElementById('trophies-leaderboard-container');
+    if (gallery) gallery.classList.add('hidden');
+    if (leaderboard) {
+      leaderboard.classList.remove('hidden');
+      renderLeaderboard();
+    }
+  } else {
+    const gallery = document.getElementById('trophies-gallery-content');
+    const leaderboard = document.getElementById('trophies-leaderboard-container');
+    if (gallery) gallery.classList.remove('hidden');
+    if (leaderboard) leaderboard.classList.add('hidden');
+    renderTrophiesGrid();
+  }
+
   if (window.lucide) lucide.createIcons();
 }
+
+function switchTrophiesSubtab(subtab = 'trophies') {
+  state.trophiesSubtab = subtab;
+  const btnTrophies = document.getElementById('btn-subtab-trophies');
+  const btnLeaderboard = document.getElementById('btn-subtab-leaderboard');
+  const gallery = document.getElementById('trophies-gallery-content');
+  const leaderboard = document.getElementById('trophies-leaderboard-container');
+
+  if (subtab === 'leaderboard') {
+    if (btnTrophies) {
+      btnTrophies.className = "px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-slate-900 text-slate-400 hover:text-white border border-slate-800";
+    }
+    if (btnLeaderboard) {
+      btnLeaderboard.className = "px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-indigo-600 text-white shadow-sm shadow-indigo-600/30";
+    }
+    if (gallery) gallery.classList.add('hidden');
+    if (leaderboard) {
+      leaderboard.classList.remove('hidden');
+      renderLeaderboard();
+    }
+  } else {
+    if (btnTrophies) {
+      btnTrophies.className = "px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-amber-500 text-slate-950 shadow-sm";
+    }
+    if (btnLeaderboard) {
+      btnLeaderboard.className = "px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-slate-900 text-slate-400 hover:text-white border border-slate-800";
+    }
+    if (gallery) gallery.classList.remove('hidden');
+    if (leaderboard) leaderboard.classList.add('hidden');
+    renderTrophiesView();
+  }
+}
+window.switchTrophiesSubtab = switchTrophiesSubtab;
+
+function setLeaderboardSort(sort) {
+  state.leaderboardSortBy = sort;
+  renderLeaderboard();
+}
+window.setLeaderboardSort = setLeaderboardSort;
+
+async function renderLeaderboard() {
+  const container = document.getElementById('trophies-leaderboard-container');
+  if (!container) return;
+
+  const currentSort = state.leaderboardSortBy || 'xp';
+
+  container.innerHTML = `
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-md">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center font-bold shrink-0">
+          <i data-lucide="trending-up" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h3 class="font-bold text-sm sm:text-base text-white">Classement Général de l'Équipe</h3>
+          <p class="text-xs text-slate-400">Avancement individuel, révisions et contributions des confrères en direct.</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+          <button onclick="setLeaderboardSort('xp')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'xp' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🏆 Par XP Joueur</button>
+          <button onclick="setLeaderboardSort('created')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'created' ? 'bg-teal-600 text-white shadow-sm' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">✍️ Par Rédactions</button>
+          <button onclick="setLeaderboardSort('streak')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'streak' ? 'bg-amber-600 text-white shadow-sm' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🔥 Par Série (Jours)</button>
+        </div>
+        <button onclick="renderLeaderboard()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center space-x-1.5 transition" title="Actualiser le classement depuis Supabase">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+          <span>Actualiser</span>
+        </button>
+      </div>
+    </div>
+    <div id="leaderboard-body" class="space-y-6">
+      <div class="p-8 text-center text-slate-400">
+        <div class="inline-block animate-spin rounded-full h-7 w-7 border-t-2 border-b-2 border-indigo-500 mb-2"></div>
+        <p class="text-xs">Chargement des données de l'équipe...</p>
+      </div>
+    </div>
+  `;
+  if (window.lucide) lucide.createIcons();
+
+  const accountsMap = new Map();
+
+  // 1. Profils connus en local
+  try {
+    const known = JSON.parse(localStorage.getItem('pathosorus_known_colleagues') || '[]');
+    if (Array.isArray(known)) {
+      known.forEach(c => {
+        if (c && c.email) {
+          const em = c.email.trim().toLowerCase();
+          accountsMap.set(em, {
+            email: em,
+            name: c.name || getQuestionAuthorDisplayName({ created_by: em }).name,
+            role: c.role || (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com' ? 'creator' : 'reader'),
+            xp: 0,
+            streak: 1,
+            totalCorrect: 0,
+            createdQuestions: 0,
+            unlockedBadgesCount: 0
+          });
+        }
+      });
+    }
+  } catch (e) {}
+
+  // 2. Toujours inclure Pierre-Alain et Samy
+  if (!accountsMap.has('padoreau85@gmail.com')) {
+    accountsMap.set('padoreau85@gmail.com', {
+      email: 'padoreau85@gmail.com',
+      name: 'Pierre-Alain Doreau',
+      role: 'creator',
+      xp: 0,
+      streak: 1,
+      totalCorrect: 0,
+      createdQuestions: 0,
+      unlockedBadgesCount: 0
+    });
+  }
+  if (!accountsMap.has('belhadef.samy@gmail.com')) {
+    accountsMap.set('belhadef.samy@gmail.com', {
+      email: 'belhadef.samy@gmail.com',
+      name: 'Samy Belhadef',
+      role: 'creator',
+      xp: 0,
+      streak: 1,
+      totalCorrect: 0,
+      createdQuestions: 0,
+      unlockedBadgesCount: 0
+    });
+  }
+
+  // 3. Lire Supabase profiles
+  if (supabaseClient) {
+    try {
+      const { data: profs, error } = await supabaseClient
+        .from('profiles')
+        .select('*');
+
+      if (profs && Array.isArray(profs)) {
+        profs.forEach(p => {
+          if (p && p.email) {
+            const em = p.email.trim().toLowerCase();
+            const existing = accountsMap.get(em) || {};
+            const stats = p.stats || {};
+            const authorInfo = getQuestionAuthorDisplayName({ created_by: em });
+
+            accountsMap.set(em, {
+              ...existing,
+              id: p.id,
+              email: em,
+              name: existing.name || authorInfo.name,
+              role: p.role || existing.role || (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com' ? 'creator' : 'reader'),
+              xp: typeof stats.xp === 'number' ? stats.xp : (existing.xp || 0),
+              streak: typeof stats.streak === 'number' ? stats.streak : (existing.streak || 1),
+              totalCorrect: typeof stats.totalCorrect === 'number' ? stats.totalCorrect : (existing.totalCorrect || 0),
+              unlockedBadgesCount: stats.unlockedBadges ? Object.keys(stats.unlockedBadges).length : (existing.unlockedBadgesCount || 0)
+            });
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Erreur chargement leaderboard profiles:", e);
+    }
+  }
+
+  // 4. Injecter les données temps réel du compte connecté
+  if (state.currentUser && state.currentUser.email) {
+    const curEmail = state.currentUser.email.trim().toLowerCase();
+    const curAuthor = getQuestionAuthorDisplayName({ created_by: curEmail });
+    const allBadges = getBadgesStatus();
+    const unlockedCount = allBadges.filter(b => b.status === 'unlocked').length;
+
+    accountsMap.set(curEmail, {
+      ...(accountsMap.get(curEmail) || {}),
+      email: curEmail,
+      name: curAuthor.name,
+      role: isCreator() ? 'creator' : 'reader',
+      xp: state.stats.xp || 0,
+      streak: state.stats.streak || 1,
+      totalCorrect: state.stats.totalCorrect || 0,
+      unlockedBadgesCount: unlockedCount,
+      isSelf: true
+    });
+  }
+
+  // 5. Compter les questions créées dans state.questions
+  const questionsByAuthor = {};
+  (state.questions || []).forEach(q => {
+    const aut = getQuestionAuthorEmail(q);
+    questionsByAuthor[aut] = (questionsByAuthor[aut] || 0) + 1;
+  });
+
+  const list = Array.from(accountsMap.values()).map(acc => {
+    const qCount = questionsByAuthor[acc.email] || 0;
+    const lvlInfo = calculatePlayerLevel(acc.xp || 0);
+    return {
+      ...acc,
+      createdQuestions: qCount,
+      level: lvlInfo.level,
+      tierName: lvlInfo.tierName,
+      tierBadge: lvlInfo.tierBadge
+    };
+  });
+
+  // Tri
+  if (currentSort === 'created') {
+    list.sort((a, b) => (b.createdQuestions || 0) - (a.createdQuestions || 0) || (b.xp || 0) - (a.xp || 0));
+  } else if (currentSort === 'streak') {
+    list.sort((a, b) => (b.streak || 0) - (a.streak || 0) || (b.xp || 0) - (a.xp || 0));
+  } else {
+    list.sort((a, b) => (b.xp || 0) - (a.xp || 0) || (b.createdQuestions || 0) - (a.createdQuestions || 0));
+  }
+
+  const bodyEl = document.getElementById('leaderboard-body');
+  if (!bodyEl) return;
+
+  // Podium (Top 3)
+  const top1 = list[0];
+  const top2 = list[1];
+  const top3 = list[2];
+
+  let podiumHtml = '';
+  if (list.length >= 2) {
+    podiumHtml = `
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end pt-2">
+        <!-- 2e Place -->
+        ${top2 ? `
+        <div class="order-2 md:order-1 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border border-slate-700/60 rounded-2xl p-5 text-center shadow-lg relative flex flex-col justify-between">
+          <div class="w-10 h-10 mx-auto -mt-8 rounded-full bg-slate-800 border-2 border-slate-400 text-slate-300 flex items-center justify-center font-bold text-base shadow">
+            🥈
+          </div>
+          <div class="mt-3 space-y-1">
+            <h4 class="font-extrabold text-sm text-white truncate">${escapeHtml(top2.name)}</h4>
+            <p class="text-[11px] text-slate-400 font-mono truncate">${escapeHtml(top2.email)}</p>
+            <div class="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 mt-1">
+              Nv ${top2.level} • ${escapeHtml(top2.tierName)}
+            </div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-around text-xs">
+            <div>
+              <span class="font-black text-white font-mono block">${top2.xp}</span>
+              <span class="text-[10px] text-slate-500">XP</span>
+            </div>
+            <div>
+              <span class="font-black text-teal-300 font-mono block">${top2.createdQuestions}</span>
+              <span class="text-[10px] text-slate-500">Créées</span>
+            </div>
+            <div>
+              <span class="font-black text-amber-400 font-mono block">${top2.streak}j</span>
+              <span class="text-[10px] text-slate-500">Série</span>
+            </div>
+          </div>
+        </div>
+        ` : '<div></div>'}
+
+        <!-- 1ère Place (Leader) -->
+        ${top1 ? `
+        <div class="order-1 md:order-2 bg-gradient-to-b from-amber-950/30 via-slate-900 to-slate-950 border-2 border-amber-500/50 rounded-2xl p-6 text-center shadow-xl relative -mt-3 flex flex-col justify-between">
+          <div class="w-12 h-12 mx-auto -mt-9 rounded-full bg-amber-500 text-slate-950 border-2 border-amber-300 flex items-center justify-center font-black text-xl shadow-lg shadow-amber-500/30">
+            👑
+          </div>
+          <div class="mt-3 space-y-1">
+            <span class="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">1er de Promotion</span>
+            <h4 class="font-black text-base text-white truncate mt-1">${escapeHtml(top1.name)}</h4>
+            <p class="text-xs text-amber-200/80 font-mono truncate">${escapeHtml(top1.email)}</p>
+            <div class="inline-block text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 mt-1">
+              Nv ${top1.level} • ${escapeHtml(top1.tierName)}
+            </div>
+          </div>
+          <div class="mt-5 pt-3 border-t border-amber-500/20 flex items-center justify-around text-xs">
+            <div>
+              <span class="font-black text-lg text-amber-400 font-mono block">${top1.xp}</span>
+              <span class="text-[10px] text-amber-200/60 font-semibold">XP Totale</span>
+            </div>
+            <div>
+              <span class="font-black text-lg text-teal-300 font-mono block">${top1.createdQuestions}</span>
+              <span class="text-[10px] text-slate-400 font-semibold">Créées</span>
+            </div>
+            <div>
+              <span class="font-black text-lg text-amber-300 font-mono block">${top1.streak}j</span>
+              <span class="text-[10px] text-slate-400 font-semibold">Série</span>
+            </div>
+          </div>
+        </div>
+        ` : ''}
+
+        <!-- 3e Place -->
+        ${top3 ? `
+        <div class="order-3 md:order-3 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border border-amber-700/40 rounded-2xl p-5 text-center shadow-lg relative flex flex-col justify-between">
+          <div class="w-10 h-10 mx-auto -mt-8 rounded-full bg-slate-800 border-2 border-amber-700 text-amber-600 flex items-center justify-center font-bold text-base shadow">
+            🥉
+          </div>
+          <div class="mt-3 space-y-1">
+            <h4 class="font-extrabold text-sm text-white truncate">${escapeHtml(top3.name)}</h4>
+            <p class="text-[11px] text-slate-400 font-mono truncate">${escapeHtml(top3.email)}</p>
+            <div class="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 mt-1">
+              Nv ${top3.level} • ${escapeHtml(top3.tierName)}
+            </div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-around text-xs">
+            <div>
+              <span class="font-black text-white font-mono block">${top3.xp}</span>
+              <span class="text-[10px] text-slate-500">XP</span>
+            </div>
+            <div>
+              <span class="font-black text-teal-300 font-mono block">${top3.createdQuestions}</span>
+              <span class="text-[10px] text-slate-500">Créées</span>
+            </div>
+            <div>
+              <span class="font-black text-amber-400 font-mono block">${top3.streak}j</span>
+              <span class="text-[10px] text-slate-500">Série</span>
+            </div>
+          </div>
+        </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  // Tableau complet
+  const tableRowsHtml = list.map((u, idx) => {
+    const isSelf = !!u.isSelf;
+    const rank = idx + 1;
+    let medal = rank === 1 ? '🥇' : (rank === 2 ? '🥈' : (rank === 3 ? '🥉' : `#${rank}`));
+    const isCreatorRole = u.role === 'creator' || u.email === 'padoreau85@gmail.com' || u.email === 'belhadef.samy@gmail.com';
+
+    return `
+      <tr class="border-b border-slate-800/80 ${isSelf ? 'bg-indigo-950/20 hover:bg-indigo-950/30 font-bold' : 'hover:bg-slate-900/60'} transition">
+        <td class="py-3 px-3.5 text-center font-bold text-xs ${rank === 1 ? 'text-amber-400' : 'text-slate-400'}">
+          ${medal}
+        </td>
+        <td class="py-3 px-3.5">
+          <div class="flex items-center space-x-2.5">
+            <div class="w-8 h-8 rounded-xl ${isCreatorRole ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30' : 'bg-sky-500/10 text-sky-400 border border-sky-500/30'} flex items-center justify-center font-bold text-xs shrink-0 shadow-sm">
+              ${escapeHtml(u.name.charAt(0).toUpperCase())}
+            </div>
+            <div class="min-w-0">
+              <div class="text-xs font-bold text-white flex items-center space-x-1.5 truncate">
+                <span class="truncate">${escapeHtml(u.name)}</span>
+                ${isSelf ? '<span class="text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/40">Vous</span>' : ''}
+                ${u.email === 'padoreau85@gmail.com' ? '<span class="text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">Master</span>' : ''}
+              </div>
+              <p class="text-[10px] text-slate-500 font-mono truncate">${escapeHtml(u.email)}</p>
+            </div>
+          </div>
+        </td>
+        <td class="py-3 px-3.5 text-xs text-slate-300">
+          <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full ${isCreatorRole ? 'bg-teal-500/10 text-teal-300 border border-teal-500/20' : 'bg-slate-800 text-slate-400'}">
+            ${isCreatorRole ? '✍️ Rédacteur' : '📖 Lecteur'}
+          </span>
+        </td>
+        <td class="py-3 px-3.5">
+          <div class="text-xs font-extrabold text-white flex items-center space-x-1.5">
+            <span class="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 font-mono text-[11px]">Nv ${u.level}</span>
+            <span class="text-[11px] text-slate-400 truncate">${escapeHtml(u.tierName)}</span>
+          </div>
+        </td>
+        <td class="py-3 px-3.5 text-right font-mono font-black text-xs text-white">
+          ${u.xp} <span class="text-[10px] text-indigo-400 font-bold">XP</span>
+        </td>
+        <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-amber-400">
+          🏆 ${u.unlockedBadgesCount}
+        </td>
+        <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-teal-300">
+          ✍️ ${u.createdQuestions}
+        </td>
+        <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-slate-300">
+          🔥 ${u.streak}j
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  bodyEl.innerHTML = `
+    ${podiumHtml}
+
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/80 border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+            <tr>
+              <th class="py-3 px-3.5 text-center w-12">#</th>
+              <th class="py-3 px-3.5">Confrère</th>
+              <th class="py-3 px-3.5">Rôle</th>
+              <th class="py-3 px-3.5">Niveau Joueur</th>
+              <th class="py-3 px-3.5 text-right cursor-pointer hover:text-white" onclick="setLeaderboardSort('xp')">XP Totale ↕</th>
+              <th class="py-3 px-3.5 text-center">Trophées</th>
+              <th class="py-3 px-3.5 text-center cursor-pointer hover:text-white" onclick="setLeaderboardSort('created')">Questions Rédigées ↕</th>
+              <th class="py-3 px-3.5 text-center cursor-pointer hover:text-white" onclick="setLeaderboardSort('streak')">Série ↕</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRowsHtml}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  if (window.lucide) lucide.createIcons();
+}
+window.renderLeaderboard = renderLeaderboard;
 
 function setTrophyFilter(filter) {
   state.trophyFilter = filter;

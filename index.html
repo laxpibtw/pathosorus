@@ -617,35 +617,55 @@
       <!-- Alerte Trophées Contestés ⚡ (si de nouvelles questions sont arrivées) -->
       <div id="trophies-contested-banner" class="hidden"></div>
 
-      <!-- Barre d'Outils & Filtres des Trophées -->
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-md">
-        <div class="flex items-center space-x-3">
-          <div class="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center font-bold shrink-0">
-            <i data-lucide="trophy" class="w-5 h-5"></i>
+      <!-- Navigation sous-onglets Trophées & Classement -->
+      <div class="flex items-center space-x-2 border-b border-slate-800 pb-3">
+        <button id="btn-subtab-trophies" onclick="switchTrophiesSubtab('trophies')" class="px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-amber-500 text-slate-950 shadow-sm">
+          <i data-lucide="award" class="w-4 h-4"></i>
+          <span>🏆 Galerie des Trophées</span>
+        </button>
+        <button id="btn-subtab-leaderboard" onclick="switchTrophiesSubtab('leaderboard')" class="px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-slate-900 text-slate-400 hover:text-white border border-slate-800">
+          <i data-lucide="trending-up" class="w-4 h-4 text-indigo-400"></i>
+          <span>🏅 Classement de l'Équipe</span>
+        </button>
+      </div>
+
+      <!-- Contenu Sous-Onglet 1 : Galerie des Trophées -->
+      <div id="trophies-gallery-content" class="space-y-6">
+        <!-- Barre d'Outils & Filtres des Trophées -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-md">
+          <div class="flex items-center space-x-3">
+            <div class="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center font-bold shrink-0">
+              <i data-lucide="trophy" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 class="font-bold text-sm sm:text-base text-white">Galerie des Trophées & Accomplissements</h3>
+              <p id="trophies-summary-text" class="text-xs text-slate-400">Calcul des trophées en cours...</p>
+            </div>
           </div>
-          <div>
-            <h3 class="font-bold text-sm sm:text-base text-white">Galerie des Trophées & Accomplissements</h3>
-            <p id="trophies-summary-text" class="text-xs text-slate-400">Calcul des trophées en cours...</p>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+              <button onclick="setTrophyFilter('all')" id="btn-trophy-filter-all" class="px-3 py-1.5 rounded-xl text-xs font-bold transition bg-amber-500 text-slate-950 shadow-sm">Tous</button>
+              <button onclick="setTrophyFilter('unlocked')" id="btn-trophy-filter-unlocked" class="px-3 py-1.5 rounded-xl text-xs font-semibold transition bg-slate-950 text-slate-400 hover:text-white border border-slate-800">🏆 Débloqués</button>
+              <button onclick="setTrophyFilter('contested')" id="btn-trophy-filter-contested" class="px-3 py-1.5 rounded-xl text-xs font-semibold transition bg-slate-950 text-slate-400 hover:text-white border border-slate-800">⚡ Contestés</button>
+              <button onclick="setTrophyFilter('locked')" id="btn-trophy-filter-locked" class="px-3 py-1.5 rounded-xl text-xs font-semibold transition bg-slate-950 text-slate-400 hover:text-white border border-slate-800">🔒 À débloquer</button>
+            </div>
+            <button onclick="openCreateTrophyModal()" class="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 text-xs font-bold flex items-center space-x-1.5 transition shadow-sm" title="Créer un trophée personnalisé">
+              <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-amber-400"></i>
+              <span>+ Créer Trophée</span>
+            </button>
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
-            <button onclick="setTrophyFilter('all')" id="btn-trophy-filter-all" class="px-3 py-1.5 rounded-xl text-xs font-bold transition bg-amber-500 text-slate-950 shadow-sm">Tous</button>
-            <button onclick="setTrophyFilter('unlocked')" id="btn-trophy-filter-unlocked" class="px-3 py-1.5 rounded-xl text-xs font-semibold transition bg-slate-950 text-slate-400 hover:text-white border border-slate-800">🏆 Débloqués</button>
-            <button onclick="setTrophyFilter('contested')" id="btn-trophy-filter-contested" class="px-3 py-1.5 rounded-xl text-xs font-semibold transition bg-slate-950 text-slate-400 hover:text-white border border-slate-800">⚡ Contestés</button>
-            <button onclick="setTrophyFilter('locked')" id="btn-trophy-filter-locked" class="px-3 py-1.5 rounded-xl text-xs font-semibold transition bg-slate-950 text-slate-400 hover:text-white border border-slate-800">🔒 À débloquer</button>
-          </div>
-          <button onclick="openCreateTrophyModal()" class="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 text-xs font-bold flex items-center space-x-1.5 transition shadow-sm" title="Créer un trophée personnalisé">
-            <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-amber-400"></i>
-            <span>+ Créer Trophée</span>
-          </button>
+        <!-- Grille des Cartes de Trophées -->
+        <div id="trophies-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <!-- Rendu dynamique par renderTrophiesView() -->
         </div>
       </div>
 
-      <!-- Grille des Cartes de Trophées -->
-      <div id="trophies-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <!-- Rendu dynamique par renderTrophiesView() -->
+      <!-- Contenu Sous-Onglet 2 : Classement de l'Équipe (Leaderboard) -->
+      <div id="trophies-leaderboard-container" class="hidden space-y-6">
+        <!-- Rendu dynamique par renderLeaderboard() -->
       </div>
 
     </div>
@@ -1575,7 +1595,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="seed_data.js?v=20261022_1550"></script>
-  <script src="app.js?v=20261022_1550"></script>
+  <script src="seed_data.js?v=20261022_1735"></script>
+  <script src="app.js?v=20261022_1735"></script>
 </body>
 </html>
