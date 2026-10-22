@@ -324,6 +324,9 @@
             </div>
           </div>
 
+          <!-- Galerie d'illustrations & Schémas de correction -->
+          <div id="session-explanation-images-container" class="grid grid-cols-1 sm:grid-cols-2 gap-3 hidden"></div>
+
           <!-- Piège classique -->
           <div id="session-trap-box" class="p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs space-y-1">
             <div class="flex items-center space-x-1.5 font-bold text-amber-400">
@@ -696,6 +699,39 @@
                 <span>Le Piège Classique ACP à éviter (optionnel)</span>
               </label>
               <textarea id="form-q-trap" rows="2" placeholder="ex: Attention au piège de l'anticorps... ou au faux positif en IHC (laisser vide si non applicable)..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/30 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"></textarea>
+            </div>
+
+            <!-- Images & Schémas d'explication -->
+            <div class="space-y-2 pt-1">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="block text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
+                    <i data-lucide="image" class="w-3.5 h-3.5 text-teal-400"></i>
+                    <span>Schémas & Illustrations d'explication (Optionnel)</span>
+                  </label>
+                  <p class="text-[11px] text-slate-400">Révélés uniquement lors de la correction (arbres décisionnels, différentiels...). Collez avec ⌘V ou déposez un fichier.</p>
+                </div>
+                <label class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1 cursor-pointer transition border border-slate-700 shrink-0">
+                  <i data-lucide="image-plus" class="w-3.5 h-3.5 text-teal-400"></i>
+                  <span>Parcourir</span>
+                  <input type="file" id="editor-explanation-file-input" accept="image/*" multiple onchange="handleEditorExplanationImageUpload(event)" class="hidden">
+                </label>
+              </div>
+
+              <!-- Zone de Dépôt & Collage dédiée à l'explication -->
+              <div id="editor-explanation-image-dropzone"
+                   onclick="document.getElementById('editor-explanation-file-input').click()"
+                   ondragover="handleEditorExplanationDragOver(event)"
+                   ondragleave="handleEditorExplanationDragLeave(event)"
+                   ondrop="handleEditorExplanationDrop(event)"
+                   class="border border-dashed border-teal-500/30 hover:border-teal-500/60 bg-slate-950/40 hover:bg-teal-500/5 rounded-xl p-3 text-center cursor-pointer transition flex items-center justify-center space-x-2 group">
+                <i data-lucide="file-image" class="w-4 h-4 text-teal-400 group-hover:scale-110 transition"></i>
+                <span class="text-xs text-slate-300">
+                  Collez un schéma avec <kbd class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-teal-300 font-mono text-[10px]">⌘V</kbd> / <kbd class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-teal-300 font-mono text-[10px]">Ctrl+V</kbd> ou glissez une image ici
+                </span>
+              </div>
+
+              <div id="editor-explanation-images-preview" class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 hidden"></div>
             </div>
           </div>
 
@@ -1153,6 +1189,7 @@
             <span>Explication diagnostique :</span>
           </span>
           <p id="detail-explanation-text" class="text-slate-300 leading-relaxed"></p>
+          <div id="detail-explanation-images-container" class="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 hidden"></div>
         </div>
 
         <div id="detail-trap-container" class="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs space-y-1">

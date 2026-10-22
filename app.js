@@ -30,6 +30,7 @@ let state = {
   currentDPSession: null,
   creatorMode: 'simple',
   editorUploadedImages: [],
+  editorUploadedExplanationImages: [],
   editorSelectedTags: new Set(),
   editorQuestionOptions: [],
   dpSteps: [],
@@ -986,15 +987,39 @@ function openQuestionDetail(id) {
 
   const expContainer = document.getElementById('detail-explanation-container');
   const expText = document.getElementById('detail-explanation-text');
-  if (expContainer && expText) {
-    if (q.explanation && q.explanation.trim()) {
-      expText.textContent = q.explanation;
+  const expImgsContainer = document.getElementById('detail-explanation-images-container');
+  const hasExpText = Boolean(q.explanation && q.explanation.trim());
+  const hasExpImgs = Boolean(q.explanationImages && q.explanationImages.length > 0);
+
+  if (expContainer) {
+    if (hasExpText || hasExpImgs) {
       expContainer.classList.remove('hidden');
+      if (expText) {
+        expText.textContent = q.explanation || '';
+        expText.style.display = hasExpText ? 'block' : 'none';
+      }
+      if (expImgsContainer) {
+        if (hasExpImgs) {
+          expImgsContainer.classList.remove('hidden');
+          expImgsContainer.innerHTML = q.explanationImages.map((img, idx) => `
+            <div class="relative group cursor-pointer overflow-hidden rounded-xl border border-teal-500/30 hover:border-teal-400/60 bg-slate-900 transition" onclick="openLightbox('${img.url}', '${escapeJsString(img.caption || 'Schéma explicatif ' + (idx + 1))}')">
+              <img src="${img.url}" alt="${escapeHtml(img.caption || 'Illustration')}" class="w-full h-24 object-cover group-hover:scale-105 transition duration-300">
+              ${img.caption ? `<div class="p-1 text-[10px] bg-slate-950/90 text-teal-300 truncate">${escapeHtml(img.caption)}</div>` : ''}
+            </div>
+          `).join('');
+        } else {
+          expImgsContainer.classList.add('hidden');
+          expImgsContainer.innerHTML = '';
+        }
+      }
     } else {
       expContainer.classList.add('hidden');
+      if (expText) expText.textContent = '';
+      if (expImgsContainer) {
+        expImgsContainer.classList.add('hidden');
+        expImgsContainer.innerHTML = '';
+      }
     }
-  } else if (expText) {
-    expText.textContent = q.explanation || "";
   }
   
   const trapContainer = document.getElementById('detail-trap-container');
@@ -1043,6 +1068,7 @@ async function fetchSupabaseData(silent = false) {
         optionExplanations: q.optionExplanations || [],
         tags: q.tags || [],
         images: q.images || [],
+        explanationImages: q.explanationImages || [],
         stats: q.stats || { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 }
       }));
       localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
@@ -1100,10 +1126,11 @@ async function syncLocalToSupabase() {
     }
     if (state.questions.length > 0) {
       const { error: qErr } = await supabaseClient.from('questions').upsert(state.questions);
-      if (qErr && qErr.message && qErr.message.includes('optionExplanations')) {
+      if (qErr && qErr.message && (qErr.message.includes('optionExplanations') || qErr.message.includes('explanationImages'))) {
         const sanitized = state.questions.map(q => {
           const copy = { ...q };
-          delete copy.optionExplanations;
+          if (qErr.message.includes('optionExplanations')) delete copy.optionExplanations;
+          if (qErr.message.includes('explanationImages')) delete copy.explanationImages;
           return copy;
         });
         await supabaseClient.from('questions').upsert(sanitized);
@@ -1143,9 +1170,10 @@ async function dbUpsertQuestion(q) {
   if (!isCreator()) return;
   try {
     const { error } = await supabaseClient.from('questions').upsert(q);
-    if (error && error.message && error.message.includes('optionExplanations')) {
+    if (error && error.message && (error.message.includes('optionExplanations') || error.message.includes('explanationImages'))) {
       const fallback = { ...q };
-      delete fallback.optionExplanations;
+      if (error.message.includes('optionExplanations')) delete fallback.optionExplanations;
+      if (error.message.includes('explanationImages')) delete fallback.explanationImages;
       await supabaseClient.from('questions').upsert(fallback);
     } else if (error) {
       console.warn("Erreur upsert question supabase:", error);
@@ -1229,6 +1257,8 @@ function initApp() {
   state.questions.forEach(q => {
     if (typeof q.mastered === 'undefined') q.mastered = false;
     if (!q.stats) q.stats = { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 };
+    if (!q.explanationImages) q.explanationImages = [];
+    if (!q.images) q.images = [];
   });
 
   const storedCases = localStorage.getItem(STORAGE_KEY_CASES);
@@ -1861,6 +1891,11 @@ function renderSessionQuestion() {
   }
 
   document.getElementById('session-feedback-box').classList.add('hidden');
+  const expImgs = document.getElementById('session-explanation-images-container');
+  if (expImgs) {
+    expImgs.classList.add('hidden');
+    expImgs.innerHTML = '';
+  }
   updateSessionMasteredButton(q.mastered);
 
   if (window.lucide) lucide.createIcons();
@@ -2073,6 +2108,32 @@ function evaluateSessionAnswer(selectedIndices) {
     }
   }
 
+  // Schémas et illustrations d'explication (révélés lors de la correction)
+  const expImgsContainer = document.getElementById('session-explanation-images-container');
+  if (expImgsContainer) {
+    if (q.explanationImages && q.explanationImages.length > 0) {
+      expImgsContainer.innerHTML = q.explanationImages.map((img, idx) => `
+        <div class="relative rounded-2xl overflow-hidden border border-teal-500/30 bg-black cursor-zoom-in group flex flex-col justify-end shadow-lg hover:border-teal-400 transition"
+             onclick="openLightbox('${img.url}', '${escapeJsString(img.caption || `Schéma d\'explication ${idx + 1}`)}')">
+          <div class="relative w-full max-h-60 flex items-center justify-center bg-black overflow-hidden">
+            <img src="${img.url}" alt="${escapeHtml(img.caption || 'Schéma explicatif')}" class="w-full max-h-60 object-contain group-hover:scale-105 transition duration-300">
+          </div>
+          <div class="bg-slate-900/95 backdrop-blur p-2 text-white text-xs font-medium flex items-center justify-between border-t border-slate-800">
+            <div class="flex items-center space-x-1.5 truncate">
+              <span class="px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300 font-mono text-[10px] font-bold">Schéma ${idx + 1}</span>
+              <span class="truncate text-slate-200 text-[11px]">${escapeHtml(img.caption || 'Agrandir')}</span>
+            </div>
+            <i data-lucide="zoom-in" class="w-3.5 h-3.5 text-teal-400 shrink-0 ml-1"></i>
+          </div>
+        </div>
+      `).join('');
+      expImgsContainer.classList.remove('hidden');
+    } else {
+      expImgsContainer.innerHTML = '';
+      expImgsContainer.classList.add('hidden');
+    }
+  }
+
   const streakText = document.getElementById('session-stat-streak');
   if (streakText) {
     streakText.textContent = `Réussite consécutive : ${q.stats.consecutiveCorrect} fois`;
@@ -2111,6 +2172,7 @@ function resetQuestionForm() {
   document.getElementById('form-q-edit-id').value = "";
   document.getElementById('form-q-format').value = "qcm";
   state.editorUploadedImages = [];
+  state.editorUploadedExplanationImages = [];
   state.editorSelectedTags.clear();
   state.editorQuestionOptions = [
     { text: '', explanation: '', correct: false },
@@ -2119,6 +2181,7 @@ function resetQuestionForm() {
     { text: '', explanation: '', correct: false }
   ];
   renderEditorUploadedImages();
+  renderEditorUploadedExplanationImages();
   renderEditorTagsSelector();
   updateEditorDatalists();
   onFormatChange();
@@ -2366,6 +2429,101 @@ async function handleEditorDrop(e) {
   }
 }
 
+async function attachExplanationFilesToEditor(files) {
+  if (!files || files.length === 0) return;
+  const validFiles = Array.from(files).filter(f => f.type && f.type.startsWith('image/'));
+  if (validFiles.length === 0) return;
+
+  if (!state.editorUploadedExplanationImages) state.editorUploadedExplanationImages = [];
+
+  for (const file of validFiles) {
+    const url = await uploadImageFile(file);
+    const count = state.editorUploadedExplanationImages.length + 1;
+    const defaultCaption = (file.name && file.name !== 'image.png' && file.name !== 'blob')
+      ? file.name.replace(/\.[^/.]+$/, "")
+      : `Schéma explicatif ${count}`;
+    state.editorUploadedExplanationImages.push({
+      url: url,
+      caption: defaultCaption
+    });
+  }
+  renderEditorUploadedExplanationImages();
+  showToast(`💡 ${validFiles.length} schéma${validFiles.length > 1 ? 's' : ''} d'explication ajouté${validFiles.length > 1 ? 's' : ''} !`);
+}
+
+async function handleEditorExplanationImageUpload(e) {
+  const files = e.target.files;
+  if (!files || files.length === 0) return;
+  await attachExplanationFilesToEditor(files);
+  e.target.value = '';
+}
+
+function handleEditorExplanationDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dropzone = document.getElementById('editor-explanation-image-dropzone');
+  if (dropzone) {
+    dropzone.classList.add('border-teal-400', 'bg-teal-500/10');
+  }
+}
+
+function handleEditorExplanationDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dropzone = document.getElementById('editor-explanation-image-dropzone');
+  if (dropzone) {
+    dropzone.classList.remove('border-teal-400', 'bg-teal-500/10');
+  }
+}
+
+async function handleEditorExplanationDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dropzone = document.getElementById('editor-explanation-image-dropzone');
+  if (dropzone) {
+    dropzone.classList.remove('border-teal-400', 'bg-teal-500/10');
+  }
+  const dt = e.dataTransfer;
+  if (dt && dt.files && dt.files.length > 0) {
+    await attachExplanationFilesToEditor(dt.files);
+  }
+}
+
+function renderEditorUploadedExplanationImages() {
+  const container = document.getElementById('editor-explanation-images-preview');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!state.editorUploadedExplanationImages || state.editorUploadedExplanationImages.length === 0) {
+    container.classList.add('hidden');
+    return;
+  }
+  container.classList.remove('hidden');
+
+  state.editorUploadedExplanationImages.forEach((imgObj, idx) => {
+    const card = document.createElement('div');
+    card.className = "relative rounded-xl overflow-hidden border border-teal-500/40 bg-black flex flex-col p-2 space-y-2 group shadow-md";
+    card.innerHTML = `
+      <div class="relative cursor-pointer overflow-hidden rounded group/img" onclick="openLightbox('${imgObj.url}', '${escapeJsString(imgObj.caption || 'Schéma ' + (idx + 1))}')">
+        <img src="${imgObj.url}" alt="Aperçu Schéma" class="h-28 w-full object-contain rounded bg-slate-950 group-hover/img:scale-105 transition">
+        <div class="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition">
+          <i data-lucide="zoom-in" class="w-5 h-5 text-teal-400"></i>
+        </div>
+      </div>
+      <input type="text" value="${escapeHtml(imgObj.caption || '')}" oninput="state.editorUploadedExplanationImages[${idx}].caption = this.value" placeholder="Légende (ex: Arbre IHC, Tableau différentiel...)" class="text-[11px] bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+      <div class="flex items-center justify-between pt-0.5">
+        <span class="text-[10px] text-teal-400 font-mono">Schéma #${idx + 1}</span>
+        <button type="button" onclick="state.editorUploadedExplanationImages.splice(${idx}, 1); renderEditorUploadedExplanationImages();" class="text-[10px] text-rose-400 hover:text-rose-300 font-semibold flex items-center space-x-0.5 transition">
+          <i data-lucide="trash-2" class="w-3 h-3"></i>
+          <span>Supprimer</span>
+        </button>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+
+  if (window.lucide) lucide.createIcons();
+}
+
 function initClipboardPasteListener() {
   window.addEventListener('paste', async (e) => {
     // Ne pas intercepter si la vue de création n'est pas active
@@ -2394,7 +2552,19 @@ function initClipboardPasteListener() {
     e.preventDefault();
 
     if (state.creatorMode === 'simple') {
-      await attachFilesToEditor(imageFiles);
+      const activeEl = document.activeElement;
+      const isExplanationTarget = activeEl && (
+        activeEl.id === 'form-q-explanation' ||
+        activeEl.id === 'form-q-trap' ||
+        activeEl.closest('#editor-explanation-image-dropzone') ||
+        activeEl.closest('#editor-explanation-images-preview')
+      );
+
+      if (isExplanationTarget) {
+        await attachExplanationFilesToEditor(imageFiles);
+      } else {
+        await attachFilesToEditor(imageFiles);
+      }
     } else if (state.creatorMode === 'dp') {
       let activeStepIdx = 0;
       const activeEl = document.activeElement;
@@ -2518,7 +2688,8 @@ function handleSaveQuestionForm(e) {
       state.questions[idx] = {
         ...state.questions[idx],
         format, organ, category, entity, question, context, explanation, trap, tags, options, correct, optionExplanations,
-        images: [...state.editorUploadedImages]
+        images: [...state.editorUploadedImages],
+        explanationImages: [...(state.editorUploadedExplanationImages || [])]
       };
       dbUpsertQuestion(state.questions[idx]);
     }
@@ -2527,6 +2698,7 @@ function handleSaveQuestionForm(e) {
       id: "q_" + Date.now(),
       format, organ, category, entity, question, context, explanation, trap, tags, options, correct, optionExplanations,
       images: [...state.editorUploadedImages],
+      explanationImages: [...(state.editorUploadedExplanationImages || [])],
       flagged: false,
       mastered: false,
       stats: { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 }
@@ -2563,8 +2735,10 @@ function editQuestion(id) {
   document.getElementById('form-q-trap').value = q.trap || '';
 
   state.editorUploadedImages = q.images ? [...q.images] : [];
+  state.editorUploadedExplanationImages = q.explanationImages ? [...q.explanationImages] : [];
   state.editorSelectedTags = new Set(q.tags || []);
   renderEditorUploadedImages();
+  renderEditorUploadedExplanationImages();
   renderEditorTagsSelector();
 
   if (q.format === 'piege') {

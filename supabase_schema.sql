@@ -90,6 +90,7 @@ create table if not exists public.questions (
   correct jsonb not null default '[]'::jsonb,
   optionExplanations jsonb not null default '[]'::jsonb,
   explanation text default '',
+  explanationImages jsonb not null default '[]'::jsonb,
   trap text default '',
   tags jsonb not null default '[]'::jsonb,
   images jsonb not null default '[]'::jsonb,
@@ -98,8 +99,9 @@ create table if not exists public.questions (
   flagged boolean not null default false
 );
 
--- Rétrocompatibilité : ajout sans erreur de la colonne explications par item si la table existe déjà
+-- Rétrocompatibilité : ajout sans erreur des colonnes d'explications et schémas si la table existe déjà
 alter table public.questions add column if not exists optionExplanations jsonb default '[]'::jsonb;
+alter table public.questions add column if not exists explanationImages jsonb default '[]'::jsonb;
 
 -- 6. Table des Dossiers Progressifs (DP)
 create table if not exists public.cases (
