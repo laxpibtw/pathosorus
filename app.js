@@ -66,6 +66,40 @@ function escapeJsString(str) {
     .replace(/"/g, '\\"');
 }
 
+function showToast(message, type = 'success') {
+  let toastContainer = document.getElementById('toast-container');
+  if (!toastContainer) {
+    toastContainer = document.createElement('div');
+    toastContainer.id = 'toast-container';
+    toastContainer.className = "fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none";
+    document.body.appendChild(toastContainer);
+  }
+
+  const toast = document.createElement('div');
+  const bg = type === 'success' 
+    ? 'bg-teal-600 text-white shadow-teal-500/30' 
+    : (type === 'error' ? 'bg-rose-600 text-white shadow-rose-500/30' : 'bg-slate-800 text-slate-200 shadow-black/50');
+  toast.className = `px-4 py-2.5 rounded-xl text-xs font-semibold shadow-xl flex items-center space-x-2 pointer-events-auto transition-all duration-300 opacity-0 translate-y-2 ${bg}`;
+  toast.innerHTML = `
+    <i data-lucide="${type === 'success' ? 'check-circle' : 'info'}" class="w-4 h-4 shrink-0"></i>
+    <span>${escapeHtml(message)}</span>
+  `;
+
+  toastContainer.appendChild(toast);
+  if (window.lucide) lucide.createIcons();
+
+  requestAnimationFrame(() => {
+    toast.classList.remove('opacity-0', 'translate-y-2');
+  });
+
+  setTimeout(() => {
+    toast.classList.add('opacity-0', 'translate-y-2');
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 300);
+  }, 3500);
+}
+
 const audioCtx = (window.AudioContext || window.webkitAudioContext) ? new (window.AudioContext || window.webkitAudioContext)() : null;
 function playSound(type) {
   if (!audioCtx) return;
@@ -1164,7 +1198,7 @@ async function dbUpsertTag(name) {
 async function uploadImageFile(file) {
   if (supabaseClient) {
     try {
-      const ext = (file.name || 'image.jpg').split('.').pop();
+      const ext = (file.name || 'image.png').split('.').pop() || 'png';
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`;
       const { data, error } = await supabaseClient.storage
         .from('pathosorus_images')
@@ -1218,6 +1252,8 @@ function initApp() {
   if (initSupabase()) {
     fetchSupabaseData(true);
   }
+
+  initClipboardPasteListener();
 
   if (window.lucide) lucide.createIcons();
 }
@@ -1707,15 +1743,28 @@ function renderSessionQuestion() {
   imgContainer.innerHTML = '';
   if (q.images && q.images.length > 0) {
     imgContainer.classList.remove('hidden');
+    const isSingle = (q.images.length === 1);
+    imgContainer.className = isSingle 
+      ? "grid grid-cols-1 gap-3" 
+      : "grid grid-cols-1 sm:grid-cols-2 gap-3";
+
     q.images.forEach((imgObj, idx) => {
       const card = document.createElement('div');
-      card.className = "relative rounded-xl overflow-hidden border border-slate-700 bg-black cursor-zoom-in group max-h-60 flex flex-col justify-end";
-      card.onclick = () => openLightbox(imgObj.url, imgObj.caption || `Cliché ${idx + 1}`);
+      card.className = "relative rounded-2xl overflow-hidden border border-slate-800 bg-black cursor-zoom-in group flex flex-col justify-end shadow-xl hover:border-teal-500/50 transition";
+      card.onclick = () => openLightbox(imgObj.url, imgObj.caption || `Lame ${idx + 1}`);
       card.innerHTML = `
-        <img src="${imgObj.url}" alt="Coupe" class="max-h-60 w-full object-contain">
-        <div class="absolute bottom-0 inset-x-0 bg-slate-900/80 backdrop-blur p-2 text-white text-[11px] font-medium flex items-center justify-between border-t border-slate-800">
-          <span class="truncate">${imgObj.caption || 'Agrandir la coupe'}</span>
-          <i data-lucide="zoom-in" class="w-3.5 h-3.5 text-teal-400"></i>
+        <div class="relative w-full ${isSingle ? 'max-h-96' : 'max-h-64'} flex items-center justify-center bg-black overflow-hidden">
+          <img src="${imgObj.url}" alt="Lame microscopique" class="w-full ${isSingle ? 'max-h-96' : 'max-h-64'} object-contain group-hover:scale-[1.02] transition duration-300">
+        </div>
+        <div class="bg-slate-900/90 backdrop-blur p-2.5 text-white text-xs font-medium flex items-center justify-between border-t border-slate-800">
+          <div class="flex items-center space-x-2 truncate">
+            <span class="px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300 font-mono text-[10px] font-bold">Lame ${idx + 1}</span>
+            <span class="truncate text-slate-200">${escapeHtml(imgObj.caption || 'Cliquer pour examiner en plein écran')}</span>
+          </div>
+          <span class="text-[11px] text-teal-400 font-semibold flex items-center space-x-1 shrink-0 ml-2">
+            <span>Examiner</span>
+            <i data-lucide="zoom-in" class="w-3.5 h-3.5"></i>
+          </span>
         </div>
       `;
       imgContainer.appendChild(card);
@@ -2216,22 +2265,113 @@ function handleEditorOptionCorrectChange(idx, isChecked) {
   }
 }
 
+async function attachFilesToEditor(files) {
+  if (!files || files.length === 0) return;
+  const validFiles = Array.from(files).filter(f => f.type && f.type.startsWith('image/'));
+  if (validFiles.length === 0) return;
+
+  for (const file of validFiles) {
+    const url = await uploadImageFile(file);
+    const count = state.editorUploadedImages.length + 1;
+    const defaultCaption = (file.name && file.name !== 'image.png' && file.name !== 'blob')
+      ? file.name.replace(/\.[^/.]+$/, "")
+      : `Lame microscopique ${count}`;
+    state.editorUploadedImages.push({
+      url: url,
+      caption: defaultCaption
+    });
+  }
+  renderEditorUploadedImages();
+  showToast(`📸 ${validFiles.length} lame${validFiles.length > 1 ? 's' : ''} ajoutée${validFiles.length > 1 ? 's' : ''} à la question !`);
+}
+
 async function handleEditorImageUpload(e) {
   const files = e.target.files;
   if (!files || files.length === 0) return;
+  await attachFilesToEditor(files);
+  e.target.value = '';
+}
 
-  for (const file of Array.from(files)) {
-    const url = await uploadImageFile(file);
-    state.editorUploadedImages.push({
-      url: url,
-      caption: file.name.replace(/\.[^/.]+$/, "")
-    });
-    renderEditorUploadedImages();
+function handleEditorDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dropzone = document.getElementById('editor-image-dropzone');
+  if (dropzone) {
+    dropzone.classList.add('border-teal-400', 'bg-teal-500/10');
   }
+}
+
+function handleEditorDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dropzone = document.getElementById('editor-image-dropzone');
+  if (dropzone) {
+    dropzone.classList.remove('border-teal-400', 'bg-teal-500/10');
+  }
+}
+
+async function handleEditorDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dropzone = document.getElementById('editor-image-dropzone');
+  if (dropzone) {
+    dropzone.classList.remove('border-teal-400', 'bg-teal-500/10');
+  }
+
+  const dt = e.dataTransfer;
+  if (dt && dt.files && dt.files.length > 0) {
+    await attachFilesToEditor(dt.files);
+  }
+}
+
+function initClipboardPasteListener() {
+  window.addEventListener('paste', async (e) => {
+    // Ne pas intercepter si la vue de création n'est pas active
+    const createView = document.getElementById('view-create');
+    if (!createView || createView.classList.contains('hidden')) return;
+
+    // Ne pas intercepter si l'utilisateur est dans une modale
+    const modalDetail = document.getElementById('modal-question-detail');
+    if (modalDetail && !modalDetail.classList.contains('hidden')) return;
+
+    const items = (e.clipboardData || window.clipboardData)?.items;
+    if (!items || items.length === 0) return;
+
+    const imageFiles = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type && items[i].type.startsWith('image/')) {
+        const file = items[i].getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+
+    // S'il n'y a pas d'image dans le presse-papiers, le collage texte standard continue normalement
+    if (imageFiles.length === 0) return;
+
+    // Empêcher l'insertion de texte binaire dans les champs texte
+    e.preventDefault();
+
+    if (state.creatorMode === 'simple') {
+      await attachFilesToEditor(imageFiles);
+    } else if (state.creatorMode === 'dp') {
+      let activeStepIdx = 0;
+      const activeEl = document.activeElement;
+      if (activeEl) {
+        const stepCard = activeEl.closest('[data-dp-step-index]');
+        if (stepCard) {
+          activeStepIdx = parseInt(stepCard.getAttribute('data-dp-step-index'), 10) || 0;
+        } else if (state.dpSteps.length > 0) {
+          activeStepIdx = state.dpSteps.length - 1;
+        }
+      }
+      await attachFilesToDPStep(imageFiles, activeStepIdx);
+    }
+  });
 }
 
 function renderEditorUploadedImages() {
   const container = document.getElementById('editor-images-preview');
+  if (!container) return;
   container.innerHTML = '';
   if (state.editorUploadedImages.length === 0) {
     container.classList.add('hidden');
@@ -2241,14 +2381,27 @@ function renderEditorUploadedImages() {
 
   state.editorUploadedImages.forEach((imgObj, idx) => {
     const card = document.createElement('div');
-    card.className = "relative rounded-xl overflow-hidden border border-slate-700 bg-black flex flex-col p-2 space-y-2";
+    card.className = "relative rounded-xl overflow-hidden border border-slate-700 bg-black flex flex-col p-2 space-y-2 group shadow-md";
     card.innerHTML = `
-      <img src="${imgObj.url}" alt="Aperçu" class="h-28 w-full object-contain rounded">
-      <input type="text" value="${imgObj.caption}" oninput="state.editorUploadedImages[${idx}].caption = this.value" placeholder="Légende (ex: HES x40)" class="text-[11px] bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white">
-      <button type="button" onclick="state.editorUploadedImages.splice(${idx}, 1); renderEditorUploadedImages();" class="text-[10px] text-rose-400 hover:text-rose-300 font-semibold text-center">Supprimer</button>
+      <div class="relative cursor-pointer overflow-hidden rounded group/img" onclick="openLightbox('${imgObj.url}', '${escapeJsString(imgObj.caption || 'Lame ' + (idx + 1))}')">
+        <img src="${imgObj.url}" alt="Aperçu Lame" class="h-28 w-full object-contain rounded bg-slate-950 group-hover/img:scale-105 transition">
+        <div class="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition">
+          <i data-lucide="zoom-in" class="w-5 h-5 text-teal-400"></i>
+        </div>
+      </div>
+      <input type="text" value="${escapeHtml(imgObj.caption || '')}" oninput="state.editorUploadedImages[${idx}].caption = this.value" placeholder="Légende (ex: HES x40, CD30...)" class="text-[11px] bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+      <div class="flex items-center justify-between pt-0.5">
+        <span class="text-[10px] text-slate-500 font-mono">Lame #${idx + 1}</span>
+        <button type="button" onclick="state.editorUploadedImages.splice(${idx}, 1); renderEditorUploadedImages();" class="text-[10px] text-rose-400 hover:text-rose-300 font-semibold flex items-center space-x-0.5 transition">
+          <i data-lucide="trash-2" class="w-3 h-3"></i>
+          <span>Supprimer</span>
+        </button>
+      </div>
     `;
     container.appendChild(card);
   });
+
+  if (window.lucide) lucide.createIcons();
 }
 
 function handleSaveQuestionForm(e) {
@@ -2523,6 +2676,7 @@ function renderDPStepsBuilder() {
     const isQCM = (step.format === 'qcm');
     const stepCard = document.createElement('div');
     stepCard.className = "bg-slate-950/80 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-md";
+    stepCard.setAttribute('data-dp-step-index', sIdx);
 
     stepCard.innerHTML = `
       <div class="flex items-center justify-between pb-2 border-b border-slate-800">
@@ -2611,19 +2765,32 @@ function handleDPStepCorrectChange(stepIdx, optIdx, isChecked, isQCM) {
   }
 }
 
+async function attachFilesToDPStep(files, stepIdx) {
+  if (!state.dpSteps || !state.dpSteps[stepIdx]) return;
+  const validFiles = Array.from(files).filter(f => f.type && f.type.startsWith('image/'));
+  if (validFiles.length === 0) return;
+  if (!state.dpSteps[stepIdx].images) state.dpSteps[stepIdx].images = [];
+
+  for (const file of validFiles) {
+    const url = await uploadImageFile(file);
+    const count = state.dpSteps[stepIdx].images.length + 1;
+    const defaultCaption = (file.name && file.name !== 'image.png' && file.name !== 'blob')
+      ? file.name.replace(/\.[^/.]+$/, "")
+      : `Lame Étape ${stepIdx + 1} (${count})`;
+    state.dpSteps[stepIdx].images.push({
+      url: url,
+      caption: defaultCaption
+    });
+  }
+  renderDPStepImagesPreview(stepIdx);
+  showToast(`📸 ${validFiles.length} lame${validFiles.length > 1 ? 's' : ''} ajoutée${validFiles.length > 1 ? 's' : ''} à l'étape ${stepIdx + 1} !`);
+}
+
 async function handleDPStepImageUpload(e, stepIdx) {
   const files = e.target.files;
   if (!files || files.length === 0) return;
-
-  for (const file of Array.from(files)) {
-    const url = await uploadImageFile(file);
-    if (!state.dpSteps[stepIdx].images) state.dpSteps[stepIdx].images = [];
-    state.dpSteps[stepIdx].images.push({
-      url: url,
-      caption: file.name.replace(/\.[^/.]+$/, "")
-    });
-    renderDPStepImagesPreview(stepIdx);
-  }
+  await attachFilesToDPStep(files, stepIdx);
+  e.target.value = '';
 }
 
 function renderDPStepImagesPreview(stepIdx) {
