@@ -126,6 +126,21 @@ create table if not exists public.custom_tags (
   created_at timestamptz default now()
 );
 
+-- 8. Table des Trophées & Badges personnalisés
+create table if not exists public.custom_badges (
+  id text primary key,
+  created_at timestamptz default now(),
+  created_by text default '',
+  name text not null,
+  description text default '',
+  icon text not null default '🏆',
+  tier text not null default 'gold',
+  xpReward integer not null default 50,
+  conditionType text not null default 'organ_mastery',
+  targetOrgan text default '',
+  targetCount integer default 5
+);
+
 -- =========================================================
 -- ROW LEVEL SECURITY (RLS) ET POLITIQUES D'ACCÈS
 -- =========================================================
@@ -193,6 +208,21 @@ create policy "Lecture publique des tags"
 drop policy if exists "Écriture tags réservée aux créateurs" on public.custom_tags;
 create policy "Écriture tags réservée aux créateurs"
   on public.custom_tags for all
+  to authenticated
+  using (public.is_creator())
+  with check (public.is_creator());
+
+-- Politiques Badges personnalisés
+alter table public.custom_badges enable row level security;
+
+drop policy if exists "Lecture publique custom_badges" on public.custom_badges;
+create policy "Lecture publique custom_badges"
+  on public.custom_badges for select
+  using (true);
+
+drop policy if exists "Écriture custom_badges réservée aux créateurs" on public.custom_badges;
+create policy "Écriture custom_badges réservée aux créateurs"
+  on public.custom_badges for all
   to authenticated
   using (public.is_creator())
   with check (public.is_creator());

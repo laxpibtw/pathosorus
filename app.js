@@ -14,6 +14,7 @@ let state = {
   questions: [],
   cases: [],
   customTags: [],
+  customBadges: [],
   stats: {
     xp: 0,
     creatorXp: 0,
@@ -380,6 +381,18 @@ async function initAuth() {
   }
 }
 
+async function syncStatsToCloud() {
+  if (!supabaseClient || !state.currentUser || isLocalEnvironment()) return;
+  try {
+    await supabaseClient
+      .from('profiles')
+      .update({ stats: state.stats })
+      .eq('id', state.currentUser.id);
+  } catch (e) {
+    console.warn("Erreur sync stats profiles:", e);
+  }
+}
+
 async function fetchCurrentUserRole() {
   if (!state.currentUser) {
     state.currentRole = 'reader';
@@ -388,23 +401,67 @@ async function fetchCurrentUserRole() {
   const email = (state.currentUser.email || '').toLowerCase();
   if (email === 'padoreau85@gmail.com') {
     state.currentRole = 'creator';
-    return;
   }
+
+  // 1. Restaurer d'abord les stats spécifiques à ce compte depuis localStorage
+  const userStatsKey = STORAGE_KEY_STATS + '_' + state.currentUser.id;
+  const userStoredStats = localStorage.getItem(userStatsKey);
+  if (userStoredStats) {
+    try {
+      state.stats = Object.assign(state.stats || {}, JSON.parse(userStoredStats));
+      updateTopBar();
+    } catch(e) {}
+  }
+
+  if (!supabaseClient) return;
 
   try {
     const { data, error } = await supabaseClient
       .from('profiles')
-      .select('role')
+      .select('role, stats')
       .eq('id', state.currentUser.id)
       .maybeSingle();
 
-    if (!error && data && data.role) {
-      state.currentRole = data.role;
+    if (!error && data) {
+      if (data.role) state.currentRole = data.role;
+      if (email === 'padoreau85@gmail.com') state.currentRole = 'creator';
+
+      if (data.stats && typeof data.stats.xp !== 'undefined') {
+        const cloudXp = data.stats.xp || 0;
+        const localXp = state.stats.xp || 0;
+        const finalXp = Math.max(cloudXp, localXp);
+
+        state.stats = {
+          ...state.stats,
+          ...data.stats,
+          xp: finalXp,
+          creatorXp: Math.max(data.stats.creatorXp || 0, state.stats.creatorXp || 0),
+          streak: Math.max(data.stats.streak || 1, state.stats.streak || 1),
+          unlockedBadges: { ...(state.stats.unlockedBadges || {}), ...(data.stats.unlockedBadges || {}) }
+        };
+
+        localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+        localStorage.setItem(userStatsKey, JSON.stringify(state.stats));
+        updateTopBar();
+
+        if (localXp > cloudXp) {
+          syncStatsToCloud();
+        }
+      } else {
+        syncStatsToCloud();
+      }
     } else {
-      state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || 'reader';
+      state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || (email === 'padoreau85@gmail.com' ? 'creator' : 'reader');
+      // Initialiser le profil dans Supabase s'il n'existe pas encore
+      await supabaseClient.from('profiles').upsert({
+        id: state.currentUser.id,
+        email: state.currentUser.email,
+        role: state.currentRole,
+        stats: state.stats
+      });
     }
   } catch (e) {
-    state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || 'reader';
+    state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || (email === 'padoreau85@gmail.com' ? 'creator' : 'reader');
   }
 }
 
@@ -661,6 +718,9 @@ async function handleAuthLoginSubmit(e) {
 
 async function handleAuthLogout() {
   if (!confirm("Voulez-vous vous déconnecter de PathoSorus ?")) return;
+  if (state.currentUser) {
+    saveStats();
+  }
   if (supabaseClient) {
     try {
       await supabaseClient.auth.signOut();
@@ -670,8 +730,23 @@ async function handleAuthLogout() {
   }
   state.currentUser = null;
   state.currentRole = 'reader';
+  // Réinitialiser les statistiques vers un profil visiteur propre
+  state.stats = {
+    xp: 0,
+    creatorXp: 0,
+    streak: 1,
+    lastActiveDate: new Date().toISOString().split('T')[0],
+    totalAnswered: 0,
+    totalCorrect: 0,
+    completedCategories: [],
+    unlockedBadges: {},
+    badgeHistory: {}
+  };
+  localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
   updateUserRoleUI();
+  updateTopBar();
   alert("Vous êtes maintenant déconnecté.");
+  switchTab('play');
 }
 
 async function handleMasterAdminSignUp() {
@@ -1289,6 +1364,17 @@ async function fetchSupabaseData(silent = false) {
       localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(state.customTags));
     }
 
+    // Récupérer les trophées personnalisés s'ils existent sur Supabase
+    try {
+      const bRes = await supabaseClient.from('custom_badges').select('*');
+      if (!bRes.error && bRes.data && Array.isArray(bRes.data)) {
+        const cloudIds = new Set(bRes.data.map(b => b.id));
+        const localOnly = (state.customBadges || []).filter(b => !cloudIds.has(b.id));
+        state.customBadges = [...bRes.data, ...localOnly];
+        localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+      }
+    } catch(e) {}
+
     await loadUserProgress();
 
     updateTopBar();
@@ -1556,6 +1642,9 @@ function initApp() {
   state.customTags = storedTags ? JSON.parse(storedTags) : ["HES", "IHC", "BiologieMoléculaire", "PiègeClone"];
   if (!storedTags) saveCustomTags();
 
+  const storedCustomBadges = localStorage.getItem('pathosorus_custom_badges');
+  state.customBadges = storedCustomBadges ? JSON.parse(storedCustomBadges) : [];
+
   const storedStats = localStorage.getItem(STORAGE_KEY_STATS);
   if (storedStats) state.stats = Object.assign(state.stats, JSON.parse(storedStats));
 
@@ -1603,6 +1692,10 @@ function saveCustomTags() {
 
 function saveStats() {
   localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+  if (state.currentUser && state.currentUser.id) {
+    localStorage.setItem(STORAGE_KEY_STATS + '_' + state.currentUser.id, JSON.stringify(state.stats));
+    syncStatsToCloud();
+  }
   updateTopBar();
 }
 
@@ -2081,6 +2174,71 @@ function getBadgesStatus() {
     });
   });
 
+  // 3. Évaluation des trophées personnalisés créés par l'utilisateur
+  (state.customBadges || []).forEach(b => {
+    let isNowMet = false;
+    let progressPercent = 0;
+    let progressText = '';
+    let missingCount = 0;
+
+    if (b.conditionType === 'organ_mastery') {
+      const orgQuestions = state.questions.filter(q => (q.organ || '').toLowerCase() === (b.targetOrgan || '').toLowerCase());
+      const totalInOrg = orgQuestions.length;
+      const targetCount = b.targetCount || Math.max(1, totalInOrg);
+      const completedInOrg = orgQuestions.filter(q => q.mastered || (q.stats && q.stats.seen > 0 && q.stats.correct > 0)).length;
+      isNowMet = totalInOrg > 0 && completedInOrg >= targetCount;
+      progressPercent = totalInOrg > 0 ? Math.min(100, Math.round((completedInOrg / targetCount) * 100)) : 0;
+      progressText = `${completedInOrg} / ${targetCount} réussies (${b.targetOrgan})`;
+      missingCount = Math.max(0, targetCount - completedInOrg);
+    } else if (b.conditionType === 'question_count') {
+      const totalCorrect = state.stats.totalCorrect || 0;
+      const target = b.targetCount || 10;
+      isNowMet = totalCorrect >= target;
+      progressPercent = Math.min(100, Math.round((totalCorrect / target) * 100));
+      progressText = `${totalCorrect} / ${target} réussies`;
+      missingCount = Math.max(0, target - totalCorrect);
+    } else if (b.conditionType === 'streak') {
+      const target = b.targetCount || 3;
+      isNowMet = streak >= target;
+      progressPercent = Math.min(100, Math.round((streak / target) * 100));
+      progressText = `${streak} / ${target} jours`;
+      missingCount = Math.max(0, target - streak);
+    } else if (b.conditionType === 'creator') {
+      const target = b.targetCount || 5;
+      isNowMet = creatorStats.createdQuestions >= target;
+      progressPercent = Math.min(100, Math.round((creatorStats.createdQuestions / target) * 100));
+      progressText = `${creatorStats.createdQuestions} / ${target} rédigées`;
+      missingCount = Math.max(0, target - creatorStats.createdQuestions);
+    } else {
+      const wasUnlocked = !!(state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
+      isNowMet = wasUnlocked;
+      progressPercent = wasUnlocked ? 100 : 0;
+      progressText = wasUnlocked ? 'Défi accompli !' : 'Défi à valider';
+    }
+
+    const wasUnlocked = !!(state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
+    let status = 'locked';
+
+    if (wasUnlocked && !isNowMet && b.conditionType === 'organ_mastery') {
+      status = 'contested';
+    } else if (isNowMet) {
+      status = 'unlocked';
+      if (!state.stats.badgeHistory[b.id]) {
+        state.stats.badgeHistory[b.id] = { unlocked: true, unlockedAt: Date.now() };
+      }
+    }
+
+    results.push({
+      ...b,
+      isCustom: true,
+      organ: b.targetOrgan,
+      status,
+      progressPercent,
+      progressText,
+      missingCount
+    });
+  });
+
   return results;
 }
 
@@ -2099,7 +2257,9 @@ function checkAndUnlockBadges() {
       if (!state.stats.unlockedBadges[b.id]) {
         state.stats.unlockedBadges[b.id] = Date.now();
         newlyUnlocked = true;
-        showRewardToast(`🏆 Trophée Débloqué : "${b.name}" !`, 'award');
+        const reward = b.xpReward || (b.tier === 'platinum' ? 100 : b.tier === 'gold' ? 50 : 25);
+        state.stats.xp = (state.stats.xp || 0) + reward;
+        showRewardToast(`🏆 Trophée Débloqué : "${b.name}" (+${reward} XP) !`, 'award');
       }
     }
   });
@@ -2328,15 +2488,28 @@ function renderTrophiesGrid() {
       <div class="rounded-2xl p-4 sm:p-5 border transition flex flex-col justify-between space-y-4 ${cardBorder}">
         <div class="space-y-3">
           <div class="flex items-start justify-between">
-            <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${iconBg}">
-              <i data-lucide="${b.icon || 'award'}" class="w-5 h-5"></i>
+            <div class="flex items-center space-x-2.5">
+              <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${iconBg}">
+                ${(b.icon && b.icon.length > 2) ? `<i data-lucide="${b.icon}" class="w-5 h-5"></i>` : `<span class="text-xl">${b.icon || '🏆'}</span>`}
+              </div>
+              <div>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold border border-amber-500/20 block w-fit">+${b.xpReward || 50} XP</span>
+              </div>
             </div>
-            ${statusBadge}
+            <div class="flex items-center space-x-1.5">
+              ${statusBadge}
+              ${(b.isCustom && isCreator()) ? `
+                <button onclick="deleteCustomBadge('${escapeJsString(b.id)}')" class="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition" title="Supprimer ce trophée">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              ` : ''}
+            </div>
           </div>
 
           <div>
             <h4 class="font-extrabold text-sm text-white ${isContested ? 'text-amber-300' : ''}">${escapeHtml(b.name)}</h4>
             <p class="text-xs text-slate-400 mt-1 leading-relaxed">${escapeHtml(b.description)}</p>
+            ${b.created_by ? `<div class="text-[10px] text-amber-400/80 mt-1.5 font-mono">👑 Créé par : ${escapeHtml(b.created_by)}</div>` : ''}
           </div>
         </div>
 
@@ -2396,6 +2569,132 @@ function recaptureFirstContestedBadge() {
     startContestedBadgeSession(contested[0].id);
   }
 }
+
+// --- GESTION DES TROPHÉES PERSONNALISÉS ---
+function openCreateTrophyModal() {
+  if (isReader()) {
+    alert("La création de trophées est réservée aux comptes Créateurs.");
+    return;
+  }
+  const modal = document.getElementById('modal-create-trophy');
+  if (!modal) return;
+
+  const organSelect = document.getElementById('trophy-input-organ');
+  if (organSelect) {
+    const tree = getHierarchyTree(true);
+    const organs = Object.keys(tree).sort();
+    organSelect.innerHTML = organs.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
+  }
+
+  onTrophyConditionTypeChange();
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  if (window.lucide) lucide.createIcons();
+}
+window.openCreateTrophyModal = openCreateTrophyModal;
+
+function closeCreateTrophyModal() {
+  const modal = document.getElementById('modal-create-trophy');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+window.closeCreateTrophyModal = closeCreateTrophyModal;
+
+function onTrophyConditionTypeChange() {
+  const condType = document.getElementById('trophy-input-cond-type')?.value;
+  const paramBox = document.getElementById('trophy-organ-param-box');
+  const countLabel = document.getElementById('trophy-count-label');
+  const organCol = document.getElementById('trophy-organ-col');
+
+  if (paramBox) {
+    if (condType === 'free') {
+      paramBox.classList.add('hidden');
+    } else {
+      paramBox.classList.remove('hidden');
+      if (condType === 'organ_mastery') {
+        if (organCol) organCol.classList.remove('hidden');
+        if (countLabel) countLabel.textContent = "Questions requises sur l'organe";
+      } else if (condType === 'question_count') {
+        if (organCol) organCol.classList.add('hidden');
+        if (countLabel) countLabel.textContent = "Total de questions à réussir";
+      } else if (condType === 'streak') {
+        if (organCol) organCol.classList.add('hidden');
+        if (countLabel) countLabel.textContent = "Jours consécutifs (Streak)";
+      } else if (condType === 'creator') {
+        if (organCol) organCol.classList.add('hidden');
+        if (countLabel) countLabel.textContent = "Questions à rédiger";
+      }
+    }
+  }
+}
+window.onTrophyConditionTypeChange = onTrophyConditionTypeChange;
+
+async function saveCustomBadge(badge) {
+  state.customBadges.push(badge);
+  localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+  if (supabaseClient && isCreator() && !isLocalEnvironment()) {
+    try {
+      await supabaseClient.from('custom_badges').upsert(badge);
+    } catch(e) {
+      console.warn("Table custom_badges non configurée (sauvegardé en local) :", e);
+    }
+  }
+  renderTrophiesView();
+}
+
+async function deleteCustomBadge(badgeId) {
+  if (!confirm("Voulez-vous vraiment supprimer ce trophée personnalisé ?")) return;
+  state.customBadges = (state.customBadges || []).filter(b => b.id !== badgeId);
+  localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+  if (supabaseClient && isCreator() && !isLocalEnvironment()) {
+    try {
+      await supabaseClient.from('custom_badges').delete().eq('id', badgeId);
+    } catch(e) {}
+  }
+  renderTrophiesView();
+  showRewardToast("Trophée supprimé.", 'trash-2');
+}
+window.deleteCustomBadge = deleteCustomBadge;
+
+async function handleCreateTrophySubmit(e) {
+  e.preventDefault();
+  const name = document.getElementById('trophy-input-name').value.trim();
+  const description = document.getElementById('trophy-input-desc').value.trim();
+  const icon = document.getElementById('trophy-input-icon').value || '🏆';
+  const tier = document.getElementById('trophy-input-tier').value || 'gold';
+  const xpReward = parseInt(document.getElementById('trophy-input-xp').value, 10) || 50;
+  const conditionType = document.getElementById('trophy-input-cond-type').value;
+  const targetOrgan = document.getElementById('trophy-input-organ')?.value || '';
+  const targetCount = parseInt(document.getElementById('trophy-input-count')?.value, 10) || 5;
+
+  if (!name) {
+    alert("Veuillez donner un nom au trophée.");
+    return;
+  }
+
+  const badge = {
+    id: 'custom_' + Date.now(),
+    name,
+    description,
+    icon,
+    tier,
+    xpReward,
+    conditionType,
+    targetOrgan,
+    targetCount,
+    category: 'custom',
+    created_at: new Date().toISOString(),
+    created_by: state.currentUser ? state.currentUser.email : 'Créateur'
+  };
+
+  await saveCustomBadge(badge);
+  closeCreateTrophyModal();
+  document.getElementById('form-create-trophy').reset();
+  showRewardToast(`🏆 Trophée "${name}" créé avec succès !`, 'award');
+}
+window.handleCreateTrophySubmit = handleCreateTrophySubmit;
 
 // --- MODULE "NOUVEAUTÉS DE L'ÉQUIPE" SUR L'ÉCRAN JOUER ---
 function renderPlayNewQuestionsFeed() {
