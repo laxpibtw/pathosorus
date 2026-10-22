@@ -28,6 +28,7 @@ let state = {
   },
   currentSession: null,
   currentDPSession: null,
+  sessionReturnView: 'bank',
   creatorMode: 'simple',
   editorUploadedImages: [],
   editorUploadedExplanationImages: [],
@@ -36,7 +37,11 @@ let state = {
   editorOpenAnswers: [''],
   lastActiveImageZone: 'statement',
   dpSteps: [],
-  bankCollapsedOrgans: new Set() // Ensemble des boîtes d'organes repliées
+  bankSelectedOrgan: 'all',
+  bankSelectedCategory: 'all',
+  bankCollapsedOrgans: new Set(),
+  bankCollapsedLesions: new Set(),
+  currentRenderedLesionKeys: []
 };
 
 function isCreator() {
@@ -1722,19 +1727,47 @@ function selectCategoryForPlay(cat) {
   renderHierarchySelector();
 }
 
+function quitCurrentSession() {
+  switchTab(state.sessionReturnView || 'play');
+}
+
+function quitCurrentDPSession() {
+  switchTab(state.sessionReturnView || 'play');
+}
+
 function startHierarchySession(level, organ, category, entity) {
+  // Détecter si on lance depuis Ma Banque ou depuis Entraînement
+  const isFromBank = document.getElementById('view-bank') && !document.getElementById('view-bank').classList.contains('hidden');
+  state.sessionReturnView = isFromBank ? 'bank' : 'play';
+
   let pool = [];
   const activeQuestions = state.questions.filter(q => !q.mastered);
 
-  if (level === 'organ') pool = activeQuestions.filter(q => q.organ === organ);
-  else if (level === 'category') pool = activeQuestions.filter(q => q.organ === organ && q.category === category);
-  else if (level === 'entity') pool = activeQuestions.filter(q => q.organ === organ && q.category === category && q.entity === entity);
+  if (level === 'organ') pool = activeQuestions.filter(q => (organ === 'all' || q.organ === organ));
+  else if (level === 'category') pool = activeQuestions.filter(q => (organ === 'all' || q.organ === organ) && (category === 'all' || q.category === category));
+  else if (level === 'entity') pool = activeQuestions.filter(q => (organ === 'all' || q.organ === organ) && (category === 'all' || q.category === category) && q.entity === entity);
 
   if (pool.length === 0) {
-    alert("Aucune question active (non maîtrisée) pour cette sélection.");
+    // Vérifier si des questions neutralisées (maîtrisées) existent
+    const allMatching = state.questions.filter(q => {
+      if (level === 'organ') return (organ === 'all' || q.organ === organ);
+      if (level === 'category') return (organ === 'all' || q.organ === organ) && (category === 'all' || q.category === category);
+      if (level === 'entity') return (organ === 'all' || q.organ === organ) && (category === 'all' || q.category === category) && q.entity === entity;
+      return false;
+    });
+
+    if (allMatching.length > 0) {
+      if (confirm(`Toutes les questions (${allMatching.length}) de cette sélection sont neutralisées (maîtrisées).\n\nVoulez-vous quand même vous entraîner dessus ?`)) {
+        launchQuizSession(allMatching, `Entraînement : ${entity || category || organ}`);
+        return;
+      }
+      return;
+    }
+
+    alert("Aucune question disponible pour cette sélection.");
     return;
   }
-  launchQuizSession(pool, `Session : ${entity || category || organ}`);
+  launchQuizSession(pool, `Entraînement : ${entity || category || organ}`);
 }
 
 // --- SESSIONS DE QUIZ SIMPLE ---
@@ -2411,7 +2444,7 @@ function nextSessionQuestion() {
     renderSessionQuestion();
   } else {
     alert(`Session terminée !\nScore : ${session.score} / ${session.questions.length} (+${session.xpEarned} XP)`);
-    switchTab('play');
+    switchTab(state.sessionReturnView || 'play');
   }
 }
 
@@ -3605,6 +3638,8 @@ function deleteDP(id) {
 // --- LECTEUR DE DOSSIER PROGRESSIF (DP SESSION) ---
 // =========================================================================
 function startDPSession(caseId) {
+  const isFromBank = document.getElementById('view-bank') && !document.getElementById('view-bank').classList.contains('hidden');
+  state.sessionReturnView = isFromBank ? 'bank' : 'play';
   const dpCase = state.cases.find(c => c.id === caseId);
   if (!dpCase) return;
 
@@ -3829,7 +3864,7 @@ function nextDPStep() {
   } else {
     confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
     alert(`Bravo ! Vous avez terminé ce Dossier Progressif.\nScore : ${session.score} / ${session.totalSteps} étapes réussies (+${session.score * 20} XP).`);
-    switchTab('play');
+    switchTab(state.sessionReturnView || 'play');
   }
 }
 
@@ -3923,44 +3958,70 @@ function createNewGlobalTag(tagName) {
 }
 
 // =========================================================================
-// --- EXPLORATEUR DE LA BANQUE AVEC BOÎTES PAR ORGANE (ACCORDÉONS) ---
+// --- EXPLORATEUR DE LA BANQUE PAR ONGLETS (ORGANE), SOUS-ONGLETS (CATÉGORIE) ET LÉSIONS ---
 // =========================================================================
-function toggleOrganBankBox(organName) {
-  if (state.bankCollapsedOrgans.has(organName)) {
-    state.bankCollapsedOrgans.delete(organName);
-  } else {
-    state.bankCollapsedOrgans.add(organName);
+function selectBankOrgan(organ) {
+  state.bankSelectedOrgan = organ;
+  state.bankSelectedCategory = 'all';
+  const organSelect = document.getElementById('bank-filter-organ');
+  if (organSelect) organSelect.value = organ;
+  renderBank();
+}
+
+function selectBankCategory(cat) {
+  state.bankSelectedCategory = cat;
+  renderBank();
+}
+
+function onBankOrganSelectChange() {
+  const organSelect = document.getElementById('bank-filter-organ');
+  if (organSelect) {
+    state.bankSelectedOrgan = organSelect.value;
+    state.bankSelectedCategory = 'all';
   }
   renderBank();
 }
 
-function collapseAllOrganBankBoxes() {
-  const tree = getHierarchyTree(true);
-  Object.keys(tree).forEach(org => state.bankCollapsedOrgans.add(org));
+function toggleBankLesionCollapse(lesionKey) {
+  if (state.bankCollapsedLesions.has(lesionKey)) {
+    state.bankCollapsedLesions.delete(lesionKey);
+  } else {
+    state.bankCollapsedLesions.add(lesionKey);
+  }
   renderBank();
 }
 
-function expandAllOrganBankBoxes() {
-  state.bankCollapsedOrgans.clear();
+function expandAllBankLesions() {
+  state.bankCollapsedLesions.clear();
+  renderBank();
+}
+
+function collapseAllBankLesions() {
+  if (Array.isArray(state.currentRenderedLesionKeys)) {
+    state.currentRenderedLesionKeys.forEach(k => state.bankCollapsedLesions.add(k));
+  }
   renderBank();
 }
 
 function renderBank() {
-  const search = (document.getElementById('bank-search-input').value || '').toLowerCase();
-  const formatFilter = document.getElementById('bank-filter-format').value;
-  const statusFilter = document.getElementById('bank-filter-status').value;
-  const organFilter = document.getElementById('bank-filter-organ').value;
-  const tagFilter = document.getElementById('bank-filter-tag').value;
+  const searchInput = document.getElementById('bank-search-input');
+  const search = (searchInput ? searchInput.value : '').toLowerCase().trim();
+  const formatFilter = document.getElementById('bank-filter-format') ? document.getElementById('bank-filter-format').value : 'all';
+  const statusFilter = document.getElementById('bank-filter-status') ? document.getElementById('bank-filter-status').value : 'all';
+  const tagFilter = document.getElementById('bank-filter-tag') ? document.getElementById('bank-filter-tag').value : 'all';
 
   populateBankFilterDropdowns();
 
-  const container = document.getElementById('bank-items-container');
-  if (!container) return;
-  container.innerHTML = '';
+  const navContainer = document.getElementById('bank-hierarchy-nav');
+  const itemsContainer = document.getElementById('bank-items-container');
+  if (!itemsContainer) return;
+
+  itemsContainer.innerHTML = '';
+  if (navContainer) navContainer.innerHTML = '';
 
   const totalItems = state.questions.length + state.cases.length;
   if (totalItems === 0) {
-    container.innerHTML = `
+    itemsContainer.innerHTML = `
       <div class="text-center py-16 text-slate-500 bg-slate-900 rounded-2xl border border-slate-800">
         <i data-lucide="inbox" class="w-10 h-10 mx-auto mb-3 text-slate-600"></i>
         <h3 class="text-base font-bold text-white">Votre banque est vide</h3>
@@ -3977,11 +4038,10 @@ function renderBank() {
     return;
   }
 
-  // Filtrage Questions
-  const filteredQ = state.questions.filter(q => {
+  // 1. Filtrage global (Format, Statut, Tag, Recherche textuelle)
+  const baseFilteredQ = state.questions.filter(q => {
     if (formatFilter === 'dp') return false;
     if (formatFilter !== 'all' && q.format !== formatFilter) return false;
-    if (organFilter !== 'all' && q.organ !== organFilter) return false;
     if (tagFilter !== 'all' && !(q.tags || []).includes(tagFilter)) return false;
 
     if (statusFilter === 'active' && q.mastered) return false;
@@ -4001,11 +4061,9 @@ function renderBank() {
     return true;
   });
 
-  // Filtrage DP
-  const filteredCases = state.cases.filter(c => {
+  const baseFilteredCases = state.cases.filter(c => {
     if (formatFilter !== 'all' && formatFilter !== 'dp') return false;
     if (statusFilter === 'mastered' || statusFilter === 'due') return false;
-    if (organFilter !== 'all' && c.organ !== organFilter) return false;
     if (tagFilter !== 'all' && !(c.tags || []).includes(tagFilter)) return false;
     if (search) {
       const matchT = (c.title || '').toLowerCase().includes(search);
@@ -4019,8 +4077,23 @@ function renderBank() {
     return true;
   });
 
-  if (filteredQ.length === 0 && filteredCases.length === 0) {
-    container.innerHTML = `
+  // Calcul des organes disponibles dans le jeu filtré
+  const organMap = {}; // organName -> { questions: [], cases: [] }
+  baseFilteredQ.forEach(q => {
+    const org = q.organ || "Autre";
+    if (!organMap[org]) organMap[org] = { questions: [], cases: [] };
+    organMap[org].questions.push(q);
+  });
+  baseFilteredCases.forEach(c => {
+    const org = c.organ || "Autre";
+    if (!organMap[org]) organMap[org] = { questions: [], cases: [] };
+    organMap[org].cases.push(c);
+  });
+
+  const availableOrgans = Object.keys(organMap).sort();
+
+  if (availableOrgans.length === 0) {
+    itemsContainer.innerHTML = `
       <div class="text-center py-10 text-slate-500 bg-slate-900 rounded-2xl border border-slate-800">
         <p class="text-xs">Aucun élément ne correspond à ces filtres de recherche.</p>
       </div>
@@ -4029,107 +4102,322 @@ function renderBank() {
     return;
   }
 
-  // GROUPEMENT EN BOÎTES PAR ORGANE
-  const organGroups = {}; // organName -> { questions: [], cases: [] }
-  filteredQ.forEach(q => {
+  // Gestion intelligente de l'organe sélectionné
+  if (state.bankSelectedOrgan === null || state.bankSelectedOrgan === undefined) {
+    state.bankSelectedOrgan = (availableOrgans.length === 1) ? availableOrgans[0] : 'all';
+  } else if (state.bankSelectedOrgan !== 'all' && !organMap[state.bankSelectedOrgan]) {
+    state.bankSelectedOrgan = (availableOrgans.length === 1) ? availableOrgans[0] : 'all';
+  }
+
+  // Synchronisation du select déroulant
+  const organSelect = document.getElementById('bank-filter-organ');
+  if (organSelect && organSelect.value !== state.bankSelectedOrgan) {
+    organSelect.value = state.bankSelectedOrgan;
+  }
+
+  // 2. Rendu des Barres d'Onglets & Sous-onglets dans #bank-hierarchy-nav
+  if (navContainer) {
+    let navHtml = '';
+
+    // --- NIVEAU 1 : ONGLETS DES ORGANES ---
+    const totalCountAll = baseFilteredQ.length + baseFilteredCases.length;
+    navHtml += `
+      <div class="bg-slate-900 border border-slate-800 p-3 sm:p-4 rounded-2xl space-y-2.5 shadow-md">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <span class="w-5 h-5 rounded-lg bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center text-[10px] font-mono font-bold">1</span>
+            <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">Onglet Organe :</span>
+          </div>
+          ${state.bankSelectedOrgan !== 'all' ? `
+            <button onclick="startHierarchySession('organ', '${escapeJsString(state.bankSelectedOrgan)}')" class="px-3 py-1 rounded-xl bg-teal-600/10 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold transition flex items-center space-x-1.5 shadow-sm">
+              <i data-lucide="play" class="w-3.5 h-3.5"></i>
+              <span>⚡ Taffer tout "${escapeHtml(state.bankSelectedOrgan)}"</span>
+            </button>
+          ` : ''}
+        </div>
+        <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+          <button onclick="selectBankOrgan('all')" class="px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 shrink-0 transition ${
+            state.bankSelectedOrgan === 'all'
+              ? 'bg-teal-600 text-white shadow-lg shadow-teal-500/30 border border-teal-400'
+              : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800 hover:border-slate-700'
+          }">
+            <span>🌐 Tous les organes</span>
+            <span class="px-1.5 py-0.5 rounded-full text-[10px] ${
+              state.bankSelectedOrgan === 'all' ? 'bg-teal-700 text-white' : 'bg-slate-800 text-slate-400'
+            }">${totalCountAll}</span>
+          </button>
+    `;
+
+    availableOrgans.forEach(org => {
+      const isSel = (state.bankSelectedOrgan === org);
+      const count = organMap[org].questions.length + organMap[org].cases.length;
+      navHtml += `
+        <button onclick="selectBankOrgan('${escapeJsString(org)}')" class="px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 shrink-0 transition ${
+          isSel
+            ? 'bg-teal-600 text-white shadow-lg shadow-teal-500/30 border border-teal-400'
+            : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700'
+        }">
+          <span>${escapeHtml(org)}</span>
+          <span class="px-1.5 py-0.5 rounded-full text-[10px] ${
+            isSel ? 'bg-teal-700 text-white' : 'bg-slate-800 text-slate-400'
+          }">${count}</span>
+        </button>
+      `;
+    });
+
+    navHtml += `</div></div>`;
+
+    // --- NIVEAU 2 : SOUS-ONGLETS DES CATÉGORIES (Quand un organe est sélectionné) ---
+    if (state.bankSelectedOrgan !== 'all' && organMap[state.bankSelectedOrgan]) {
+      const orgGroup = organMap[state.bankSelectedOrgan];
+      const categoryMap = {};
+      orgGroup.questions.forEach(q => {
+        const cat = q.category || "Général";
+        if (!categoryMap[cat]) categoryMap[cat] = { questions: [], cases: [] };
+        categoryMap[cat].questions.push(q);
+      });
+      orgGroup.cases.forEach(c => {
+        const cat = c.category || "Général";
+        if (!categoryMap[cat]) categoryMap[cat] = { questions: [], cases: [] };
+        categoryMap[cat].cases.push(c);
+      });
+
+      const availableCats = Object.keys(categoryMap).sort();
+      if (state.bankSelectedCategory !== 'all' && !categoryMap[state.bankSelectedCategory]) {
+        state.bankSelectedCategory = 'all';
+      }
+
+      const curCat = state.bankSelectedCategory;
+      const activeQInCurSelection = (curCat !== 'all' && categoryMap[curCat])
+        ? categoryMap[curCat].questions.filter(q => !q.mastered).length
+        : orgGroup.questions.filter(q => !q.mastered).length;
+      const totalQInCurSelection = (curCat !== 'all' && categoryMap[curCat])
+        ? categoryMap[curCat].questions.length
+        : orgGroup.questions.length;
+
+      navHtml += `
+        <div class="bg-slate-900/90 border border-slate-800/80 p-3.5 sm:p-4 rounded-2xl space-y-2.5 shadow-md">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div class="flex items-center space-x-2">
+              <span class="w-5 h-5 rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center text-[10px] font-mono font-bold">2</span>
+              <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Sous-onglets Catégories <span class="text-slate-400 font-normal lowercase">dans ${escapeHtml(state.bankSelectedOrgan)}</span> :
+              </span>
+            </div>
+            <div class="flex items-center space-x-2 self-start sm:self-auto">
+              ${curCat !== 'all' ? `
+                <button onclick="startHierarchySession('category', '${escapeJsString(state.bankSelectedOrgan)}', '${escapeJsString(curCat)}')" class="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-sm shadow-sky-500/20">
+                  <i data-lucide="play" class="w-3.5 h-3.5"></i>
+                  <span>⚡ Taffer "${escapeHtml(curCat)}" (${activeQInCurSelection || totalQInCurSelection}Q)</span>
+                </button>
+              ` : `
+                <button onclick="startHierarchySession('organ', '${escapeJsString(state.bankSelectedOrgan)}')" class="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-sm shadow-teal-500/20">
+                  <i data-lucide="play" class="w-3.5 h-3.5"></i>
+                  <span>⚡ Taffer tout "${escapeHtml(state.bankSelectedOrgan)}" (${orgGroup.questions.filter(q => !q.mastered).length || orgGroup.questions.length}Q)</span>
+                </button>
+              `}
+            </div>
+          </div>
+          <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+            <button onclick="selectBankCategory('all')" class="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-2 shrink-0 transition ${
+              curCat === 'all'
+                ? 'bg-sky-600 text-white shadow-md shadow-sky-500/30 border border-sky-400'
+                : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800 hover:border-slate-700'
+            }">
+              <span>📑 Toutes les catégories</span>
+              <span class="px-1.5 py-0.5 rounded-full text-[10px] ${
+                curCat === 'all' ? 'bg-sky-700 text-white' : 'bg-slate-800 text-slate-400'
+              }">${orgGroup.questions.length + orgGroup.cases.length}</span>
+            </button>
+      `;
+
+      availableCats.forEach(cat => {
+        const isSel = (curCat === cat);
+        const count = categoryMap[cat].questions.length + categoryMap[cat].cases.length;
+        navHtml += `
+          <button onclick="selectBankCategory('${escapeJsString(cat)}')" class="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-2 shrink-0 transition ${
+            isSel
+              ? 'bg-sky-600 text-white shadow-md shadow-sky-500/30 border border-sky-400'
+              : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700'
+          }">
+            <span>${escapeHtml(cat)}</span>
+            <span class="px-1.5 py-0.5 rounded-full text-[10px] ${
+              isSel ? 'bg-sky-700 text-white' : 'bg-slate-800 text-slate-400'
+            }">${count}</span>
+          </button>
+        `;
+      });
+
+      navHtml += `</div></div>`;
+    } else {
+      navHtml += `
+        <div class="flex items-center space-x-2 text-xs text-slate-400 bg-slate-900/60 border border-slate-800/80 px-3.5 py-2.5 rounded-xl">
+          <i data-lucide="info" class="w-4 h-4 text-teal-400 shrink-0"></i>
+          <span>Cliquez sur un <strong>onglet d'organe</strong> ci-dessus pour naviguer par sous-onglets de catégories diagnostiques et cibler votre page de travail.</span>
+        </div>
+      `;
+    }
+
+    navContainer.innerHTML = navHtml;
+  }
+
+  // 3. Filtrage des items selon l'organe et la catégorie sélectionnés
+  let scopedQ = baseFilteredQ;
+  let scopedCases = baseFilteredCases;
+
+  if (state.bankSelectedOrgan !== 'all') {
+    scopedQ = scopedQ.filter(q => (q.organ || "Autre") === state.bankSelectedOrgan);
+    scopedCases = scopedCases.filter(c => (c.organ || "Autre") === state.bankSelectedOrgan);
+  }
+
+  if (state.bankSelectedCategory !== 'all') {
+    scopedQ = scopedQ.filter(q => (q.category || "Général") === state.bankSelectedCategory);
+    scopedCases = scopedCases.filter(c => (c.category || "Général") === state.bankSelectedCategory);
+  }
+
+  if (scopedQ.length === 0 && scopedCases.length === 0) {
+    itemsContainer.innerHTML = `
+      <div class="text-center py-12 text-slate-500 bg-slate-900 rounded-2xl border border-slate-800 space-y-3">
+        <p class="text-xs">Aucun élément dans cette sélection (${escapeHtml(state.bankSelectedOrgan)} › ${escapeHtml(state.bankSelectedCategory)}).</p>
+        <button onclick="selectBankCategory('all')" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 text-xs font-semibold transition">
+          Afficher toutes les catégories
+        </button>
+      </div>
+    `;
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+
+  // 4. Groupement par Lésion (Entité)
+  const lesionMap = {}; // key -> { organ, category, entity, questions: [], cases: [] }
+  scopedQ.forEach(q => {
     const org = q.organ || "Autre";
-    if (!organGroups[org]) organGroups[org] = { questions: [], cases: [] };
-    organGroups[org].questions.push(q);
+    const cat = q.category || "Général";
+    const ent = q.entity || "Lésion non spécifiée";
+    const key = `${org}::${cat}::${ent}`;
+    if (!lesionMap[key]) {
+      lesionMap[key] = { organ: org, category: cat, entity: ent, questions: [], cases: [] };
+    }
+    lesionMap[key].questions.push(q);
   });
-  filteredCases.forEach(c => {
+  scopedCases.forEach(c => {
     const org = c.organ || "Autre";
-    if (!organGroups[org]) organGroups[org] = { questions: [], cases: [] };
-    organGroups[org].cases.push(c);
+    const cat = c.category || "Général";
+    const ent = c.entity || "Lésion non spécifiée";
+    const key = `${org}::${cat}::${ent}`;
+    if (!lesionMap[key]) {
+      lesionMap[key] = { organ: org, category: cat, entity: ent, questions: [], cases: [] };
+    }
+    lesionMap[key].cases.push(c);
   });
 
-  const sortedOrgans = Object.keys(organGroups).sort();
+  const lesionKeys = Object.keys(lesionMap).sort((a, b) => {
+    const la = lesionMap[a];
+    const lb = lesionMap[b];
+    if (la.organ !== lb.organ) return la.organ.localeCompare(lb.organ);
+    if (la.category !== lb.category) return la.category.localeCompare(lb.category);
+    return la.entity.localeCompare(lb.entity);
+  });
+
+  state.currentRenderedLesionKeys = lesionKeys;
 
   // Barre d'outils secondaire : Replier / Déplier
   const toolbar = document.createElement('div');
   toolbar.className = "flex items-center justify-between pb-1 text-xs text-slate-400";
   toolbar.innerHTML = `
-    <span>${sortedOrgans.length} boîte(s) d'organe trouvée(s)</span>
     <div class="flex items-center space-x-2">
-      <button onclick="expandAllOrganBankBoxes()" class="hover:text-teal-400 transition">Tout déplier</button>
+      <span class="w-5 h-5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-[10px] font-mono font-bold">3</span>
+      <span class="font-bold text-slate-300">${lesionKeys.length} bloc(s) de lésion</span>
       <span>•</span>
-      <button onclick="collapseAllOrganBankBoxes()" class="hover:text-teal-400 transition">Tout replier</button>
+      <span>${scopedQ.length} question(s)${scopedCases.length > 0 ? ` + ${scopedCases.length} DP` : ''}</span>
+    </div>
+    <div class="flex items-center space-x-2">
+      <button onclick="expandAllBankLesions()" class="hover:text-teal-400 transition">Tout déplier</button>
+      <span>•</span>
+      <button onclick="collapseAllBankLesions()" class="hover:text-teal-400 transition">Tout replier</button>
     </div>
   `;
-  container.appendChild(toolbar);
+  itemsContainer.appendChild(toolbar);
 
-  // Rendu de chaque Boîte d'Organe
-  sortedOrgans.forEach(orgName => {
-    const group = organGroups[orgName];
-    const totalInOrg = group.questions.length + group.cases.length;
-    const isCollapsed = state.bankCollapsedOrgans.has(orgName) && !search; // Ne pas replier si recherche active
+  // 5. Rendu de chaque Lésion
+  lesionKeys.forEach(key => {
+    const lesion = lesionMap[key];
+    const totalInLesion = lesion.questions.length + lesion.cases.length;
+    const isCollapsed = state.bankCollapsedLesions.has(key) && !search;
 
-    const dueInOrg = group.questions.filter(q => isQuestionDue(q)).length;
-    const masteredInOrg = group.questions.filter(q => q.mastered).length;
+    const dueInLesion = lesion.questions.filter(q => isQuestionDue(q)).length;
+    const masteredInLesion = lesion.questions.filter(q => q.mastered).length;
+    const activeInLesion = lesion.questions.filter(q => !q.mastered).length;
 
-    const organBox = document.createElement('div');
-    organBox.className = "bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl overflow-hidden transition shadow-lg space-y-0";
+    const lesionBox = document.createElement('div');
+    lesionBox.className = "bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-2xl overflow-hidden transition shadow-lg space-y-0";
 
-    // En-tête de la Boîte d'Organe
+    // En-tête de la Lésion
     const header = document.createElement('div');
-    header.className = "p-4 sm:p-5 bg-slate-900/90 flex items-center justify-between cursor-pointer select-none border-b border-slate-800/80 hover:bg-slate-800/40 transition";
-    header.addEventListener('click', () => toggleOrganBankBox(orgName));
+    header.className = "p-4 sm:p-4.5 bg-slate-900/95 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 cursor-pointer select-none hover:bg-slate-800/40 transition";
+    header.onclick = (e) => {
+      if (!e.target.closest('button')) {
+        toggleBankLesionCollapse(key);
+      }
+    };
 
     header.innerHTML = `
       <div class="flex items-center space-x-3">
-        <div class="w-9 h-9 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center font-bold">
-          <i data-lucide="folder" class="w-4 h-4"></i>
+        <div class="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center font-bold shrink-0">
+          <i data-lucide="microscope" class="w-4.5 h-4.5"></i>
         </div>
         <div>
           <div class="flex items-center space-x-2">
-            <h3 class="font-extrabold text-base text-white capitalize"></h3>
-            <span class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-teal-300 font-bold border border-slate-700">${totalInOrg}</span>
+            <h3 class="font-extrabold text-sm sm:text-base text-white"></h3>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-teal-300 font-bold border border-slate-700">${totalInLesion}</span>
           </div>
-          <div class="flex items-center space-x-2 text-[11px] text-slate-400 mt-0.5">
-            ${dueInOrg > 0 ? `<span class="text-amber-400 font-semibold">• ${dueInOrg} à revoir</span>` : ''}
-            ${masteredInOrg > 0 ? `<span class="text-emerald-400 font-semibold">• ${masteredInOrg} maîtrisée(s)</span>` : ''}
-            ${group.cases.length > 0 ? `<span class="text-indigo-400 font-semibold">• ${group.cases.length} DP</span>` : ''}
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-400 mt-0.5">
+            <span class="text-slate-400 font-medium">${escapeHtml(lesion.organ)} › ${escapeHtml(lesion.category)}</span>
+            ${dueInLesion > 0 ? `<span class="text-amber-400 font-semibold">• ${dueInLesion} à revoir</span>` : ''}
+            ${masteredInLesion > 0 ? `<span class="text-emerald-400 font-semibold">• ${masteredInLesion} maîtrisée(s)</span>` : ''}
+            ${lesion.cases.length > 0 ? `<span class="text-indigo-400 font-semibold">• ${lesion.cases.length} DP</span>` : ''}
           </div>
         </div>
       </div>
 
-      <div class="flex items-center space-x-2">
-        <button class="btn-test-organ hidden sm:flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-teal-600/10 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold transition">
+      <div class="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+        <button class="btn-test-lesion px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center space-x-1.5 transition shadow-sm shadow-teal-500/20">
           <i data-lucide="play" class="w-3.5 h-3.5"></i>
-          <span>Tester l'organe</span>
+          <span>⚡ Taffer cette lésion (${activeInLesion || totalInLesion})</span>
         </button>
-        <button class="btn-toggle-box p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition">
+        <button class="btn-toggle-lesion p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition">
           <i data-lucide="${isCollapsed ? 'chevron-down' : 'chevron-up'}" class="w-4 h-4"></i>
         </button>
       </div>
     `;
 
-    header.querySelector('h3').textContent = orgName;
+    header.querySelector('h3').textContent = lesion.entity;
 
-    const testBtn = header.querySelector('.btn-test-organ');
+    const testBtn = header.querySelector('.btn-test-lesion');
     if (testBtn) {
-      testBtn.addEventListener('click', (e) => {
+      testBtn.onclick = (e) => {
         e.stopPropagation();
-        startHierarchySession('organ', orgName);
-      });
+        startHierarchySession('entity', lesion.organ, lesion.category, lesion.entity);
+      };
     }
 
-    const toggleBtn = header.querySelector('.btn-toggle-box');
+    const toggleBtn = header.querySelector('.btn-toggle-lesion');
     if (toggleBtn) {
-      toggleBtn.addEventListener('click', (e) => {
+      toggleBtn.onclick = (e) => {
         e.stopPropagation();
-        toggleOrganBankBox(orgName);
-      });
+        toggleBankLesionCollapse(key);
+      };
     }
 
-    organBox.appendChild(header);
+    lesionBox.appendChild(header);
 
-    // Corps repliable contenant les cartes de cet organe
+    // Corps repliable
     const bodyContainer = document.createElement('div');
-    bodyContainer.className = `p-4 sm:p-5 space-y-3 bg-slate-950/40 ${isCollapsed ? 'hidden' : ''}`;
-    organBox.appendChild(bodyContainer);
+    bodyContainer.className = `p-3.5 sm:p-4 space-y-3 bg-slate-950/40 ${isCollapsed ? 'hidden' : ''}`;
+    lesionBox.appendChild(bodyContainer);
 
-    // Insérer les Dossiers Progressifs de cet organe
-    group.cases.forEach(c => {
+    // Insérer les DP de cette lésion
+    lesion.cases.forEach(c => {
       const card = document.createElement('div');
       card.className = "bg-slate-900 border border-indigo-500/30 hover:border-indigo-500 rounded-xl p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-sm";
       card.innerHTML = `
@@ -4137,25 +4425,25 @@ function renderBank() {
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-[10px] font-extrabold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono">📋 DP (${c.steps.length} étapes)</span>
             <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-              ${c.category} > ${c.entity}
+              ${escapeHtml(c.category)} > ${escapeHtml(c.entity)}
             </span>
           </div>
-          <h4 class="font-bold text-sm text-white">${c.title}</h4>
-          <p class="text-xs text-slate-400 line-clamp-1">${c.synopsis}</p>
+          <h4 class="font-bold text-sm text-white">${escapeHtml(c.title)}</h4>
+          <p class="text-xs text-slate-400 line-clamp-1">${escapeHtml(c.synopsis)}</p>
           <div class="flex flex-wrap gap-1 mt-1">
-            ${(c.tags || []).map(t => `<span class="text-[10px] text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded font-mono">#${t}</span>`).join('')}
+            ${(c.tags || []).map(t => `<span class="text-[10px] text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded font-mono">#${escapeHtml(t)}</span>`).join('')}
           </div>
         </div>
         <div class="flex items-center space-x-2 shrink-0 self-end md:self-auto">
-          <button onclick="startDPSession('${c.id}')" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-1 transition shadow-sm shadow-indigo-500/20">
+          <button onclick="startDPSession('${escapeJsString(c.id)}')" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-1 transition shadow-sm shadow-indigo-500/20">
             <i data-lucide="play" class="w-3.5 h-3.5"></i>
             <span>Jouer</span>
           </button>
           ${isCreator() ? `
-          <button onclick="editDP('${c.id}')" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Modifier le DP">
+          <button onclick="editDP('${escapeJsString(c.id)}')" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Modifier le DP">
             <i data-lucide="edit-3" class="w-4 h-4"></i>
           </button>
-          <button onclick="deleteDP('${c.id}')" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition" title="Supprimer le DP">
+          <button onclick="deleteDP('${escapeJsString(c.id)}')" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition" title="Supprimer le DP">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
           ` : ''}
@@ -4164,8 +4452,8 @@ function renderBank() {
       bodyContainer.appendChild(card);
     });
 
-    // Insérer les Questions Simples de cet organe
-    group.questions.forEach(q => {
+    // Insérer les Questions Simples de cette lésion
+    lesion.questions.forEach(q => {
       const card = document.createElement('div');
       card.className = `bg-slate-900 border rounded-xl p-4 transition flex flex-col md:flex-row md:items-center justify-between gap-3 ${
         q.mastered ? 'border-emerald-500/30 bg-emerald-950/10' : 'border-slate-800 hover:border-slate-700'
@@ -4180,7 +4468,7 @@ function renderBank() {
       } else if (isQuestionDue(q)) {
         dueBadgeHtml = '<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center space-x-1"><i data-lucide="clock" class="w-3 h-3"></i><span>À revoir aujourd\'hui</span></span>';
       } else if (q.stats && q.stats.nextReviewDate) {
-        dueBadgeHtml = `<span class="text-[10px] font-medium px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">📅 Revoir le ${q.stats.nextReviewDate}</span>`;
+        dueBadgeHtml = `<span class="text-[10px] font-medium px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">📅 Revoir le ${escapeHtml(q.stats.nextReviewDate)}</span>`;
       }
 
       card.innerHTML = `
@@ -4188,24 +4476,24 @@ function renderBank() {
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/20">${formatBadge}</span>
             <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-              ${q.category} > ${q.entity}
+              ${escapeHtml(q.category)} > ${escapeHtml(q.entity)}
             </span>
             ${dueBadgeHtml}
             <span class="text-[10px] text-slate-400">Précision : ${rate}</span>
           </div>
-          <h4 class="font-bold text-sm text-white">${q.question}</h4>
-          ${q.context ? `<p class="text-xs text-slate-400 font-mono line-clamp-1">${q.context}</p>` : ''}
+          <h4 class="font-bold text-sm text-white">${escapeHtml(q.question)}</h4>
+          ${q.context ? `<p class="text-xs text-slate-400 font-mono line-clamp-1">${escapeHtml(q.context)}</p>` : ''}
           <div class="flex flex-wrap gap-1 mt-1">
-            ${(q.tags || []).map(t => `<span class="text-[10px] text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded font-mono">#${t}</span>`).join('')}
+            ${(q.tags || []).map(t => `<span class="text-[10px] text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded font-mono">#${escapeHtml(t)}</span>`).join('')}
             ${q.images && q.images.length > 0 ? `<span class="text-[10px] text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded flex items-center space-x-1"><i data-lucide="image" class="w-3 h-3"></i><span>${q.images.length} photo${q.images.length > 1 ? 's' : ''}</span></span>` : ''}
           </div>
         </div>
         <div class="flex items-center space-x-2 shrink-0 self-end md:self-auto">
-          <button onclick="openQuestionDetail('${q.id}')" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center space-x-1 transition" title="Aperçu diagnostique et explications">
+          <button onclick="openQuestionDetail('${escapeJsString(q.id)}')" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center space-x-1 transition" title="Aperçu diagnostique et explications">
             <i data-lucide="eye" class="w-3.5 h-3.5"></i>
             <span>Aperçu</span>
           </button>
-          <button onclick="toggleQuestionMastered('${q.id}')" class="px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center space-x-1 transition ${
+          <button onclick="toggleQuestionMastered('${escapeJsString(q.id)}')" class="px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center space-x-1 transition ${
             q.mastered 
               ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30' 
               : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-emerald-400'
@@ -4214,10 +4502,10 @@ function renderBank() {
             <span>${q.mastered ? 'Maîtrisée' : 'Neutraliser'}</span>
           </button>
           ${isCreator() ? `
-          <button onclick="editQuestion('${q.id}')" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Modifier">
+          <button onclick="editQuestion('${escapeJsString(q.id)}')" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Modifier">
             <i data-lucide="edit-3" class="w-4 h-4"></i>
           </button>
-          <button onclick="deleteQuestion('${q.id}')" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition" title="Supprimer">
+          <button onclick="deleteQuestion('${escapeJsString(q.id)}')" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition" title="Supprimer">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
           ` : ''}
@@ -4226,7 +4514,7 @@ function renderBank() {
       bodyContainer.appendChild(card);
     });
 
-    container.appendChild(organBox);
+    itemsContainer.appendChild(lesionBox);
   });
 
   if (window.lucide) lucide.createIcons();

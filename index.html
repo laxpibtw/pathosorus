@@ -236,7 +236,7 @@
       
       <!-- Barre d'état -->
       <div class="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl px-5 py-3">
-        <button onclick="switchTab('play')" class="text-xs font-semibold text-slate-400 hover:text-rose-400 flex items-center space-x-1.5 transition">
+        <button onclick="quitCurrentSession()" class="text-xs font-semibold text-slate-400 hover:text-rose-400 flex items-center space-x-1.5 transition">
           <i data-lucide="x" class="w-4 h-4"></i>
           <span>Quitter</span>
         </button>
@@ -403,7 +403,7 @@
       
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
         <div class="flex items-center justify-between">
-          <button onclick="switchTab('play')" class="text-xs font-semibold text-slate-400 hover:text-rose-400 flex items-center space-x-1.5 transition">
+          <button onclick="quitCurrentDPSession()" class="text-xs font-semibold text-slate-400 hover:text-rose-400 flex items-center space-x-1.5 transition">
             <i data-lucide="x" class="w-4 h-4"></i>
             <span>Quitter le Cas</span>
           </button>
@@ -502,7 +502,7 @@
             <option value="dp">📋 Dossiers Progressifs (DP)</option>
           </select>
 
-          <select id="bank-filter-organ" onchange="renderBank()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500">
+          <select id="bank-filter-organ" onchange="onBankOrganSelectChange()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500">
             <option value="all">Tous les organes</option>
           </select>
 
@@ -527,7 +527,10 @@
         </div>
       </div>
 
-      <div id="bank-items-container" class="space-y-3"></div>
+      <!-- Navigation Hiérarchique par Onglets & Sous-onglets -->
+      <div id="bank-hierarchy-nav" class="space-y-3"></div>
+
+      <div id="bank-items-container" class="space-y-4"></div>
     </div>
 
     <!-- ================= 5. VUE CRÉATEUR MODULAIRE (QUESTION OU DP) ================= -->
