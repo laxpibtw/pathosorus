@@ -487,7 +487,7 @@ async function forceFullCloudSync() {
   try {
     await pushAllLocalDataToAccountCloud();
     await fetchSupabaseData(true);
-    alert(`Synchronisation terminée avec succès 🎉 !\n\n• Questions & Justifications envoyées et synchronisées\n• Trophées & XP à jour (${state.stats.xp || 0} XP, Série ${state.stats.streak || 1}j)\n• Cartes de révision espacée à jour.`);
+    alert(`Synchronisation terminée avec succès !\n\n• Questions & Justifications envoyées et synchronisées\n• Trophées & XP à jour (${state.stats.xp || 0} XP, Série ${state.stats.streak || 1}j)\n• Cartes de révision espacée à jour.`);
   } catch (err) {
     alert("Erreur lors de la synchronisation : " + err.message);
   } finally {
@@ -2661,7 +2661,7 @@ function checkCategoryCompletionBonus(organ, category) {
   if (allCompleted) {
     state.stats.completedCategories.push(catKey);
     state.stats.xp = (state.stats.xp || 0) + 5; // Bonus strict de 5 pts (PDF)
-    showRewardToast(`🎉 Catégorie terminée : "${category}" (+5 XP Bonus permanent) !`, 'check-circle');
+    showRewardToast(`Catégorie terminée : "${category}" (+5 XP Bonus permanent) !`, 'check-circle');
     saveStats();
   }
 }
@@ -3614,16 +3614,10 @@ function startColleaguesQuestionsSession() {
   }
 
   const toReview = getColleaguesQuestions(true, true);
-  if (toReview.length === 0) {
-    if (confirm(`Toutes les questions de l'équipe (${allColleagues.length}) ont déjà été révisées aujourd'hui ! 🎉\n\nSouhaitez-vous quand même les relancer en révision libre ?`)) {
-      state.sessionReturnView = 'play';
-      launchQuizSession(allColleagues, `Questions de l'Équipe • Révision libre (${allColleagues.length} Q) 👥`);
-    }
-    return;
-  }
+  const pool = toReview.length > 0 ? toReview : allColleagues;
 
   state.sessionReturnView = 'play';
-  launchQuizSession(toReview, `Questions de l'Équipe • ${toReview.length} à réviser 👥`);
+  launchQuizSession(pool, `Questions de l'Équipe • ${pool.length} Q 👥`);
 }
 
 // --- DASHBOARD DE RÉPÉTITION ESPACÉE ---
@@ -3649,8 +3643,14 @@ function renderSpacedRepetitionDashboard() {
   if (colleaguesBadge) colleaguesBadge.textContent = colleaguesToReview.length;
 
   const btnColleagues = document.getElementById('btn-play-colleagues');
+  const iconColleagues = document.getElementById('icon-play-colleagues');
   if (btnColleagues) {
-    btnColleagues.disabled = (allColleagues.length === 0);
+    const isDone = (colleaguesToReview.length === 0);
+    btnColleagues.disabled = isDone;
+    if (iconColleagues) {
+      if (isDone) iconColleagues.classList.add('hidden');
+      else iconColleagues.classList.remove('hidden');
+    }
     const labelC = document.getElementById('label-colleagues-count');
     if (labelC) {
       if (allColleagues.length === 0) {
@@ -3658,8 +3658,19 @@ function renderSpacedRepetitionDashboard() {
       } else if (colleaguesToReview.length > 0) {
         labelC.textContent = `Réviser les questions de l'équipe (${colleaguesToReview.length} à faire)`;
       } else {
-        labelC.textContent = `À jour aujourd'hui 🎉 (${allColleagues.length} validée${allColleagues.length > 1 ? 's' : ''})`;
+        labelC.textContent = `À jour aujourd'hui`;
       }
+    }
+  }
+
+  const btnShortcut = document.getElementById('btn-play-colleagues-shortcut');
+  if (btnShortcut) {
+    const isDone = (colleaguesToReview.length === 0);
+    btnShortcut.disabled = isDone;
+    if (isDone) {
+      btnShortcut.classList.add('opacity-40', 'cursor-not-allowed');
+    } else {
+      btnShortcut.classList.remove('opacity-40', 'cursor-not-allowed');
     }
   }
 
@@ -3667,7 +3678,7 @@ function renderSpacedRepetitionDashboard() {
   if (labelShortcut) {
     labelShortcut.textContent = colleaguesToReview.length > 0 
       ? `Questions des Collègues (${colleaguesToReview.length})` 
-      : `Questions des Collègues (À jour 🎉)`;
+      : `Questions des Collègues (À jour)`;
   }
 
   const btnStartDue = document.getElementById('btn-play-due-today');
@@ -3677,7 +3688,7 @@ function renderSpacedRepetitionDashboard() {
     if (label) {
       label.textContent = dueQuestions.length > 0 
         ? `Lancer la session du jour (${dueQuestions.length} à revoir)` 
-        : `Aucune carte échue aujourd'hui 🎉`;
+        : `Aucune carte échue aujourd'hui`;
     }
   }
 
@@ -3814,7 +3825,7 @@ function renderHierarchySelector() {
   const allActiveCount = state.questions.filter(q => !q.mastered).length + state.cases.length;
   const colleaguesTotal = getColleaguesQuestions(true, false).length;
   const colleaguesToReview = getColleaguesQuestions(true, true).length;
-  const colleaguesBadgeText = (colleaguesToReview === 0 && colleaguesTotal > 0) ? 'À jour 🎉' : `${colleaguesToReview}`;
+  const colleaguesBadgeText = (colleaguesToReview === 0 && colleaguesTotal > 0) ? 'À jour' : `${colleaguesToReview}`;
   const myCount = getMyAuthoredQuestions(true).length;
 
   let html = `<div class="space-y-4">`;
@@ -4054,21 +4065,16 @@ function startHierarchySession(level, organ, category, entity) {
   else if (level === 'category') matchingQuestions = activeQuestions.filter(q => (organ === 'all' || q.organ === organ) && (category === 'all' || q.category === category));
   else if (level === 'entity') matchingQuestions = activeQuestions.filter(q => (organ === 'all' || q.organ === organ) && (category === 'all' || q.category === category) && q.entity === entity);
 
-  // Si on lance depuis l'onglet JOUER : exclure les questions déjà faites aujourd'hui (règle J1)
+  // Si on lance depuis l'onglet JOUER : privilégier les questions non faites aujourd'hui
   let pool = matchingQuestions;
   if (!isFromBank) {
-    pool = matchingQuestions.filter(q => !isQuestionDoneToday(q));
+    const notDoneToday = matchingQuestions.filter(q => !isQuestionDoneToday(q));
+    // S'il reste des questions à réviser aujourd'hui, on les lance en priorité
+    // Si toutes ont déjà été faites aujourd'hui, on lance directement la sélection sans aucune pop-up
+    pool = notDoneToday.length > 0 ? notDoneToday : matchingQuestions;
   }
 
   if (pool.length === 0) {
-    if (matchingQuestions.length > 0 && !isFromBank) {
-      if (confirm(`Vous avez déjà validé toutes les questions (${matchingQuestions.length}) de cette sélection aujourd'hui 🎉 !\n\nVoulez-vous quand même les refaire en révision libre ?`)) {
-        launchQuizSession(matchingQuestions, `Entraînement : ${entity || category || organ}`);
-        return;
-      }
-      return;
-    }
-
     // Vérifier si des questions neutralisées (maîtrisées) existent
     const allMatching = state.questions.filter(q => {
       if (level === 'organ') return (organ === 'all' || q.organ === organ);
@@ -4078,17 +4084,14 @@ function startHierarchySession(level, organ, category, entity) {
     });
 
     if (allMatching.length > 0) {
-      if (confirm(`Toutes les questions (${allMatching.length}) de cette sélection sont neutralisées (maîtrisées).\n\nVoulez-vous quand même vous entraîner dessus ?`)) {
-        launchQuizSession(allMatching, `Entraînement : ${entity || category || organ}`);
-        return;
-      }
+      launchQuizSession(allMatching, `Entraînement : ${entity || category || organ} (Maîtrisées)`);
       return;
     }
 
     alert("Aucune question disponible pour cette sélection.");
     return;
   }
-  launchQuizSession(pool, `Entraînement : ${entity || category || organ} (${pool.length} à faire)`);
+  launchQuizSession(pool, `Entraînement : ${entity || category || organ}`);
 }
 
 // --- SESSIONS DE QUIZ SIMPLE ---
@@ -4155,12 +4158,18 @@ function launchQuizSession(pool, title) {
 
 function startGlobalSprint() {
   const activeQuestions = state.questions.filter(q => !q.mastered && !isQuestionDoneToday(q));
-  if (activeQuestions.length === 0) {
-    alert("Vous avez déjà terminé toutes vos révisions pour aujourd'hui 🎉 !\nRevenez demain pour de nouvelles échéances.");
+  if (activeQuestions.length > 0) {
+    const pool = [...activeQuestions].sort(() => 0.5 - Math.random()).slice(0, 10);
+    launchQuizSession(pool, `Sprint Quotidien (${pool.length} questions restantes)`);
     return;
   }
-  const pool = [...activeQuestions].sort(() => 0.5 - Math.random()).slice(0, 10);
-  launchQuizSession(pool, `Sprint Quotidien (${pool.length} questions restantes)`);
+  const allActive = state.questions.filter(q => !q.mastered);
+  if (allActive.length > 0) {
+    const pool = [...allActive].sort(() => 0.5 - Math.random()).slice(0, 10);
+    launchQuizSession(pool, `Sprint Quotidien • Révision libre (${pool.length} questions)`);
+    return;
+  }
+  alert("Aucune question active disponible.");
 }
 
 function renderSessionQuestion() {
