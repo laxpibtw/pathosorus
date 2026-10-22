@@ -6,5 +6,8 @@
 
 window.PATHOSORUS_CONFIG = {
   supabaseUrl: "https://tevcifnshxzhkdkrcrph.supabase.co",
-  supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRldmNpZm5zaHh6aGtka3JjcnBoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2MDY5NzQsImV4cCI6MjEwODE4Mjk3NH0.AuRQ8LfMJWe5oaRyn79dTEQThEH8q29ckkaEg9lXGKI"
+  supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRldmNpZm5zaHh6aGtka3JjcnBoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2MDY5NzQsImV4cCI6MjEwODE4Mjk3NH0.AuRQ8LfMJWe5oaRyn79dTEQThEH8q29ckkaEg9lXGKI",
+  // La clé service_role est optionnelle en local.
+  // Sur Netlify : renseignez SUPABASE_SERVICE_ROLE_KEY dans Site settings > Environment variables.
+  supabaseServiceRoleKey: ""
 };

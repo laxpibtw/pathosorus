@@ -78,20 +78,40 @@
         </button>
       </nav>
 
-      <!-- Stats Pill & Cloud Status -->
+      <!-- Stats Pill, Comptes & Auth -->
       <div class="flex items-center space-x-2">
         <button id="btn-supabase-modal" onclick="openSupabaseModal()" class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition bg-slate-800 text-slate-300 border-slate-700 hover:border-teal-500" title="Configurer la synchronisation Cloud Supabase">
           <span class="w-2 h-2 rounded-full bg-slate-500" id="supabase-status-dot"></span>
           <span id="supabase-status-text" class="hidden md:inline">Cloud Hôpital</span>
         </button>
+
         <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold" title="Série de jours actifs">
           <i data-lucide="flame" class="w-3.5 h-3.5 fill-amber-400"></i>
           <span id="top-streak">1</span> j
         </div>
+
         <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-semibold" title="Points d'expérience">
           <i data-lucide="award" class="w-3.5 h-3.5"></i>
           <span id="top-xp">0</span> <span class="text-[10px]">XP</span>
         </div>
+
+        <!-- Bouton Gestion des Comptes (visible uniquement pour Créateur) -->
+        <button id="btn-accounts-modal" onclick="openAccountsModal()" class="hidden items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-600 hover:text-white transition shadow-sm" title="Gérer les comptes collègues (Créateurs & Lecteurs)">
+          <i data-lucide="users" class="w-3.5 h-3.5"></i>
+          <span class="hidden lg:inline">Comptes</span>
+        </button>
+
+        <!-- Badge Rôle Utilisateur -->
+        <div id="user-role-badge" class="flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-800 border border-slate-700 text-slate-300" title="Votre compte PathoSorus">
+          <span id="user-role-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+          <span id="user-role-text">Non connecté</span>
+        </div>
+
+        <!-- Bouton Connexion / Déconnexion -->
+        <button id="btn-auth-toggle" onclick="toggleAuthModal()" class="px-2.5 py-1 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition border border-slate-700 flex items-center space-x-1" title="Se connecter ou se déconnecter">
+          <i data-lucide="log-in" class="w-3.5 h-3.5" id="auth-btn-icon"></i>
+          <span id="auth-btn-text">Connexion</span>
+        </button>
       </div>
 
     </div>
@@ -478,6 +498,35 @@
 
     <!-- ================= 5. VUE CRÉATEUR MODULAIRE (QUESTION OU DP) ================= -->
     <div id="view-create" class="app-view hidden max-w-3xl mx-auto space-y-6">
+
+      <!-- Écran Verrouillé pour les Comptes Lecteurs -->
+      <div id="view-create-locked" class="hidden text-center py-16 px-6 bg-slate-900 border border-slate-800 rounded-3xl max-w-xl mx-auto space-y-5 shadow-2xl">
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center shadow-inner">
+          <i data-lucide="lock" class="w-8 h-8"></i>
+        </div>
+        <div>
+          <span class="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30 text-xs font-bold mb-2">
+            <i data-lucide="shield-alert" class="w-3.5 h-3.5"></i>
+            <span>Compte Lecteur Actif</span>
+          </span>
+          <h2 class="text-xl font-bold text-white tracking-tight">Espace de Rédaction Réservé aux Créateurs</h2>
+        </div>
+        <p class="text-xs sm:text-sm text-slate-300 leading-relaxed">
+          Votre compte dispose des droits <strong>Lecteur</strong>. Vous avez un accès illimité à l'entraînement, aux séries de répétition espacée du jour, aux QCM/QCU et aux Dossiers Progressifs.
+        </p>
+        <p class="text-xs text-slate-400 leading-relaxed bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+          💡 Pour rédiger et publier de nouvelles questions ou concevoir des dossiers cliniques pour l'équipe, demandez à votre référent de passer votre profil en rôle <strong>Créateur</strong>.
+        </p>
+        <div class="pt-2">
+          <button onclick="switchTab('play')" class="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs inline-flex items-center space-x-2 transition shadow-lg shadow-teal-500/20">
+            <i data-lucide="play" class="w-4 h-4"></i>
+            <span>Retourner à l'entraînement</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Contenu de Rédaction (affiché pour les Créateurs) -->
+      <div id="view-create-content" class="space-y-6">
       
       <div class="flex items-center p-1.5 rounded-2xl bg-slate-900 border border-slate-800 shadow-lg">
         <button type="button" id="tab-creator-simple" onclick="setCreatorMode('simple')" class="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 bg-teal-600 text-white shadow-md">
@@ -735,7 +784,9 @@
         </form>
       </div>
 
-    </div>
+      </div> <!-- Fin view-create-content -->
+
+    </div> <!-- Fin view-create -->
 
   </main>
 
@@ -798,6 +849,285 @@
           <span>Recharger depuis le Cloud Supabase</span>
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL AUTHENTIFICATION (CONNEXION) ================= -->
+  <div id="modal-auth" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-5">
+      
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-teal-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-teal-500/20">
+            <i data-lucide="microscope" class="w-5 h-5 text-white"></i>
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <h3 class="font-extrabold text-base text-white">PathoSorus 🦖</h3>
+              <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/30">Accès</span>
+            </div>
+            <p class="text-xs text-slate-400">Connexion à votre espace d'anatomopathologie</p>
+          </div>
+        </div>
+        <button onclick="closeAuthModal()" class="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div id="auth-alert-box" class="hidden p-3 rounded-xl text-xs flex items-start space-x-2"></div>
+
+      <!-- Mode Connexion (par défaut) -->
+      <form id="form-auth-login" onsubmit="handleAuthLoginSubmit(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-300 mb-1.5">Adresse e-mail</label>
+          <div class="relative">
+            <i data-lucide="mail" class="w-4 h-4 text-slate-500 absolute left-3 top-3"></i>
+            <input type="email" id="auth-input-email" required placeholder="nom.prenom@ch-hopital.fr" class="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 text-xs">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-300 mb-1.5">Mot de passe</label>
+          <div class="relative">
+            <i data-lucide="key-round" class="w-4 h-4 text-slate-500 absolute left-3 top-3"></i>
+            <input type="password" id="auth-input-password" required placeholder="••••••••" class="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 text-xs font-mono">
+          </div>
+        </div>
+
+        <button type="submit" id="btn-auth-submit" class="w-full py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-lg shadow-teal-500/20">
+          <i data-lucide="log-in" class="w-4 h-4"></i>
+          <span>Se connecter</span>
+        </button>
+
+        <p class="text-[11px] text-slate-400 text-center leading-relaxed">
+          Un compte <strong>Lecteur</strong> permet l'entraînement complet. Seul le compte <strong>Créateur</strong> peut rédiger et modifier les cas.
+        </p>
+      </form>
+
+      <div class="pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+        <button type="button" onclick="toggleAdminInitView()" id="btn-toggle-admin-init" class="text-teal-400 hover:text-teal-300 transition underline underline-offset-2">
+          Première connexion Administrateur ?
+        </button>
+        <span class="text-slate-500">Mode Local & Cloud</span>
+      </div>
+
+      <!-- Sous-panneau optionnel : Inscription du Premier Admin (padoreau85@gmail.com) -->
+      <div id="admin-init-panel" class="hidden p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+        <div class="flex items-center space-x-2 text-indigo-400 text-xs font-bold">
+          <i data-lucide="shield" class="w-4 h-4"></i>
+          <span>Création du compte Administrateur Master</span>
+        </div>
+        <p class="text-[11px] text-slate-400 leading-relaxed">
+          Si votre compte administrateur n'a pas encore été créé dans Supabase Auth, vous pouvez l'initialiser ici avec votre mot de passe :
+        </p>
+        <button type="button" onclick="handleMasterAdminSignUp()" class="w-full py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-bold transition flex items-center justify-center space-x-1.5">
+          <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
+          <span>Initialiser le compte padoreau85@gmail.com</span>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ================= MODAL GESTION DES COMPTES COLLÈGUES (CRÉATEUR ONLY) ================= -->
+  <div id="modal-accounts" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 sm:p-7 shadow-2xl space-y-5">
+      
+      <!-- En-tête -->
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+            <i data-lucide="users" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="font-extrabold text-base text-white flex items-center space-x-2">
+              <span>Gestion des Comptes Internes</span>
+              <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">Créateur</span>
+            </h3>
+            <p class="text-xs text-slate-400">Créez des accès pour vos co-internes et gérez leurs permissions</p>
+          </div>
+        </div>
+        <button onclick="closeAccountsModal()" class="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Navigation Onglets Modal -->
+      <div class="flex items-center p-1 rounded-xl bg-slate-950 border border-slate-800">
+        <button type="button" onclick="switchAccountModalTab('create')" id="tab-btn-acc-create" class="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white bg-indigo-600 shadow-sm transition">
+          ➕ Créer un compte
+        </button>
+        <button type="button" onclick="switchAccountModalTab('list')" id="tab-btn-acc-list" class="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition">
+          👥 Collègues inscrits
+        </button>
+        <button type="button" onclick="switchAccountModalTab('settings')" id="tab-btn-acc-settings" class="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition">
+          ⚙️ Clé Locale
+        </button>
+      </div>
+
+      <!-- 1. ONGLET : CRÉER UN COMPTE POUR UN COLLÈGUE -->
+      <div id="acc-view-create" class="space-y-4">
+        <div id="acc-create-alert" class="hidden p-3 rounded-xl text-xs flex items-start space-x-2"></div>
+
+        <form id="form-create-colleague" onsubmit="handleCreateColleagueSubmit(event)" class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-300 mb-1.5">Adresse e-mail du collègue *</label>
+            <input type="email" id="colleague-email" required placeholder="ex: interne.dupont@ch-hopital.fr" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-xs">
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="block text-xs font-bold text-slate-300">Mot de passe provisoire *</label>
+              <button type="button" onclick="generateColleaguePassword()" class="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center space-x-1">
+                <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                <span>Générer un mot de passe</span>
+              </button>
+            </div>
+            <input type="text" id="colleague-password" required minlength="6" placeholder="ex: Patho2026!#" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-xs font-mono">
+          </div>
+
+          <!-- Choix du Rôle -->
+          <div class="space-y-2">
+            <label class="block text-xs font-bold text-slate-300">Type de compte à attribuer *</label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              
+              <!-- Carte Lecteur -->
+              <label class="cursor-pointer relative p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-sky-500/50 has-[:checked]:border-sky-500 has-[:checked]:bg-sky-500/10 transition block">
+                <div class="flex items-start space-x-2.5">
+                  <input type="radio" name="colleague-role" value="reader" checked class="mt-1 text-sky-500 focus:ring-sky-500">
+                  <div>
+                    <span class="block text-xs font-bold text-white flex items-center space-x-1">
+                      <span>📖 Compte Lecteur</span>
+                    </span>
+                    <p class="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                      Consultation, répétition espacée, révision des QCM et résolution des cas cliniques (sans modification des cartes).
+                    </p>
+                  </div>
+                </div>
+              </label>
+
+              <!-- Carte Créateur -->
+              <label class="cursor-pointer relative p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-teal-500/50 has-[:checked]:border-teal-500 has-[:checked]:bg-teal-500/10 transition block">
+                <div class="flex items-start space-x-2.5">
+                  <input type="radio" name="colleague-role" value="creator" class="mt-1 text-teal-500 focus:ring-teal-500">
+                  <div>
+                    <span class="block text-xs font-bold text-white flex items-center space-x-1">
+                      <span>🦖 Compte Créateur</span>
+                    </span>
+                    <p class="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                      Droits complets : rédaction de questions, création de Dossiers Progressifs, gestion des tags et création de comptes.
+                    </p>
+                  </div>
+                </div>
+              </label>
+
+            </div>
+          </div>
+
+          <button type="submit" id="btn-colleague-submit" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-lg shadow-indigo-500/20">
+            <i data-lucide="user-plus" class="w-4 h-4"></i>
+            <span>Créer l'accès pour ce collègue</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- 2. ONGLET : LISTE DES COMPTES ENREGISTRÉS -->
+      <div id="acc-view-list" class="hidden space-y-3">
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-slate-400">Comptes associés à PathoSorus :</span>
+          <button type="button" onclick="loadColleaguesList()" class="text-indigo-400 hover:text-indigo-300 font-semibold flex items-center space-x-1">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+            <span>Actualiser</span>
+          </button>
+        </div>
+        
+        <div id="colleagues-list-container" class="max-h-64 overflow-y-auto space-y-2 pr-1">
+          <div class="text-center py-8 text-slate-500 text-xs">Chargement des utilisateurs...</div>
+        </div>
+      </div>
+
+      <!-- 3. ONGLET : PARAMÈTRES LOCAUX (SERVICE ROLE) -->
+      <div id="acc-view-settings" class="hidden space-y-3 text-xs">
+        <div class="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+          <h4 class="font-bold text-white flex items-center space-x-1.5">
+            <i data-lucide="key" class="w-3.5 h-3.5 text-amber-400"></i>
+            <span>Clé Secrète Supabase Service Role (Optionnelle en Local)</span>
+          </h4>
+          <p class="text-[11px] text-slate-400 leading-relaxed">
+            Permet à votre environnement local de créer instantanément des comptes avec confirmation automatique d'e-mail. (Dans Supabase Dashboard $\rightarrow$ Project Settings $\rightarrow$ API $\rightarrow$ <code class="text-teal-300 font-mono">service_role secret</code>).
+          </p>
+          <input type="password" id="input-local-service-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-mono text-xs">
+          <div class="flex items-center space-x-2 pt-1">
+            <button type="button" onclick="saveLocalServiceKey()" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition">
+              Enregistrer en local
+            </button>
+            <button type="button" onclick="clearLocalServiceKey()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition">
+              Effacer
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ================= MODAL DÉTAILS DE LA QUESTION (APERÇU POUR LECTEURS) ================= -->
+  <div id="modal-question-detail" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 sm:p-7 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+      
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div class="flex items-center space-x-2.5">
+          <span id="detail-format-badge" class="text-xs font-bold px-2.5 py-1 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/30">☑️ QCM</span>
+          <span id="detail-hierarchy-badge" class="text-xs font-mono px-2.5 py-1 rounded-full bg-slate-800 text-slate-300">Organe > Catégorie > Entité</span>
+        </div>
+        <button onclick="closeQuestionDetailModal()" class="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <h3 id="detail-question-text" class="text-base sm:text-lg font-extrabold text-white leading-snug"></h3>
+        <div id="detail-context-box" class="hidden p-3.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs text-slate-300 whitespace-pre-wrap"></div>
+      </div>
+
+      <!-- Galerie photos -->
+      <div id="detail-photos-gallery" class="hidden space-y-2">
+        <label class="text-xs font-bold text-slate-400">Photos & Coupes microscopiques :</label>
+        <div id="detail-photos-container" class="grid grid-cols-2 sm:grid-cols-3 gap-2.5"></div>
+      </div>
+
+      <!-- Liste des choix & réponses -->
+      <div class="space-y-2">
+        <label class="text-xs font-bold text-slate-400">Choix & Réponses :</label>
+        <div id="detail-options-container" class="space-y-2"></div>
+      </div>
+
+      <!-- Explications & Pièges -->
+      <div class="space-y-2.5 pt-2 border-t border-slate-800">
+        <div class="p-3.5 rounded-xl bg-slate-950 border border-teal-500/20 text-xs space-y-1">
+          <span class="font-bold text-teal-300 flex items-center space-x-1.5">
+            <i data-lucide="info" class="w-3.5 h-3.5"></i>
+            <span>Explication diagnostique :</span>
+          </span>
+          <p id="detail-explanation-text" class="text-slate-300 leading-relaxed"></p>
+        </div>
+
+        <div id="detail-trap-container" class="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs space-y-1">
+          <span class="font-bold text-amber-300 flex items-center space-x-1.5">
+            <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
+            <span>Pièges classiques & diagnostics différentiels :</span>
+          </span>
+          <p id="detail-trap-text" class="text-amber-200/90 leading-relaxed"></p>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-2">
+        <div id="detail-tags-container" class="flex flex-wrap gap-1"></div>
+        <button type="button" onclick="closeQuestionDetailModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">
+          Fermer
+        </button>
+      </div>
+
     </div>
   </div>
 

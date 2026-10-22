@@ -8,6 +8,9 @@ const STORAGE_KEY_TAGS = "pathotrainer_custom_tags_v3";
 const STORAGE_KEY_STATS = "pathotrainer_custom_stats_v3";
 
 let state = {
+  currentUser: null,
+  currentRole: 'reader', // 'creator' | 'reader'
+  userProgress: {}, // map questionId -> { stats, mastered, flagged }
   questions: [],
   cases: [],
   customTags: [],
@@ -31,6 +34,17 @@ let state = {
   dpSteps: [],
   bankCollapsedOrgans: new Set() // Ensemble des boîtes d'organes repliées
 };
+
+function isCreator() {
+  if (state.currentUser && state.currentUser.email && state.currentUser.email.toLowerCase() === 'padoreau85@gmail.com') {
+    return true;
+  }
+  return state.currentRole === 'creator';
+}
+
+function isReader() {
+  return !isCreator();
+}
 
 // --- SYNTHÈSE SONORE ---
 function escapeHtml(str) {
@@ -114,6 +128,7 @@ function initSupabase() {
     try {
       supabaseClient = lib.createClient(url, key);
       updateSupabaseUI(true);
+      initAuth();
       return true;
     } catch (e) {
       console.error('Erreur Supabase init:', e);
@@ -122,6 +137,7 @@ function initSupabase() {
     }
   } else {
     updateSupabaseUI(false);
+    updateUserRoleUI();
     return false;
   }
 }
@@ -217,6 +233,737 @@ async function saveSupabaseSettings() {
   closeSupabaseModal();
 }
 
+// =========================================================================
+// --- MODULE D'AUTHENTIFICATION & GESTION DES RÔLES (CRÉATEUR / LECTEUR) ---
+// =========================================================================
+
+async function initAuth() {
+  if (!supabaseClient) return;
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session && session.user) {
+      state.currentUser = session.user;
+      await fetchCurrentUserRole();
+      await loadUserProgress();
+    } else {
+      state.currentUser = null;
+      state.currentRole = 'reader';
+    }
+    updateUserRoleUI();
+
+    supabaseClient.auth.onAuthStateChange(async (event, session) => {
+      if (session && session.user) {
+        state.currentUser = session.user;
+        await fetchCurrentUserRole();
+        await loadUserProgress();
+      } else {
+        state.currentUser = null;
+        state.currentRole = 'reader';
+      }
+      updateUserRoleUI();
+    });
+  } catch (e) {
+    console.warn("Erreur initAuth:", e);
+  }
+}
+
+async function fetchCurrentUserRole() {
+  if (!state.currentUser) {
+    state.currentRole = 'reader';
+    return;
+  }
+  const email = (state.currentUser.email || '').toLowerCase();
+  if (email === 'padoreau85@gmail.com') {
+    state.currentRole = 'creator';
+    return;
+  }
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('profiles')
+      .select('role')
+      .eq('id', state.currentUser.id)
+      .maybeSingle();
+
+    if (!error && data && data.role) {
+      state.currentRole = data.role;
+    } else {
+      state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || 'reader';
+    }
+  } catch (e) {
+    state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || 'reader';
+  }
+}
+
+async function loadUserProgress() {
+  if (!supabaseClient || !state.currentUser) return;
+  try {
+    const { data, error } = await supabaseClient
+      .from('user_progress')
+      .select('*')
+      .eq('user_id', state.currentUser.id);
+
+    if (!error && data && Array.isArray(data)) {
+      data.forEach(up => {
+        state.userProgress[up.question_id] = up;
+        const q = state.questions.find(item => item.id === up.question_id);
+        if (q) {
+          if (typeof up.mastered !== 'undefined') q.mastered = up.mastered;
+          if (typeof up.flagged !== 'undefined') q.flagged = up.flagged;
+          if (up.stats) q.stats = Object.assign(q.stats || {}, up.stats);
+        }
+      });
+      localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
+      renderSpacedRepetitionDashboard();
+      renderBank();
+      renderHierarchySelector();
+    }
+  } catch (e) {
+    console.warn("Table user_progress non migrée ou inaccessible:", e);
+  }
+}
+
+async function dbSaveUserProgress(q) {
+  if (!q) return;
+  if (!state.currentUser) {
+    saveQuestions();
+    return;
+  }
+
+  state.userProgress[q.id] = {
+    mastered: q.mastered,
+    flagged: q.flagged,
+    stats: q.stats
+  };
+  localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
+
+  if (!supabaseClient) return;
+
+  try {
+    await supabaseClient.from('user_progress').upsert({
+      user_id: state.currentUser.id,
+      question_id: q.id,
+      mastered: q.mastered || false,
+      flagged: q.flagged || false,
+      stats: q.stats || {},
+      updated_at: new Date().toISOString()
+    });
+  } catch (e) {
+    console.warn("Erreur sauvegarde progression Supabase:", e);
+    if (isCreator()) {
+      dbUpsertQuestion(q);
+    }
+  }
+}
+
+function updateUserRoleUI() {
+  const roleBadge = document.getElementById('user-role-badge');
+  const roleDot = document.getElementById('user-role-dot');
+  const roleText = document.getElementById('user-role-text');
+  const btnAuthToggle = document.getElementById('btn-auth-toggle');
+  const authBtnIcon = document.getElementById('auth-btn-icon');
+  const authBtnText = document.getElementById('auth-btn-text');
+  const btnAccountsModal = document.getElementById('btn-accounts-modal');
+
+  if (state.currentUser) {
+    const email = state.currentUser.email || '';
+    const emailPrefix = email.split('@')[0];
+    if (authBtnIcon) authBtnIcon.setAttribute('data-lucide', 'log-out');
+    if (authBtnText) authBtnText.textContent = "Déconnexion";
+    if (btnAuthToggle) btnAuthToggle.title = `Déconnecter ${email}`;
+
+    if (isCreator()) {
+      if (roleBadge) roleBadge.className = "flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-teal-500/20 to-indigo-500/20 border border-teal-500/40 text-teal-300 shadow-sm";
+      if (roleDot) roleDot.className = "w-2 h-2 rounded-full bg-teal-400 animate-pulse";
+      if (roleText) roleText.textContent = `${emailPrefix} (Créateur 🦖)`;
+      if (btnAccountsModal) {
+        btnAccountsModal.classList.remove('hidden');
+        btnAccountsModal.classList.add('flex');
+      }
+    } else {
+      if (roleBadge) roleBadge.className = "flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-sky-500/10 border border-sky-500/30 text-sky-300";
+      if (roleDot) roleDot.className = "w-2 h-2 rounded-full bg-sky-400";
+      if (roleText) roleText.textContent = `${emailPrefix} (Lecteur 📖)`;
+      if (btnAccountsModal) {
+        btnAccountsModal.classList.add('hidden');
+        btnAccountsModal.classList.remove('flex');
+      }
+    }
+  } else {
+    if (authBtnIcon) authBtnIcon.setAttribute('data-lucide', 'log-in');
+    if (authBtnText) authBtnText.textContent = "Connexion";
+    if (btnAuthToggle) btnAuthToggle.title = "Se connecter";
+    if (roleBadge) roleBadge.className = "flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-800 border border-slate-700 text-slate-400";
+    if (roleDot) roleDot.className = "w-2 h-2 rounded-full bg-slate-500";
+    if (roleText) roleText.textContent = "Non connecté";
+    if (btnAccountsModal) {
+      btnAccountsModal.classList.add('hidden');
+      btnAccountsModal.classList.remove('flex');
+    }
+  }
+
+  // Contrôle de l'écran verrouillé sur la vue Créer
+  const lockedEl = document.getElementById('view-create-locked');
+  const contentEl = document.getElementById('view-create-content');
+  if (isReader()) {
+    if (lockedEl) lockedEl.classList.remove('hidden');
+    if (contentEl) contentEl.classList.add('hidden');
+  } else {
+    if (lockedEl) lockedEl.classList.add('hidden');
+    if (contentEl) contentEl.classList.remove('hidden');
+  }
+
+  renderBank();
+  if (window.lucide) lucide.createIcons();
+}
+
+function openAuthModal() {
+  const modal = document.getElementById('modal-auth');
+  const alertBox = document.getElementById('auth-alert-box');
+  if (alertBox) alertBox.classList.add('hidden');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+  if (window.lucide) lucide.createIcons();
+}
+
+function closeAuthModal() {
+  const modal = document.getElementById('modal-auth');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+
+function toggleAuthModal() {
+  if (state.currentUser) {
+    handleAuthLogout();
+  } else {
+    openAuthModal();
+  }
+}
+
+function toggleAdminInitView() {
+  const panel = document.getElementById('admin-init-panel');
+  if (panel) {
+    panel.classList.toggle('hidden');
+  }
+}
+
+async function handleAuthLoginSubmit(e) {
+  e.preventDefault();
+  if (!supabaseClient) {
+    alert("Supabase n'est pas initialisé. Vérifiez vos clés dans config.js.");
+    return;
+  }
+
+  const emailInput = document.getElementById('auth-input-email');
+  const passInput = document.getElementById('auth-input-password');
+  const alertBox = document.getElementById('auth-alert-box');
+  const btn = document.getElementById('btn-auth-submit');
+
+  const email = (emailInput.value || '').trim();
+  const password = passInput.value || '';
+
+  if (!email || !password) return;
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span>Connexion en cours...</span>`;
+  }
+  if (alertBox) alertBox.classList.add('hidden');
+
+  try {
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+
+    state.currentUser = data.user;
+    await fetchCurrentUserRole();
+    await loadUserProgress();
+    updateUserRoleUI();
+    closeAuthModal();
+
+    const roleStr = isCreator() ? "Créateur 🦖" : "Lecteur 📖";
+    alert(`Bienvenue ${email} !\nConnecté avec succès en tant que ${roleStr}.`);
+    if (isCreator()) {
+      fetchSupabaseData(true);
+    }
+  } catch (err) {
+    console.error("Erreur connexion:", err);
+    if (alertBox) {
+      alertBox.className = "p-3 rounded-xl text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start space-x-2";
+      alertBox.innerHTML = `<i data-lucide="alert-circle" class="w-4 h-4 shrink-0 mt-0.5"></i><span>${err.message || "Identifiants invalides."}</span>`;
+      alertBox.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="log-in" class="w-4 h-4"></i><span>Se connecter</span>`;
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+}
+
+async function handleAuthLogout() {
+  if (!confirm("Voulez-vous vous déconnecter de PathoSorus ?")) return;
+  if (supabaseClient) {
+    try {
+      await supabaseClient.auth.signOut();
+    } catch (e) {
+      console.warn("Erreur signOut:", e);
+    }
+  }
+  state.currentUser = null;
+  state.currentRole = 'reader';
+  updateUserRoleUI();
+  alert("Vous êtes maintenant déconnecté.");
+}
+
+async function handleMasterAdminSignUp() {
+  const passInput = document.getElementById('auth-input-password');
+  const password = passInput.value || '';
+  if (!password || password.length < 6) {
+    alert("Veuillez renseigner un mot de passe d'au moins 6 caractères dans le champ Mot de passe.");
+    passInput.focus();
+    return;
+  }
+
+  if (!confirm("Créer le compte Administrateur Master pour padoreau85@gmail.com ?")) return;
+
+  try {
+    const { data, error } = await supabaseClient.auth.signUp({
+      email: 'padoreau85@gmail.com',
+      password: password,
+      options: {
+        data: { role: 'creator' }
+      }
+    });
+    if (error) throw error;
+    alert("Compte Administrateur padoreau85@gmail.com initialisé !\nSi l'e-mail de confirmation est requis, validez-le, sinon connectez-vous directement.");
+  } catch (err) {
+    alert("Erreur lors de la création master : " + err.message);
+  }
+}
+
+// --- GESTION DES COMPTES COLLÈGUES ---
+
+function openAccountsModal() {
+  if (!isCreator()) {
+    alert("Accès réservé aux comptes Créateurs.");
+    return;
+  }
+  const modal = document.getElementById('modal-accounts');
+  const alertBox = document.getElementById('acc-create-alert');
+  if (alertBox) alertBox.classList.add('hidden');
+
+  const sKeyInput = document.getElementById('input-local-service-key');
+  if (sKeyInput) {
+    sKeyInput.value = localStorage.getItem('pathosorus_service_key') || '';
+  }
+
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    switchAccountModalTab('create');
+  }
+  if (window.lucide) lucide.createIcons();
+}
+
+function closeAccountsModal() {
+  const modal = document.getElementById('modal-accounts');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+
+function switchAccountModalTab(tab) {
+  const views = ['create', 'list', 'settings'];
+  views.forEach(v => {
+    const el = document.getElementById('acc-view-' + v);
+    const btn = document.getElementById('tab-btn-acc-' + v);
+    if (el) el.classList.add('hidden');
+    if (btn) {
+      btn.className = "flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition";
+    }
+  });
+
+  const targetView = document.getElementById('acc-view-' + tab);
+  const targetBtn = document.getElementById('tab-btn-acc-' + tab);
+  if (targetView) targetView.classList.remove('hidden');
+  if (targetBtn) {
+    targetBtn.className = "flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white bg-indigo-600 shadow-sm transition";
+  }
+
+  if (tab === 'list') {
+    loadColleaguesList();
+  }
+  if (window.lucide) lucide.createIcons();
+}
+
+function generateColleaguePassword() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!#$*";
+  let pass = "Patho";
+  for (let i = 0; i < 6; i++) {
+    pass += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  const passInput = document.getElementById('colleague-password');
+  if (passInput) passInput.value = pass;
+}
+
+async function handleCreateColleagueSubmit(e) {
+  e.preventDefault();
+  if (!isCreator()) {
+    alert("Action réservée aux créateurs.");
+    return;
+  }
+
+  const emailInput = document.getElementById('colleague-email');
+  const passInput = document.getElementById('colleague-password');
+  const roleRadio = document.querySelector('input[name="colleague-role"]:checked');
+  const alertBox = document.getElementById('acc-create-alert');
+  const btn = document.getElementById('btn-colleague-submit');
+
+  const email = (emailInput.value || '').trim().toLowerCase();
+  const password = passInput.value || '';
+  const role = roleRadio ? roleRadio.value : 'reader';
+
+  if (!email || !password) return;
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span>Création en cours...</span>`;
+  }
+  if (alertBox) alertBox.classList.add('hidden');
+
+  try {
+    const result = await createColleagueAccount(email, password, role);
+    if (alertBox) {
+      alertBox.className = "p-3.5 rounded-xl text-xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 flex items-start space-x-2";
+      alertBox.innerHTML = `
+        <i data-lucide="check-circle" class="w-4 h-4 shrink-0 mt-0.5"></i>
+        <div>
+          <strong>Succès !</strong> ${result.message}<br>
+          <span class="text-[11px] text-slate-300 mt-1 block">
+            Identifiants pour votre collègue :<br>
+            • E-mail : <code class="text-teal-300 font-mono">${email}</code><br>
+            • Mot de passe : <code class="text-teal-300 font-mono">${password}</code><br>
+            • Droits : <strong>${role === 'creator' ? 'Créateur 🦖' : 'Lecteur 📖'}</strong>
+          </span>
+        </div>
+      `;
+      alertBox.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    }
+    emailInput.value = "";
+    passInput.value = "";
+  } catch (err) {
+    console.error("Erreur création compte collègue:", err);
+    if (alertBox) {
+      alertBox.className = "p-3.5 rounded-xl text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start space-x-2";
+      alertBox.innerHTML = `<i data-lucide="alert-triangle" class="w-4 h-4 shrink-0 mt-0.5"></i><div><strong>Échec :</strong> ${err.message}</div>`;
+      alertBox.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="user-plus" class="w-4 h-4"></i><span>Créer l'accès pour ce collègue</span>`;
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+}
+
+async function createColleagueAccount(email, password, role) {
+  let token = "";
+  if (supabaseClient) {
+    const { data: sess } = await supabaseClient.auth.getSession();
+    token = sess && sess.session ? sess.session.access_token : "";
+  }
+
+  const localServiceKey = localStorage.getItem('pathosorus_service_key') || "";
+
+  // 1. Appel vers la fonction serveur Netlify ou serveur local python
+  try {
+    const res = await fetch("/.netlify/functions/create-user", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": token ? ("Bearer " + token) : "",
+        "x-service-key": localServiceKey
+      },
+      body: JSON.stringify({ email, password, role, serviceRoleKey: localServiceKey })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return data;
+    } else if (res.status !== 404) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || `Erreur serveur (${res.status})`);
+    }
+  } catch (netErr) {
+    if (netErr.message && !netErr.message.includes("404") && !netErr.message.includes("Failed to fetch")) {
+      throw netErr;
+    }
+  }
+
+  // 2. Si serveur statique pur sans proxy mais avec clé service_role renseignée
+  const { url } = getSupabaseCredentials();
+  if (localServiceKey && url) {
+    const adminRes = await fetch(url.replace(/\/$/, "") + "/auth/v1/admin/users", {
+      method: "POST",
+      headers: {
+        "apikey": localServiceKey,
+        "Authorization": "Bearer " + localServiceKey,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { role }
+      })
+    });
+
+    const payload = await adminRes.json().catch(() => ({}));
+    if (!adminRes.ok) {
+      throw new Error(payload.msg || payload.message || "Erreur Supabase Admin");
+    }
+
+    if (payload.id) {
+      await fetch(url.replace(/\/$/, "") + "/rest/v1/profiles", {
+        method: "POST",
+        headers: {
+          "apikey": localServiceKey,
+          "Authorization": "Bearer " + localServiceKey,
+          "Content-Type": "application/json",
+          "Prefer": "resolution=merge-duplicates"
+        },
+        body: JSON.stringify({ id: payload.id, email, role })
+      });
+    }
+
+    return {
+      success: true,
+      message: `Compte ${role === 'creator' ? 'Créateur' : 'Lecteur'} créé directement avec succès !`
+    };
+  }
+
+  // 3. Fallback client-side signUp
+  const { key } = getSupabaseCredentials();
+  if (window.supabase && url && key) {
+    const tempSb = window.supabase.createClient(url, key, { auth: { persistSession: false } });
+    const { data, error } = await tempSb.auth.signUp({
+      email,
+      password,
+      options: { data: { role } }
+    });
+    if (error) throw error;
+    return {
+      success: true,
+      message: `Compte créé via SignUp pour ${email}. Si la confirmation d'e-mail est requise sur Supabase, le collègue recevra un e-mail.`
+    };
+  }
+
+  throw new Error("Impossible d'accéder au service de création de compte. Lancez l'application via Lancer-Local.command ou fournissez la clé Service Role.");
+}
+
+async function loadColleaguesList() {
+  const container = document.getElementById('colleagues-list-container');
+  if (!container) return;
+  container.innerHTML = `<div class="text-center py-6 text-slate-500 text-xs">Chargement des utilisateurs...</div>`;
+
+  if (!supabaseClient) {
+    container.innerHTML = `<div class="text-center py-6 text-slate-500 text-xs">Supabase non connecté</div>`;
+    return;
+  }
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      container.innerHTML = `<div class="p-3 text-xs text-amber-300 bg-amber-500/10 rounded-xl">La table 'profiles' n'est pas encore créée. Avez-vous exécuté le script SQL dans Supabase ?</div>`;
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      container.innerHTML = `<div class="text-center py-6 text-slate-400 text-xs">Aucun collègue enregistré pour l'instant.</div>`;
+      return;
+    }
+
+    container.innerHTML = data.map(u => {
+      const isMaster = u.email && u.email.toLowerCase() === 'padoreau85@gmail.com';
+      const isUserCreator = u.role === 'creator' || isMaster;
+      const badgeColor = isUserCreator ? 'bg-teal-500/20 text-teal-300 border-teal-500/30' : 'bg-sky-500/20 text-sky-300 border-sky-500/30';
+      const roleLabel = isUserCreator ? 'Créateur 🦖' : 'Lecteur 📖';
+
+      return `
+        <div class="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+          <div class="flex items-center space-x-2.5">
+            <div class="w-7 h-7 rounded-lg ${isUserCreator ? 'bg-teal-500/20 text-teal-400' : 'bg-sky-500/20 text-sky-400'} flex items-center justify-center font-bold text-[11px] uppercase">
+              ${(u.email || '?')[0]}
+            </div>
+            <div>
+              <div class="font-bold text-white">${escapeHtml(u.email)}</div>
+              <div class="text-[10px] text-slate-500">${u.created_at ? new Date(u.created_at).toLocaleDateString('fr-FR') : ''}</div>
+            </div>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span class="px-2 py-0.5 rounded-full border text-[10px] font-bold ${badgeColor}">
+              ${roleLabel}
+            </span>
+            ${!isMaster ? `
+            <button onclick="toggleColleagueRole('${u.id}', '${isUserCreator ? 'reader' : 'creator'}')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold transition" title="Basculer le rôle">
+              Passer en ${isUserCreator ? 'Lecteur' : 'Créateur'}
+            </button>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+    if (window.lucide) lucide.createIcons();
+  } catch (e) {
+    container.innerHTML = `<div class="p-3 text-xs text-rose-300 bg-rose-500/10 rounded-xl">Erreur : ${e.message}</div>`;
+  }
+}
+
+async function toggleColleagueRole(userId, newRole) {
+  if (!isCreator()) return;
+  if (!supabaseClient) return;
+  try {
+    const { error } = await supabaseClient
+      .from('profiles')
+      .update({ role: newRole })
+      .eq('id', userId);
+
+    if (error) throw error;
+    alert(`Rôle mis à jour en '${newRole === 'creator' ? 'Créateur' : 'Lecteur'}' !`);
+    loadColleaguesList();
+  } catch (e) {
+    alert("Erreur modification rôle : " + e.message);
+  }
+}
+
+function saveLocalServiceKey() {
+  const input = document.getElementById('input-local-service-key');
+  const key = input ? input.value.trim() : '';
+  if (!key) {
+    alert("Veuillez saisir une clé.");
+    return;
+  }
+  localStorage.setItem('pathosorus_service_key', key);
+  alert("Clé Service Role enregistrée en local sur ce navigateur !");
+}
+
+function clearLocalServiceKey() {
+  localStorage.removeItem('pathosorus_service_key');
+  const input = document.getElementById('input-local-service-key');
+  if (input) input.value = '';
+  alert("Clé Service Role locale effacée.");
+}
+
+// --- APERÇU DÉTAILS DE LA QUESTION (POUR LECTEURS ET CRÉATEURS) ---
+
+function openQuestionDetail(id) {
+  const q = state.questions.find(item => item.id === id);
+  if (!q) return;
+
+  const modal = document.getElementById('modal-question-detail');
+  if (!modal) return;
+
+  const formatBadge = document.getElementById('detail-format-badge');
+  if (formatBadge) {
+    formatBadge.textContent = q.format === 'qcm' ? '☑️ QCM' : (q.format === 'piege' ? '⚠️ Vrai/Faux' : '🔘 QCU');
+  }
+
+  const hierarchyBadge = document.getElementById('detail-hierarchy-badge');
+  if (hierarchyBadge) {
+    hierarchyBadge.textContent = `${q.organ} > ${q.category} > ${q.entity}`;
+  }
+
+  document.getElementById('detail-question-text').textContent = q.question;
+
+  const contextBox = document.getElementById('detail-context-box');
+  if (contextBox) {
+    if (q.context && q.context.trim()) {
+      contextBox.textContent = q.context;
+      contextBox.classList.remove('hidden');
+    } else {
+      contextBox.classList.add('hidden');
+    }
+  }
+
+  const photoGallery = document.getElementById('detail-photos-gallery');
+  const photosContainer = document.getElementById('detail-photos-container');
+  if (photoGallery && photosContainer) {
+    if (q.images && q.images.length > 0) {
+      photoGallery.classList.remove('hidden');
+      photosContainer.innerHTML = q.images.map(img => `
+        <div class="relative group cursor-pointer overflow-hidden rounded-xl border border-slate-800" onclick="openLightbox('${img.url}', '${escapeJsString(img.caption || q.entity)}')">
+          <img src="${img.url}" alt="${escapeHtml(img.caption || '')}" class="w-full h-28 object-cover group-hover:scale-105 transition duration-300">
+          ${img.caption ? `<div class="p-1 text-[10px] bg-slate-900/90 text-slate-300 truncate">${escapeHtml(img.caption)}</div>` : ''}
+        </div>
+      `).join('');
+    } else {
+      photoGallery.classList.add('hidden');
+    }
+  }
+
+  const optionsContainer = document.getElementById('detail-options-container');
+  if (optionsContainer) {
+    optionsContainer.innerHTML = (q.options || []).map((opt, idx) => {
+      const isCorrect = (q.correct || []).includes(idx);
+      return `
+        <div class="flex items-center space-x-2.5 p-3 rounded-xl border text-xs font-medium ${
+          isCorrect
+            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200'
+            : 'bg-slate-950 border-slate-800 text-slate-400'
+        }">
+          <i data-lucide="${isCorrect ? 'check-circle' : 'circle'}" class="w-4 h-4 ${isCorrect ? 'text-emerald-400' : 'text-slate-600'} shrink-0"></i>
+          <span class="flex-1">${escapeHtml(opt)}</span>
+          ${isCorrect ? `<span class="text-[10px] uppercase font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-500/20">Bonne Réponse</span>` : ''}
+        </div>
+      `;
+    }).join('');
+  }
+
+  document.getElementById('detail-explanation-text').textContent = q.explanation || "Aucune explication détaillée enregistrée.";
+  
+  const trapContainer = document.getElementById('detail-trap-container');
+  const trapText = document.getElementById('detail-trap-text');
+  if (trapContainer && trapText) {
+    if (q.trap && q.trap.trim()) {
+      trapText.textContent = q.trap;
+      trapContainer.classList.remove('hidden');
+    } else {
+      trapContainer.classList.add('hidden');
+    }
+  }
+
+  const tagsContainer = document.getElementById('detail-tags-container');
+  if (tagsContainer) {
+    tagsContainer.innerHTML = (q.tags || []).map(t => `<span class="text-[10px] text-teal-400 bg-teal-500/10 px-2.5 py-1 rounded-full font-mono border border-teal-500/20">#${escapeHtml(t)}</span>`).join('');
+  }
+
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  if (window.lucide) lucide.createIcons();
+}
+
+function closeQuestionDetailModal() {
+  const modal = document.getElementById('modal-question-detail');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+
 async function fetchSupabaseData(silent = false) {
   if (!supabaseClient) return;
   try {
@@ -252,6 +999,8 @@ async function fetchSupabaseData(silent = false) {
       localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(state.customTags));
     }
 
+    await loadUserProgress();
+
     updateTopBar();
     renderHierarchySelector();
     renderTagsCloud();
@@ -269,6 +1018,10 @@ async function fetchSupabaseData(silent = false) {
 async function syncLocalToSupabase() {
   if (!supabaseClient) {
     alert("Veuillez d'abord connecter votre projet Supabase.");
+    return;
+  }
+  if (!isCreator()) {
+    alert("Action réservée aux créateurs : seuls les créateurs peuvent synchroniser et modifier la base Cloud partagée.");
     return;
   }
   const btn = document.getElementById('btn-sync-to-cloud');
@@ -314,6 +1067,7 @@ async function syncSupabaseToLocal() {
 
 async function dbUpsertQuestion(q) {
   if (!supabaseClient) return;
+  if (!isCreator()) return;
   try {
     await supabaseClient.from('questions').upsert(q);
   } catch (e) {
@@ -323,6 +1077,7 @@ async function dbUpsertQuestion(q) {
 
 async function dbDeleteQuestion(id) {
   if (!supabaseClient) return;
+  if (!isCreator()) return;
   try {
     await supabaseClient.from('questions').delete().eq('id', id);
   } catch (e) {
@@ -332,6 +1087,7 @@ async function dbDeleteQuestion(id) {
 
 async function dbUpsertCase(c) {
   if (!supabaseClient) return;
+  if (!isCreator()) return;
   try {
     await supabaseClient.from('cases').upsert(c);
   } catch (e) {
@@ -341,6 +1097,7 @@ async function dbUpsertCase(c) {
 
 async function dbDeleteCase(id) {
   if (!supabaseClient) return;
+  if (!isCreator()) return;
   try {
     await supabaseClient.from('cases').delete().eq('id', id);
   } catch (e) {
@@ -350,6 +1107,7 @@ async function dbDeleteCase(id) {
 
 async function dbUpsertTag(name) {
   if (!supabaseClient) return;
+  if (!isCreator()) return;
   try {
     await supabaseClient.from('custom_tags').upsert({ name });
   } catch (e) {
@@ -480,7 +1238,16 @@ function switchTab(viewId) {
   } else if (viewId === 'bank') {
     renderBank();
   } else if (viewId === 'create') {
-    setCreatorMode(state.creatorMode);
+    const lockedEl = document.getElementById('view-create-locked');
+    const contentEl = document.getElementById('view-create-content');
+    if (isReader()) {
+      if (lockedEl) lockedEl.classList.remove('hidden');
+      if (contentEl) contentEl.classList.add('hidden');
+    } else {
+      if (lockedEl) lockedEl.classList.add('hidden');
+      if (contentEl) contentEl.classList.remove('hidden');
+      setCreatorMode(state.creatorMode);
+    }
   }
 
   if (window.lucide) lucide.createIcons();
@@ -544,7 +1311,7 @@ function toggleQuestionMastered(id) {
 
   q.mastered = !q.mastered;
   saveQuestions();
-  dbUpsertQuestion(q);
+  dbSaveUserProgress(q);
 
   if (state.currentSession) {
     const curQ = state.currentSession.questions[state.currentSession.currentIndex];
@@ -582,7 +1349,7 @@ function chooseReviewInterval(days) {
   if (globalQ) {
     globalQ.stats = q.stats;
     globalQ.flagged = q.flagged;
-    dbUpsertQuestion(globalQ);
+    dbSaveUserProgress(globalQ);
   }
 
   saveQuestions();
@@ -1078,6 +1845,7 @@ function toggleSessionFlag() {
   const q = session.questions[session.currentIndex];
   q.flagged = !q.flagged;
   saveQuestions();
+  dbSaveUserProgress(q);
   document.getElementById('btn-session-flag').className = q.flagged ? "text-amber-400 p-1.5 rounded-lg bg-slate-800" : "text-slate-400 hover:text-amber-400 p-1.5 rounded-lg";
 }
 
@@ -1315,6 +2083,10 @@ function handleSaveQuestionForm(e) {
 }
 
 function editQuestion(id) {
+  if (!isCreator()) {
+    alert("Action réservée aux comptes Créateurs.");
+    return;
+  }
   const q = state.questions.find(item => item.id === id);
   if (!q) return;
 
@@ -1354,6 +2126,10 @@ function editQuestion(id) {
 }
 
 function deleteQuestion(id) {
+  if (!isCreator()) {
+    alert("Action réservée aux comptes Créateurs.");
+    return;
+  }
   if (!confirm("Voulez-vous supprimer cette question ?")) return;
   state.questions = state.questions.filter(q => q.id !== id);
   saveQuestions();
@@ -1672,6 +2448,10 @@ function handleSaveDPForm(e) {
 }
 
 function editDP(id) {
+  if (!isCreator()) {
+    alert("Action réservée aux comptes Créateurs.");
+    return;
+  }
   const c = state.cases.find(item => item.id === id);
   if (!c) return;
 
@@ -1693,6 +2473,10 @@ function editDP(id) {
 }
 
 function deleteDP(id) {
+  if (!isCreator()) {
+    alert("Action réservée aux comptes Créateurs.");
+    return;
+  }
   if (!confirm("Voulez-vous supprimer ce Dossier Progressif ?")) return;
   state.cases = state.cases.filter(c => c.id !== id);
   saveCases();
@@ -2223,12 +3007,14 @@ function renderBank() {
             <i data-lucide="play" class="w-3.5 h-3.5"></i>
             <span>Jouer</span>
           </button>
+          ${isCreator() ? `
           <button onclick="editDP('${c.id}')" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Modifier le DP">
             <i data-lucide="edit-3" class="w-4 h-4"></i>
           </button>
           <button onclick="deleteDP('${c.id}')" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition" title="Supprimer le DP">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
+          ` : ''}
         </div>
       `;
       bodyContainer.appendChild(card);
@@ -2271,6 +3057,10 @@ function renderBank() {
           </div>
         </div>
         <div class="flex items-center space-x-2 shrink-0 self-end md:self-auto">
+          <button onclick="openQuestionDetail('${q.id}')" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center space-x-1 transition" title="Aperçu diagnostique et explications">
+            <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+            <span>Aperçu</span>
+          </button>
           <button onclick="toggleQuestionMastered('${q.id}')" class="px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center space-x-1 transition ${
             q.mastered 
               ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30' 
@@ -2279,12 +3069,14 @@ function renderBank() {
             <i data-lucide="${q.mastered ? 'check-check' : 'award'}" class="w-3.5 h-3.5"></i>
             <span>${q.mastered ? 'Maîtrisée' : 'Neutraliser'}</span>
           </button>
+          ${isCreator() ? `
           <button onclick="editQuestion('${q.id}')" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Modifier">
             <i data-lucide="edit-3" class="w-4 h-4"></i>
           </button>
           <button onclick="deleteQuestion('${q.id}')" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition" title="Supprimer">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
+          ` : ''}
         </div>
       `;
       bodyContainer.appendChild(card);
@@ -2369,6 +3161,10 @@ function importCustomBankJSON(e) {
 }
 
 function clearAllData() {
+  if (!isCreator()) {
+    alert("Action réservée aux comptes Créateurs.");
+    return;
+  }
   if (confirm("Voulez-vous vraiment vider toute votre banque ?")) {
     state.questions = [];
     state.cases = [];

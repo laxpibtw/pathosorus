@@ -1,9 +1,82 @@
 -- =========================================================
--- PATHOSORUS 🦖 - SCHÉMA DE BASE DE DONNÉES SUPABASE
--- À copier-coller dans l'onglet "SQL Editor" de votre projet Supabase
+-- PATHOSORUS 🦖 - SCHÉMA COMPLET SUPABASE AVEC GESTION DES RÔLES
+-- (Créateurs & Lecteurs, Progression individuelle de Répétition Espacée)
+-- À exécuter dans l'onglet "SQL Editor" de votre projet Supabase
 -- =========================================================
 
--- 1. Table des Questions (QCM, QCU, Piège/Vrai-Faux)
+-- 1. Table des Profils Utilisateurs & Rôles
+create table if not exists public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text unique not null,
+  role text not null default 'reader' check (role in ('creator', 'reader')),
+  stats jsonb not null default '{"xp":0,"streak":1}'::jsonb,
+  created_at timestamptz default now()
+);
+
+-- 2. Fonction de vérification des droits Créateur / Administrateur
+create or replace function public.is_creator()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where id = auth.uid() and role = 'creator'
+  ) or lower(coalesce((auth.jwt() ->> 'email'), '')) = 'padoreau85@gmail.com';
+$$;
+
+revoke all on function public.is_creator() from public;
+grant execute on function public.is_creator() to authenticated, anon;
+
+-- 3. Trigger automatique lors de la création d'un utilisateur Auth
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, role)
+  values (
+    new.id,
+    new.email,
+    case
+      when lower(new.email) = 'padoreau85@gmail.com' then 'creator'
+      else coalesce(new.raw_user_meta_data->>'role', 'reader')
+    end
+  )
+  on conflict (id) do update set
+    email = excluded.email,
+    role = case
+      when lower(excluded.email) = 'padoreau85@gmail.com' then 'creator'
+      else coalesce(public.profiles.role, excluded.role)
+    end;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- 4. Table de la Progression Individuelle de Répétition Espacée
+-- Permet à chaque interne d'avoir ses propres intervalles, cartes maîtrisées et erreurs,
+-- sans altérer le contenu central de la banque de questions partagée !
+create table if not exists public.user_progress (
+  user_id uuid references auth.users(id) on delete cascade,
+  question_id text not null,
+  mastered boolean not null default false,
+  flagged boolean not null default false,
+  stats jsonb not null default '{"seen":0,"correct":0,"consecutiveCorrect":0,"intervalDays":0,"nextReviewDate":null,"lastReviewed":null}'::jsonb,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, question_id)
+);
+
+-- 5. Table des Questions (QCM, QCU, Piège/Vrai-Faux)
 create table if not exists public.questions (
   id text primary key,
   created_at timestamptz default now(),
@@ -24,7 +97,7 @@ create table if not exists public.questions (
   flagged boolean not null default false
 );
 
--- 2. Table des Dossiers Progressifs (DP)
+-- 6. Table des Dossiers Progressifs (DP)
 create table if not exists public.cases (
   id text primary key,
   created_at timestamptz default now(),
@@ -37,35 +110,85 @@ create table if not exists public.cases (
   steps jsonb not null default '[]'::jsonb
 );
 
--- 3. Table des Tags personnalisés (#HES, #IHC...)
+-- 7. Table des Tags personnalisés (#HES, #IHC...)
 create table if not exists public.custom_tags (
   name text primary key,
   created_at timestamptz default now()
 );
 
 -- =========================================================
--- ACTIVATION DU ROW LEVEL SECURITY (RLS) AVEC ACCÈS LIBRE
--- Permet à l'application de lire/écrire sans blocage depuis l'hôpital
+-- ROW LEVEL SECURITY (RLS) ET POLITIQUES D'ACCÈS
 -- =========================================================
 
+alter table public.profiles enable row level security;
+alter table public.user_progress enable row level security;
 alter table public.questions enable row level security;
 alter table public.cases enable row level security;
 alter table public.custom_tags enable row level security;
 
-drop policy if exists "Accès total questions" on public.questions;
-create policy "Accès total questions" on public.questions
-  for all using (true) with check (true);
+-- Politiques Profiles
+drop policy if exists "Lecture des profils pour utilisateurs connectés" on public.profiles;
+create policy "Lecture des profils pour utilisateurs connectés"
+  on public.profiles for select
+  to authenticated
+  using (true);
 
-drop policy if exists "Accès total cases" on public.cases;
-create policy "Accès total cases" on public.cases
-  for all using (true) with check (true);
+drop policy if exists "Gestion des profils par les créateurs" on public.profiles;
+create policy "Gestion des profils par les créateurs"
+  on public.profiles for all
+  to authenticated
+  using (public.is_creator() or auth.uid() = id)
+  with check (public.is_creator() or auth.uid() = id);
 
-drop policy if exists "Accès total custom_tags" on public.custom_tags;
-create policy "Accès total custom_tags" on public.custom_tags
-  for all using (true) with check (true);
+-- Politiques Progression Individuelle
+drop policy if exists "Chaque utilisateur gère sa propre progression" on public.user_progress;
+create policy "Chaque utilisateur gère sa propre progression"
+  on public.user_progress for all
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+-- Politiques Questions
+drop policy if exists "Lecture publique des questions" on public.questions;
+create policy "Lecture publique des questions"
+  on public.questions for select
+  using (true);
+
+drop policy if exists "Écriture questions réservée aux créateurs" on public.questions;
+create policy "Écriture questions réservée aux créateurs"
+  on public.questions for all
+  to authenticated
+  using (public.is_creator())
+  with check (public.is_creator());
+
+-- Politiques Dossiers Progressifs
+drop policy if exists "Lecture publique des dossiers" on public.cases;
+create policy "Lecture publique des dossiers"
+  on public.cases for select
+  using (true);
+
+drop policy if exists "Écriture dossiers réservée aux créateurs" on public.cases;
+create policy "Écriture dossiers réservée aux créateurs"
+  on public.cases for all
+  to authenticated
+  using (public.is_creator())
+  with check (public.is_creator());
+
+-- Politiques Tags personnalisés
+drop policy if exists "Lecture publique des tags" on public.custom_tags;
+create policy "Lecture publique des tags"
+  on public.custom_tags for select
+  using (true);
+
+drop policy if exists "Écriture tags réservée aux créateurs" on public.custom_tags;
+create policy "Écriture tags réservée aux créateurs"
+  on public.custom_tags for all
+  to authenticated
+  using (public.is_creator())
+  with check (public.is_creator());
 
 -- =========================================================
--- CONFIGURATION DU STOCKAGE SUPABASE (STORAGE BUCKET POUR PHOTOS)
+-- CONFIGURATION DU STOCKAGE SUPABASE (STORAGE PHOTOS)
 -- =========================================================
 
 insert into storage.buckets (id, name, public)
@@ -76,6 +199,7 @@ drop policy if exists "Lecture publique photos" on storage.objects;
 create policy "Lecture publique photos" on storage.objects
   for select using (bucket_id = 'pathosorus_images');
 
-drop policy if exists "Upload public photos" on storage.objects;
-create policy "Upload public photos" on storage.objects
+drop policy if exists "Upload photos pour utilisateurs connectés" on storage.objects;
+create policy "Upload photos pour utilisateurs connectés"
+  on storage.objects
   for insert with check (bucket_id = 'pathosorus_images');
