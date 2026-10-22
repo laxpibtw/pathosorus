@@ -582,8 +582,8 @@ async function fetchCurrentUserRole() {
 
   if (isAdminUser) state.currentRole = 'creator';
 
-  // 4. Fusion robuste : garantir que le créateur principal conserve au minimum ses acquis réels
-  const defaultMinXp = isAdminUser ? 250 : 0;
+  // 4. Fusion robuste : garantir que le créateur principal conserve son palier Niveau 25 (750 XP) partout
+  const defaultMinXp = isAdminUser ? 750 : 0;
   const mergedXp = Math.max(cloudStats.xp || 0, metaStats.xp || 0, localStats.xp || 0, defaultMinXp);
   const mergedStreak = Math.max(cloudStats.streak || 1, metaStats.streak || 1, localStats.streak || 1);
   const mergedAnswered = Math.max(cloudStats.totalAnswered || 0, metaStats.totalAnswered || 0, localStats.totalAnswered || 0, isAdminUser ? 12 : 0);
@@ -2226,8 +2226,32 @@ function calculateCreatorLevel(creatorXp) {
 }
 
 function getCreatorStats() {
-  const createdQuestions = state.questions.length;
-  const extremeQuestions = state.questions.filter(q => q.difficulty === 'extreme').length;
+  const currentEmail = (state.currentUser && state.currentUser.email || '').toLowerCase();
+  
+  // Si l'utilisateur n'est pas connecté ou est simple lecteur : 0 questions créées
+  if (!state.currentUser || !isCreator()) {
+    return {
+      createdQuestions: 0,
+      extremeQuestions: 0,
+      creatorXp: 0,
+      level: 1,
+      currentTierXp: 0,
+      tierMaxXp: 20,
+      percent: 0,
+      tierName: 'Novice Rédacteur'
+    };
+  }
+
+  // Filtrer strictement les questions rédigées par CET utilisateur spécifique
+  const myQuestions = (state.questions || []).filter(q => {
+    const author = (q.created_by || (q.stats && q.stats.created_by) || '').toLowerCase();
+    if (author) return author === currentEmail;
+    // Les 12 premières questions de la banque initiale appartiennent au compte créateur initial
+    return currentEmail === 'padoreau85@gmail.com';
+  });
+
+  const createdQuestions = myQuestions.length;
+  const extremeQuestions = myQuestions.filter(q => q.difficulty === 'extreme').length;
   const creatorXp = (createdQuestions * 5) + (extremeQuestions * 50);
   const lvlInfo = calculateCreatorLevel(creatorXp);
   return {
@@ -2411,7 +2435,18 @@ function getBadgesStatus() {
       progressPercent = isNowMet ? 100 : 0;
       progressText = isNowMet ? '1 / 1 résolue' : '0 / 1 résolue';
     } else if (b.category === 'creator') {
-      if (b.id === 'creator_extreme') {
+      if (creatorStats.createdQuestions === 0) {
+        // Sécurité absolue : nettoyer tout badge créateur indûment présent sur ce compte (ex: compte d'un collègue)
+        if (state.stats.unlockedBadges && state.stats.unlockedBadges[b.id]) {
+          delete state.stats.unlockedBadges[b.id];
+        }
+        if (state.stats.badgeHistory && state.stats.badgeHistory[b.id]) {
+          delete state.stats.badgeHistory[b.id];
+        }
+        isNowMet = false;
+        progressPercent = 0;
+        progressText = `0 / ${b.targetCount || 1} rédigées`;
+      } else if (b.id === 'creator_extreme') {
         isNowMet = creatorStats.extremeQuestions >= 1;
         progressPercent = isNowMet ? 100 : 0;
         progressText = `${creatorStats.extremeQuestions} / 1 rédigée`;
@@ -2422,7 +2457,10 @@ function getBadgesStatus() {
       }
     }
 
-    const wasUnlocked = !!(state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
+    let wasUnlocked = !!(state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
+    if (b.category === 'creator' && creatorStats.createdQuestions === 0) {
+      wasUnlocked = false;
+    }
     let status = 'locked';
 
     // Mécanique du badge contesté pour les badges de pathologie
@@ -4915,6 +4953,7 @@ async function handleSaveQuestionForm(e) {
         optionExplanations,
         optionexplanations: optionExplanations,
         difficulty, extremeClues,
+        created_by: state.questions[idx].created_by || ((state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : 'padoreau85@gmail.com'),
         acceptedAnswers: [...acceptedAnswers],
         acceptedanswers: [...acceptedAnswers],
         images: [...state.editorUploadedImages],
@@ -4930,6 +4969,7 @@ async function handleSaveQuestionForm(e) {
       optionExplanations,
       optionexplanations: optionExplanations,
       difficulty, extremeClues,
+      created_by: (state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : 'padoreau85@gmail.com',
       acceptedAnswers: [...acceptedAnswers],
       acceptedanswers: [...acceptedAnswers],
       images: [...state.editorUploadedImages],
