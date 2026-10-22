@@ -33,6 +33,7 @@ let state = {
   editorUploadedExplanationImages: [],
   editorSelectedTags: new Set(),
   editorQuestionOptions: [],
+  editorOpenAnswers: [''],
   dpSteps: [],
   bankCollapsedOrgans: new Set() // Ensemble des boîtes d'organes repliées
 };
@@ -65,6 +66,50 @@ function escapeJsString(str) {
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'")
     .replace(/"/g, '\\"');
+}
+
+// Normalisation intelligente pour les questions ouvertes (insensible à la casse, aux accents et à la ponctuation)
+function normalizeDiagnosticText(str) {
+  if (!str) return '';
+  return String(str)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Supprime les accents
+    .replace(/[^a-z0-9\s]/g, ' ')   // Remplace la ponctuation par des espaces
+    .replace(/\s+/g, ' ')           // Espaces multiples
+    .trim();
+}
+
+function isDiagnosticMatch(userInput, target) {
+  const normUser = normalizeDiagnosticText(userInput);
+  const normTarget = normalizeDiagnosticText(target);
+  if (!normUser || !normTarget) return false;
+  if (normUser === normTarget) return true;
+  // Comparaison compacte (sans aucun espace) pour tolérer "basocellulaire" vs "baso cellulaire" ou "in-situ"
+  const compactUser = normUser.replace(/\s+/g, '');
+  const compactTarget = normTarget.replace(/\s+/g, '');
+  if (compactUser === compactTarget) return true;
+  return false;
+}
+
+function getQuestionAcceptedAnswers(q) {
+  const list = [];
+  if (Array.isArray(q.acceptedAnswers)) {
+    q.acceptedAnswers.forEach(a => {
+      const s = (a || '').trim();
+      if (s && !list.includes(s)) list.push(s);
+    });
+  }
+  if (Array.isArray(q.options) && q.format === 'ouverte') {
+    q.options.forEach(o => {
+      const s = (o || '').trim();
+      if (s && !list.includes(s)) list.push(s);
+    });
+  }
+  if (list.length === 0 && q.entity) {
+    list.push(q.entity.trim());
+  }
+  return list;
 }
 
 function showToast(message, type = 'success') {
@@ -914,8 +959,19 @@ function openQuestionDetail(id) {
   if (!modal) return;
 
   const formatBadge = document.getElementById('detail-format-badge');
+  const isOpen = (q.format === 'ouverte');
+  const isQCM = (q.format === 'qcm');
   if (formatBadge) {
-    formatBadge.textContent = q.format === 'qcm' ? '☑️ QCM' : (q.format === 'piege' ? '⚠️ Vrai/Faux' : '🔘 QCU');
+    if (isOpen) {
+      formatBadge.textContent = "✍️ Question Ouverte";
+      formatBadge.className = "text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30";
+    } else if (isQCM) {
+      formatBadge.textContent = "☑️ QCM";
+      formatBadge.className = "text-xs font-bold px-2.5 py-1 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/30";
+    } else {
+      formatBadge.textContent = q.format === 'piege' ? '⚠️ Vrai/Faux' : '🔘 QCU';
+      formatBadge.className = "text-xs font-bold px-2.5 py-1 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/30";
+    }
   }
 
   const hierarchyBadge = document.getElementById('detail-hierarchy-badge');
@@ -951,38 +1007,65 @@ function openQuestionDetail(id) {
     }
   }
 
+  const optionsLabel = document.getElementById('detail-options-label');
   const optionsContainer = document.getElementById('detail-options-container');
   if (optionsContainer) {
-    optionsContainer.innerHTML = (q.options || []).map((opt, idx) => {
-      const isCorrect = (q.correct || []).includes(idx);
-      const letter = String.fromCharCode(65 + idx);
-      const itemExp = (q.optionExplanations && q.optionExplanations[idx]) ? q.optionExplanations[idx].trim() : '';
-      return `
-        <div class="space-y-1.5">
-          <div class="flex items-center space-x-2.5 p-3 rounded-xl border text-xs font-medium ${
-            isCorrect
-              ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200'
-              : 'bg-slate-950 border-slate-800 text-slate-400'
-          }">
-            <span class="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold ${
-              isCorrect ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
-            }">${letter}</span>
-            <i data-lucide="${isCorrect ? 'check-circle' : 'circle'}" class="w-4 h-4 ${isCorrect ? 'text-emerald-400' : 'text-slate-600'} shrink-0"></i>
-            <span class="flex-1">${escapeHtml(opt)}</span>
-            ${isCorrect ? `<span class="text-[10px] uppercase font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-500/20">Bonne Réponse</span>` : ''}
+    if (isOpen) {
+      if (optionsLabel) optionsLabel.textContent = "Formulations diagnostiques acceptées :";
+      const accepted = getQuestionAcceptedAnswers(q);
+      optionsContainer.innerHTML = `
+        <div class="p-4 rounded-2xl bg-slate-950 border border-amber-500/30 space-y-2.5">
+          <div class="text-xs text-amber-300 font-semibold flex items-center space-x-1.5">
+            <i data-lucide="check-check" class="w-4 h-4 text-amber-400"></i>
+            <span>Termes diagnostiques validés pour cette question :</span>
           </div>
-          ${itemExp ? `
-            <div class="ml-6 p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-300 flex items-start space-x-2">
-              <i data-lucide="lightbulb" class="w-3.5 h-3.5 mt-0.5 text-amber-400 shrink-0"></i>
-              <div class="flex-1 leading-relaxed">
-                <span class="font-bold text-amber-300">Justification ${letter} :</span>
-                <span class="text-slate-300 ml-1">${escapeHtml(itemExp)}</span>
-              </div>
-            </div>
-          ` : ''}
+          <div class="flex flex-wrap gap-2">
+            ${accepted.map((ans, idx) => `
+              <span class="px-3 py-1.5 rounded-xl text-xs font-mono font-bold ${
+                idx === 0
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                  : 'bg-slate-900 text-teal-300 border border-slate-700'
+              }">
+                ${escapeHtml(ans)} ${idx === 0 ? '⭐ (Diagnostic principal)' : ''}
+              </span>
+            `).join('')}
+          </div>
+          <p class="text-[11px] text-slate-400">Lors de l'entraînement, la comparaison est tolérante aux majuscules, accents et tirets.</p>
         </div>
       `;
-    }).join('');
+    } else {
+      if (optionsLabel) optionsLabel.textContent = "Choix & Réponses :";
+      optionsContainer.innerHTML = (q.options || []).map((opt, idx) => {
+        const isCorrect = (q.correct || []).includes(idx);
+        const letter = String.fromCharCode(65 + idx);
+        const itemExp = (q.optionExplanations && q.optionExplanations[idx]) ? q.optionExplanations[idx].trim() : '';
+        return `
+          <div class="space-y-1.5">
+            <div class="flex items-center space-x-2.5 p-3 rounded-xl border text-xs font-medium ${
+              isCorrect
+                ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200'
+                : 'bg-slate-950 border-slate-800 text-slate-400'
+            }">
+              <span class="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold ${
+                isCorrect ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
+              }">${letter}</span>
+              <i data-lucide="${isCorrect ? 'check-circle' : 'circle'}" class="w-4 h-4 ${isCorrect ? 'text-emerald-400' : 'text-slate-600'} shrink-0"></i>
+              <span class="flex-1">${escapeHtml(opt)}</span>
+              ${isCorrect ? `<span class="text-[10px] uppercase font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-500/20">Bonne Réponse</span>` : ''}
+            </div>
+            ${itemExp ? `
+              <div class="ml-6 p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-300 flex items-start space-x-2">
+                <i data-lucide="lightbulb" class="w-3.5 h-3.5 mt-0.5 text-amber-400 shrink-0"></i>
+                <div class="flex-1 leading-relaxed">
+                  <span class="font-bold text-amber-300">Justification ${letter} :</span>
+                  <span class="text-slate-300 ml-1">${escapeHtml(itemExp)}</span>
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    }
   }
 
   const expContainer = document.getElementById('detail-explanation-container');
@@ -1066,6 +1149,7 @@ async function fetchSupabaseData(silent = false) {
         options: q.options || [],
         correct: q.correct || [],
         optionExplanations: q.optionExplanations || [],
+        acceptedAnswers: q.acceptedAnswers || (q.format === 'ouverte' ? (q.options || []) : []),
         tags: q.tags || [],
         images: q.images || [],
         explanationImages: q.explanationImages || [],
@@ -1126,11 +1210,12 @@ async function syncLocalToSupabase() {
     }
     if (state.questions.length > 0) {
       const { error: qErr } = await supabaseClient.from('questions').upsert(state.questions);
-      if (qErr && qErr.message && (qErr.message.includes('optionExplanations') || qErr.message.includes('explanationImages'))) {
+      if (qErr && qErr.message && (qErr.message.includes('optionExplanations') || qErr.message.includes('explanationImages') || qErr.message.includes('acceptedAnswers'))) {
         const sanitized = state.questions.map(q => {
           const copy = { ...q };
           if (qErr.message.includes('optionExplanations')) delete copy.optionExplanations;
           if (qErr.message.includes('explanationImages')) delete copy.explanationImages;
+          if (qErr.message.includes('acceptedAnswers')) delete copy.acceptedAnswers;
           return copy;
         });
         await supabaseClient.from('questions').upsert(sanitized);
@@ -1170,10 +1255,11 @@ async function dbUpsertQuestion(q) {
   if (!isCreator()) return;
   try {
     const { error } = await supabaseClient.from('questions').upsert(q);
-    if (error && error.message && (error.message.includes('optionExplanations') || error.message.includes('explanationImages'))) {
+    if (error && error.message && (error.message.includes('optionExplanations') || error.message.includes('explanationImages') || error.message.includes('acceptedAnswers'))) {
       const fallback = { ...q };
       if (error.message.includes('optionExplanations')) delete fallback.optionExplanations;
       if (error.message.includes('explanationImages')) delete fallback.explanationImages;
+      if (error.message.includes('acceptedAnswers')) delete fallback.acceptedAnswers;
       await supabaseClient.from('questions').upsert(fallback);
     } else if (error) {
       console.warn("Erreur upsert question supabase:", error);
@@ -1259,6 +1345,7 @@ function initApp() {
     if (!q.stats) q.stats = { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 };
     if (!q.explanationImages) q.explanationImages = [];
     if (!q.images) q.images = [];
+    if (!q.acceptedAnswers) q.acceptedAnswers = (q.format === 'ouverte' ? (q.options || []) : []);
   });
 
   const storedCases = localStorage.getItem(STORAGE_KEY_CASES);
@@ -1687,8 +1774,8 @@ function shuffleQuestionOptions(q) {
     optionExplanations: q.optionExplanations ? [...q.optionExplanations] : []
   };
 
-  // Ne pas mélanger le format 'piege' (Vrai / Faux) afin de conserver la convention VRAI puis FAUX
-  if (sessionQ.format !== 'piege' && sessionQ.options && sessionQ.options.length > 1) {
+  // Ne pas mélanger le format 'piege' (Vrai / Faux) ni le format 'ouverte' (Question ouverte sans choix)
+  if (sessionQ.format !== 'piege' && sessionQ.format !== 'ouverte' && sessionQ.options && sessionQ.options.length > 1) {
     const corSet = new Set(sessionQ.correct);
     const exps = sessionQ.optionExplanations || [];
 
@@ -1778,9 +1865,18 @@ function renderSessionQuestion() {
   }
 
   const isQCM = (q.format === 'qcm');
+  const isOpen = (q.format === 'ouverte');
   const formatBadge = document.getElementById('session-format-badge');
-  formatBadge.textContent = isQCM ? "☑️ QCM (Choix Multiples)" : (q.format === 'piege' ? "⚠️ Vrai / Faux" : "🔘 QCU (Choix Unique)");
-  formatBadge.className = isQCM ? "text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" : "text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20";
+  if (isOpen) {
+    formatBadge.textContent = "✍️ Question Ouverte (Diagnostic)";
+    formatBadge.className = "text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20";
+  } else if (isQCM) {
+    formatBadge.textContent = "☑️ QCM (Choix Multiples)";
+    formatBadge.className = "text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20";
+  } else {
+    formatBadge.textContent = (q.format === 'piege' ? "⚠️ Vrai / Faux" : "🔘 QCU (Choix Unique)");
+    formatBadge.className = "text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20";
+  }
 
   // Filtrer les tags pour ne pas trahir l'organe ou l'entité pendant la phase de réflexion
   const tagsBox = document.getElementById('session-tags-box');
@@ -1845,49 +1941,84 @@ function renderSessionQuestion() {
     imgContainer.classList.add('hidden');
   }
 
-  // Options
+  // Options vs Question Ouverte
   const optionsBox = document.getElementById('session-options-container');
-  optionsBox.innerHTML = '';
-  q.options.forEach((optText, idx) => {
-    const wrapper = document.createElement('div');
-    wrapper.id = 'opt-wrapper-' + idx;
-    wrapper.className = "space-y-1.5";
-
-    const btn = document.createElement('button');
-    btn.id = 'opt-btn-' + idx;
-    btn.className = "w-full text-left p-4 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-teal-500/50 hover:bg-slate-800/50 transition flex items-center justify-between text-sm text-slate-200 group";
-    btn.onclick = () => {
-      if (isQCM) toggleQCMSelection(idx);
-      else selectSingleOption(idx);
-    };
-
-    const letter = String.fromCharCode(65 + idx);
-    const shape = isQCM ? "rounded-md" : "rounded-lg";
-
-    btn.innerHTML = `
-      <div class="flex items-center space-x-3">
-        <span class="opt-box w-7 h-7 ${shape} bg-slate-900 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 group-hover:text-teal-400 transition">${letter}</span>
-        <span class="font-medium">${escapeHtml(optText)}</span>
-      </div>
-      <div class="opt-status w-5 h-5 flex items-center justify-center"></div>
-    `;
-    wrapper.appendChild(btn);
-
-    const expDiv = document.createElement('div');
-    expDiv.id = 'opt-exp-' + idx;
-    expDiv.className = "hidden ml-4 pl-3 py-2 pr-3 rounded-xl bg-slate-900/90 border border-slate-800 text-xs text-slate-300 flex items-start space-x-2";
-    wrapper.appendChild(expDiv);
-
-    optionsBox.appendChild(wrapper);
-  });
-
+  const openContainer = document.getElementById('session-open-container');
+  const openInput = document.getElementById('session-open-input');
+  const openResultBox = document.getElementById('session-open-result-box');
   const valBtn = document.getElementById('btn-session-validate-qcm');
-  if (isQCM) {
-    valBtn.classList.remove('hidden');
-    valBtn.disabled = true;
-    valBtn.textContent = "Valider ma sélection (0 cochée)";
+
+  if (isOpen) {
+    if (optionsBox) {
+      optionsBox.innerHTML = '';
+      optionsBox.classList.add('hidden');
+    }
+    if (valBtn) valBtn.classList.add('hidden');
+    if (openContainer) {
+      openContainer.classList.remove('hidden');
+      if (openInput) {
+        openInput.value = '';
+        openInput.disabled = false;
+        setTimeout(() => openInput.focus(), 80);
+      }
+      if (openResultBox) {
+        openResultBox.classList.add('hidden');
+        openResultBox.innerHTML = '';
+      }
+      const valOpenBtn = document.getElementById('btn-session-validate-open');
+      if (valOpenBtn) {
+        valOpenBtn.disabled = false;
+        valOpenBtn.classList.remove('hidden');
+      }
+    }
   } else {
-    valBtn.classList.add('hidden');
+    if (openContainer) openContainer.classList.add('hidden');
+    if (optionsBox) {
+      optionsBox.classList.remove('hidden');
+      optionsBox.innerHTML = '';
+      q.options.forEach((optText, idx) => {
+        const wrapper = document.createElement('div');
+        wrapper.id = 'opt-wrapper-' + idx;
+        wrapper.className = "space-y-1.5";
+
+        const btn = document.createElement('button');
+        btn.id = 'opt-btn-' + idx;
+        btn.className = "w-full text-left p-4 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-teal-500/50 hover:bg-slate-800/50 transition flex items-center justify-between text-sm text-slate-200 group";
+        btn.onclick = () => {
+          if (isQCM) toggleQCMSelection(idx);
+          else selectSingleOption(idx);
+        };
+
+        const letter = String.fromCharCode(65 + idx);
+        const shape = isQCM ? "rounded-md" : "rounded-lg";
+
+        btn.innerHTML = `
+          <div class="flex items-center space-x-3">
+            <span class="opt-box w-7 h-7 ${shape} bg-slate-900 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-400 group-hover:text-teal-400 transition">${letter}</span>
+            <span class="font-medium">${escapeHtml(optText)}</span>
+          </div>
+          <div class="opt-status w-5 h-5 flex items-center justify-center"></div>
+        `;
+        wrapper.appendChild(btn);
+
+        const expDiv = document.createElement('div');
+        expDiv.id = 'opt-exp-' + idx;
+        expDiv.className = "hidden ml-4 pl-3 py-2 pr-3 rounded-xl bg-slate-900/90 border border-slate-800 text-xs text-slate-300 flex items-start space-x-2";
+        wrapper.appendChild(expDiv);
+
+        optionsBox.appendChild(wrapper);
+      });
+    }
+
+    if (valBtn) {
+      if (isQCM) {
+        valBtn.classList.remove('hidden');
+        valBtn.disabled = true;
+        valBtn.textContent = "Valider ma sélection (0 cochée)";
+      } else {
+        valBtn.classList.add('hidden');
+      }
+    }
   }
 
   document.getElementById('session-feedback-box').classList.add('hidden');
@@ -2057,6 +2188,161 @@ function evaluateSessionAnswer(selectedIndices) {
 
   document.getElementById('btn-session-validate-qcm').classList.add('hidden');
 
+  revealSessionFeedback(isExact, q);
+}
+
+function handleOpenAnswerKeyDown(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    validateOpenAnswer();
+  }
+}
+
+function validateOpenAnswer() {
+  const session = state.currentSession;
+  if (!session || session.isAnswered) return;
+  const q = session.questions[session.currentIndex];
+  const inputEl = document.getElementById('session-open-input');
+  const userText = (inputEl ? inputEl.value : '').trim();
+  if (!userText) {
+    alert("Veuillez saisir votre diagnostic avant de valider.");
+    if (inputEl) inputEl.focus();
+    return;
+  }
+
+  session.isAnswered = true;
+  if (inputEl) inputEl.disabled = true;
+  const valOpenBtn = document.getElementById('btn-session-validate-open');
+  if (valOpenBtn) valOpenBtn.disabled = true;
+
+  const accepted = getQuestionAcceptedAnswers(q);
+  const isMatch = accepted.some(target => isDiagnosticMatch(userText, target));
+
+  session.lastOpenUserText = userText;
+  session.lastOpenAccepted = accepted;
+  session.lastOpenIsMatch = isMatch;
+
+  if (!q.stats) q.stats = { seen: 0, correct: 0, consecutiveCorrect: 0 };
+  q.stats.seen += 1;
+  q.stats.lastReviewed = new Date().toISOString();
+  state.stats.totalAnswered += 1;
+
+  if (isMatch) {
+    q.stats.correct += 1;
+    q.stats.consecutiveCorrect = (q.stats.consecutiveCorrect || 0) + 1;
+    state.stats.totalCorrect += 1;
+    session.score += 1;
+    session.xpEarned += 15;
+    state.stats.xp += 15;
+    playSound('correct');
+    confetti({ particleCount: 35, spread: 65, origin: { y: 0.8 } });
+  } else {
+    q.stats.consecutiveCorrect = 0;
+    q.flagged = true;
+    playSound('wrong');
+  }
+
+  const globalQ = state.questions.find(item => item.id === q.id);
+  if (globalQ) {
+    globalQ.stats = q.stats;
+    globalQ.flagged = q.flagged;
+  }
+
+  saveQuestions();
+  saveStats();
+
+  renderOpenAnswerResult(isMatch, userText, accepted);
+  revealSessionFeedback(isMatch, q);
+}
+
+function renderOpenAnswerResult(isMatch, userText, accepted) {
+  const resultBox = document.getElementById('session-open-result-box');
+  if (!resultBox) return;
+
+  resultBox.className = isMatch
+    ? "p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-xs space-y-2.5"
+    : "p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs space-y-2.5";
+
+  resultBox.innerHTML = `
+    <div class="flex items-center justify-between">
+      <div class="flex items-center space-x-2 font-bold text-sm ${isMatch ? 'text-emerald-400' : 'text-rose-400'}">
+        <i data-lucide="${isMatch ? 'check-circle' : 'x-circle'}" class="w-4 h-4"></i>
+        <span>${isMatch ? 'Diagnostic Exact !' : 'Diagnostic non reconnu ou incomplet'}</span>
+      </div>
+      <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border ${isMatch ? 'border-emerald-500/40 text-emerald-300' : 'border-rose-500/40 text-rose-300'} font-bold">
+        ${isMatch ? '+15 XP' : '0 XP'}
+      </span>
+    </div>
+
+    <div class="space-y-1 pt-1 border-t border-slate-800">
+      <div class="text-slate-400 text-[11px]">Votre réponse saisie :</div>
+      <div class="font-mono text-xs sm:text-sm px-3 py-1.5 rounded-lg bg-slate-950 border ${isMatch ? 'border-emerald-500/40 text-emerald-300' : 'border-rose-500/40 text-rose-300'} font-bold">
+        ${escapeHtml(userText)}
+      </div>
+    </div>
+
+    <div class="space-y-1">
+      <div class="text-slate-400 text-[11px]">Formulation(s) acceptée(s) par le créateur :</div>
+      <div class="flex flex-wrap gap-1.5">
+        ${accepted.map((ans, idx) => `
+          <span class="px-2.5 py-1 rounded-lg text-xs font-mono font-bold ${
+            idx === 0 
+              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' 
+              : 'bg-slate-900 text-teal-300 border border-slate-700'
+          }">
+            ${escapeHtml(ans)} ${idx === 0 ? '⭐ (Attendu)' : ''}
+          </span>
+        `).join('')}
+      </div>
+    </div>
+
+    ${!isMatch ? `
+      <div class="pt-2 border-t border-rose-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <span class="text-[11px] text-slate-300">Vous aviez la bonne lésion (faute de frappe, synonyme non listé...) ?</span>
+        <button type="button" onclick="overrideOpenAnswerCorrect()" class="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 text-xs font-bold transition flex items-center space-x-1.5 shrink-0">
+          <i data-lucide="check" class="w-3.5 h-3.5"></i>
+          <span>J'avais le bon diagnostic</span>
+        </button>
+      </div>
+    ` : ''}
+  `;
+
+  resultBox.classList.remove('hidden');
+  if (window.lucide) lucide.createIcons();
+}
+
+function overrideOpenAnswerCorrect() {
+  const session = state.currentSession;
+  if (!session || !session.isAnswered) return;
+  const q = session.questions[session.currentIndex];
+
+  session.score += 1;
+  session.xpEarned += 15;
+  state.stats.xp += 15;
+  state.stats.totalCorrect += 1;
+  if (!q.stats) q.stats = { seen: 1, correct: 0, consecutiveCorrect: 0 };
+  q.stats.correct += 1;
+  q.stats.consecutiveCorrect = 1;
+  q.flagged = false;
+
+  const globalQ = state.questions.find(item => item.id === q.id);
+  if (globalQ) {
+    globalQ.stats = q.stats;
+    globalQ.flagged = q.flagged;
+  }
+
+  saveQuestions();
+  saveStats();
+
+  playSound('correct');
+  confetti({ particleCount: 30, spread: 60, origin: { y: 0.8 } });
+
+  renderOpenAnswerResult(true, session.lastOpenUserText || '', session.lastOpenAccepted || []);
+  revealSessionFeedback(true, q);
+  showToast("🤝 Réponse validée comme correcte !");
+}
+
+function revealSessionFeedback(isExact, q) {
   // Révélation automatique de la classification et de l'organe lors de la correction
   const breadcrumbContainer = document.getElementById('session-breadcrumb-container');
   if (breadcrumbContainer) breadcrumbContainer.classList.remove('hidden');
@@ -2180,6 +2466,7 @@ function resetQuestionForm() {
     { text: '', explanation: '', correct: false },
     { text: '', explanation: '', correct: false }
   ];
+  state.editorOpenAnswers = [''];
   renderEditorUploadedImages();
   renderEditorUploadedExplanationImages();
   renderEditorTagsSelector();
@@ -2244,16 +2531,27 @@ function onFormatChange() {
   const format = document.getElementById('form-q-format').value;
   const isQCM = (format === 'qcm');
   const isPiege = (format === 'piege');
+  const isOpen = (format === 'ouverte');
   const btnAdd = document.getElementById('btn-add-editor-option');
 
   const mcqWrapper = document.getElementById('form-mcq-wrapper');
   const tfWrapper = document.getElementById('form-tf-wrapper');
+  const openWrapper = document.getElementById('form-open-wrapper');
+  const mcqHeader = document.getElementById('editor-mcq-header');
 
-  if (mcqWrapper) mcqWrapper.classList.toggle('hidden', isPiege);
+  if (mcqWrapper) mcqWrapper.classList.toggle('hidden', isPiege || isOpen);
   if (tfWrapper) tfWrapper.classList.toggle('hidden', !isPiege);
-  if (btnAdd) btnAdd.classList.toggle('hidden', isPiege);
+  if (openWrapper) openWrapper.classList.toggle('hidden', !isOpen);
+  if (btnAdd) btnAdd.classList.toggle('hidden', isPiege || isOpen);
+  if (mcqHeader) mcqHeader.classList.toggle('hidden', isPiege || isOpen);
 
-  if (!isPiege) {
+  if (isOpen) {
+    if (state.editorOpenAnswers.length === 1 && !state.editorOpenAnswers[0]) {
+      const entityVal = document.getElementById('form-q-entity')?.value?.trim();
+      if (entityVal) state.editorOpenAnswers[0] = entityVal;
+    }
+    renderEditorOpenAnswers();
+  } else if (!isPiege) {
     if (!isQCM && state.editorQuestionOptions) {
       let firstFound = false;
       state.editorQuestionOptions.forEach(opt => {
@@ -2265,6 +2563,69 @@ function onFormatChange() {
       });
     }
     renderEditorOptions();
+  }
+}
+
+function renderEditorOpenAnswers() {
+  const container = document.getElementById('form-open-answers-list');
+  if (!container) return;
+
+  if (!state.editorOpenAnswers || state.editorOpenAnswers.length === 0) {
+    state.editorOpenAnswers = [''];
+  }
+
+  container.innerHTML = '';
+  const canDelete = state.editorOpenAnswers.length > 1;
+
+  state.editorOpenAnswers.forEach((ans, idx) => {
+    const row = document.createElement('div');
+    row.className = "flex items-center space-x-2.5 p-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition";
+
+    const isFirst = (idx === 0);
+    const badgeLabel = isFirst ? "Attendu" : `Var. ${idx + 1}`;
+    const badgeBg = isFirst ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" : "bg-slate-800 text-teal-300 border-slate-700";
+
+    row.innerHTML = `
+      <span class="px-2 py-1 rounded-lg text-[10px] font-mono font-bold border shrink-0 ${badgeBg}">
+        ${badgeLabel}
+      </span>
+      <input type="text"
+             value="${escapeHtml(ans)}"
+             oninput="updateEditorOpenAnswer(${idx}, this.value)"
+             placeholder="${isFirst ? 'Diagnostic principal (ex: Carcinome canalaire infiltrant) *' : 'Variante / abréviation (ex: CCI, Carcinome NST, Carcinome mammaire infiltrant...)'}"
+             class="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-medium">
+      ${canDelete ? `
+        <button type="button" onclick="removeEditorOpenAnswer(${idx})" title="Supprimer cette formulation" class="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+        </button>
+      ` : ''}
+    `;
+
+    container.appendChild(row);
+  });
+
+  if (window.lucide) lucide.createIcons();
+}
+
+function addEditorOpenAnswer() {
+  if (!state.editorOpenAnswers) state.editorOpenAnswers = [];
+  state.editorOpenAnswers.push('');
+  renderEditorOpenAnswers();
+  setTimeout(() => {
+    const inputs = document.querySelectorAll('#form-open-answers-list input');
+    if (inputs.length > 0) inputs[inputs.length - 1].focus();
+  }, 50);
+}
+
+function removeEditorOpenAnswer(idx) {
+  if (!state.editorOpenAnswers || state.editorOpenAnswers.length <= 1) return;
+  state.editorOpenAnswers.splice(idx, 1);
+  renderEditorOpenAnswers();
+}
+
+function updateEditorOpenAnswer(idx, val) {
+  if (state.editorOpenAnswers && typeof state.editorOpenAnswers[idx] !== 'undefined') {
+    state.editorOpenAnswers[idx] = val;
   }
 }
 
@@ -2654,12 +3015,29 @@ function handleSaveQuestionForm(e) {
   let options = [];
   let optionExplanations = [];
   let correct = [];
+  let acceptedAnswers = [];
 
   if (format === 'piege') {
     options = ["Vrai", "Faux"];
     const chosen = document.querySelector('input[name="form_tf_choice"]:checked');
     correct = [chosen && chosen.value === 'Faux' ? 1 : 0];
     optionExplanations = ["", ""];
+  } else if (format === 'ouverte') {
+    acceptedAnswers = (state.editorOpenAnswers || [])
+      .map(s => (s || '').trim())
+      .filter(s => s.length > 0);
+
+    if (acceptedAnswers.length === 0) {
+      if (entity) {
+        acceptedAnswers = [entity];
+      } else {
+        alert("En mode Question Ouverte, veuillez renseigner au moins une formulation diagnostique acceptée.");
+        return;
+      }
+    }
+    options = [...acceptedAnswers];
+    correct = [0];
+    optionExplanations = [];
   } else {
     (state.editorQuestionOptions || []).forEach(opt => {
       const val = (opt.text || '').trim();
@@ -2688,6 +3066,7 @@ function handleSaveQuestionForm(e) {
       state.questions[idx] = {
         ...state.questions[idx],
         format, organ, category, entity, question, context, explanation, trap, tags, options, correct, optionExplanations,
+        acceptedAnswers: [...acceptedAnswers],
         images: [...state.editorUploadedImages],
         explanationImages: [...(state.editorUploadedExplanationImages || [])]
       };
@@ -2697,6 +3076,7 @@ function handleSaveQuestionForm(e) {
     const newQ = {
       id: "q_" + Date.now(),
       format, organ, category, entity, question, context, explanation, trap, tags, options, correct, optionExplanations,
+      acceptedAnswers: [...acceptedAnswers],
       images: [...state.editorUploadedImages],
       explanationImages: [...(state.editorUploadedExplanationImages || [])],
       flagged: false,
@@ -2748,6 +3128,12 @@ function editQuestion(id) {
     const radVrai = document.querySelector('input[name="form_tf_choice"][value="Vrai"]');
     if (isFaux && radFaux) radFaux.checked = true;
     else if (radVrai) radVrai.checked = true;
+  } else if (q.format === 'ouverte') {
+    const list = Array.isArray(q.acceptedAnswers) && q.acceptedAnswers.length > 0
+      ? [...q.acceptedAnswers]
+      : (Array.isArray(q.options) && q.options.length > 0 ? [...q.options] : [q.entity || '']);
+    state.editorOpenAnswers = [...list];
+    onFormatChange();
   } else {
     const correctIndices = new Set(Array.isArray(q.correct) ? q.correct : [q.correct]);
     const exps = Array.isArray(q.optionExplanations) ? q.optionExplanations : [];
@@ -3709,7 +4095,7 @@ function renderBank() {
         q.mastered ? 'border-emerald-500/30 bg-emerald-950/10' : 'border-slate-800 hover:border-slate-700'
       }`;
 
-      const formatBadge = q.format === 'qcm' ? '☑️ QCM' : (q.format === 'piege' ? '⚠️ Vrai/Faux' : '🔘 QCU');
+      const formatBadge = q.format === 'qcm' ? '☑️ QCM' : (q.format === 'piege' ? '⚠️ Vrai/Faux' : (q.format === 'ouverte' ? '✍️ Ouverte' : '🔘 QCU'));
       const rate = q.stats && q.stats.seen > 0 ? `${Math.round((q.stats.correct / q.stats.seen) * 100)}% (${q.stats.correct}/${q.stats.seen})` : 'Non jouée';
 
       let dueBadgeHtml = '';

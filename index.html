@@ -301,6 +301,29 @@
         <!-- Options Container -->
         <div id="session-options-container" class="space-y-3"></div>
 
+        <!-- Zone de Réponse Ouverte (Saisie Diagnostique) -->
+        <div id="session-open-container" class="hidden space-y-3">
+          <div class="p-4 sm:p-5 rounded-2xl bg-slate-950/80 border border-teal-500/30 space-y-3">
+            <label class="block text-xs font-bold text-teal-300 flex items-center space-x-2">
+              <i data-lucide="edit-3" class="w-4 h-4 text-teal-400"></i>
+              <span>Quel est votre diagnostic ?</span>
+            </label>
+            <div class="relative">
+              <input type="text" id="session-open-input" placeholder="Tapez votre diagnostic ici puis validez (ou appuyez sur Entrée ↵)..." class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 font-medium pr-10" onkeydown="handleOpenAnswerKeyDown(event)">
+              <button type="button" onclick="document.getElementById('session-open-input').value = ''; document.getElementById('session-open-input').focus();" title="Effacer" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+                <i data-lucide="x" class="w-4 h-4"></i>
+              </button>
+            </div>
+            <button id="btn-session-validate-open" onclick="validateOpenAnswer()" class="w-full py-3 rounded-xl bg-gradient-to-r from-teal-600 to-indigo-600 hover:from-teal-500 hover:to-indigo-500 text-white font-bold text-sm transition shadow-lg shadow-teal-500/20 flex items-center justify-center space-x-2">
+              <span>Valider mon diagnostic</span>
+              <i data-lucide="corner-down-left" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+          <!-- Résultat comparatif après validation de la question ouverte -->
+          <div id="session-open-result-box" class="hidden p-4 rounded-xl border text-xs space-y-2"></div>
+        </div>
+
         <!-- Bouton Valider pour QCM -->
         <button id="btn-session-validate-qcm" onclick="validateQCMAnswer()" class="hidden w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm transition shadow-lg shadow-teal-500/20 flex items-center justify-center space-x-2">
           <span>Valider ma sélection</span>
@@ -486,6 +509,7 @@
             <option value="qcm">☑️ QCM (Choix Multiples)</option>
             <option value="qcu">🔘 QCU (Choix Unique)</option>
             <option value="piege">⚠️ Vrai/Faux</option>
+            <option value="ouverte">✍️ Question Ouverte (Diagnostic)</option>
             <option value="dp">📋 Dossiers Progressifs (DP)</option>
           </select>
 
@@ -583,6 +607,7 @@
               <option value="qcm" selected>☑️ Choix Multiples (QCM) - Par défaut</option>
               <option value="qcu">🔘 Choix Unique (QCU) - 1 seule bonne réponse</option>
               <option value="piege">⚠️ Vrai / Faux - Diagnostic tranché</option>
+              <option value="ouverte">✍️ Question Ouverte - Saisie libre du diagnostic</option>
             </select>
           </div>
 
@@ -660,7 +685,7 @@
 
           <!-- Options de Réponses -->
           <div class="space-y-3 pt-2">
-            <div class="flex items-center justify-between">
+            <div id="editor-mcq-header" class="flex items-center justify-between">
               <div>
                 <label class="block text-xs font-semibold text-slate-300">Propositions & Justifications *</label>
                 <p class="text-[11px] text-slate-400">Cochez la ou les bonnes réponses. Vous pouvez ajouter autant de propositions que nécessaire.</p>
@@ -673,6 +698,28 @@
             
             <div id="form-mcq-wrapper" class="space-y-3">
               <!-- Rendu dynamique via renderEditorOptions() dans app.js -->
+            </div>
+
+            <!-- Formulaire pour Question Ouverte (Saisie Diagnostique) -->
+            <div id="form-open-wrapper" class="hidden space-y-3 p-4 rounded-2xl bg-slate-950/80 border border-teal-500/30">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <span class="text-xs font-bold text-teal-300 flex items-center space-x-1.5">
+                    <i data-lucide="edit-3" class="w-4 h-4 text-teal-400"></i>
+                    <span>Formulations diagnostiques acceptées (Synonymes & Variantes) *</span>
+                  </span>
+                  <p class="text-[11px] text-slate-400 mt-1">
+                    Renseignez les différentes façons valides d'écrire le diagnostic (abréviations, synonymes, terminologie OMS). La vérification lors de l'entraînement sera <strong class="text-teal-300">automatique et tolérante</strong> (insensible à la casse, aux accents et aux tirets).
+                  </p>
+                </div>
+                <button type="button" onclick="addEditorOpenAnswer()" class="px-3 py-1.5 rounded-xl bg-teal-600/20 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold flex items-center space-x-1 transition shrink-0">
+                  <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                  <span>Ajouter une variante</span>
+                </button>
+              </div>
+              <div id="form-open-answers-list" class="space-y-2 pt-1">
+                <!-- Rendu dynamique via renderEditorOpenAnswers() -->
+              </div>
             </div>
 
             <div id="form-tf-wrapper" class="hidden space-y-2">
@@ -1177,7 +1224,7 @@
 
       <!-- Liste des choix & réponses -->
       <div class="space-y-2">
-        <label class="text-xs font-bold text-slate-400">Choix & Réponses :</label>
+        <label id="detail-options-label" class="text-xs font-bold text-slate-400">Choix & Réponses :</label>
         <div id="detail-options-container" class="space-y-2"></div>
       </div>
 
