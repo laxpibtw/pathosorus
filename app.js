@@ -356,20 +356,24 @@ async function initAuth() {
     if (session && session.user) {
       state.currentUser = session.user;
       await fetchCurrentUserRole();
-      await loadUserProgress();
-      if (isCreator()) autoSyncLocalQuestionsToCloud();
     } else {
       state.currentUser = null;
       state.currentRole = 'reader';
     }
     updateUserRoleUI();
 
+    // Charger les questions et synchroniser la progression liée au compte
+    await fetchSupabaseData(true);
+    if (state.currentUser) {
+      await syncLocalProgressToCloud();
+    }
+
     supabaseClient.auth.onAuthStateChange(async (event, session) => {
       if (session && session.user) {
         state.currentUser = session.user;
         await fetchCurrentUserRole();
-        await loadUserProgress();
-        if (isCreator()) autoSyncLocalQuestionsToCloud();
+        await fetchSupabaseData(true);
+        await syncLocalProgressToCloud();
       } else {
         state.currentUser = null;
         state.currentRole = 'reader';
@@ -381,13 +385,48 @@ async function initAuth() {
   }
 }
 
-async function syncStatsToCloud() {
-  if (!supabaseClient || !state.currentUser || isLocalEnvironment()) return;
+async function syncLocalProgressToCloud() {
+  if (!supabaseClient || !state.currentUser) return;
   try {
+    const toUpload = [];
+    (state.questions || []).forEach(q => {
+      if (q && q.id && q.stats && (q.stats.seen > 0 || q.stats.lastReviewed || q.mastered || q.flagged)) {
+        toUpload.push({
+          user_id: state.currentUser.id,
+          question_id: q.id,
+          mastered: Boolean(q.mastered),
+          flagged: Boolean(q.flagged),
+          stats: q.stats || {},
+          updated_at: new Date().toISOString()
+        });
+      }
+    });
+    if (toUpload.length > 0) {
+      for (let i = 0; i < toUpload.length; i += 50) {
+        const batch = toUpload.slice(i, i + 50);
+        await supabaseClient.from('user_progress').upsert(batch);
+      }
+    }
+  } catch (e) {
+    console.warn("Erreur syncLocalProgressToCloud:", e);
+  }
+}
+
+async function syncStatsToCloud() {
+  if (!supabaseClient || !state.currentUser) return;
+  try {
+    const statsPayload = {
+      ...state.stats,
+      customBadges: state.customBadges || []
+    };
     await supabaseClient
       .from('profiles')
-      .update({ stats: state.stats })
-      .eq('id', state.currentUser.id);
+      .upsert({
+        id: state.currentUser.id,
+        email: state.currentUser.email,
+        role: state.currentRole || 'creator',
+        stats: statsPayload
+      });
   } catch (e) {
     console.warn("Erreur sync stats profiles:", e);
   }
@@ -426,25 +465,36 @@ async function fetchCurrentUserRole() {
       if (data.role) state.currentRole = data.role;
       if (email === 'padoreau85@gmail.com') state.currentRole = 'creator';
 
-      if (data.stats && typeof data.stats.xp !== 'undefined') {
-        const cloudXp = data.stats.xp || 0;
-        const localXp = state.stats.xp || 0;
-        const finalXp = Math.max(cloudXp, localXp);
+      if (data.stats) {
+        const cloudStats = data.stats || {};
+        const localStats = state.stats || {};
 
         state.stats = {
-          ...state.stats,
-          ...data.stats,
-          xp: finalXp,
-          creatorXp: Math.max(data.stats.creatorXp || 0, state.stats.creatorXp || 0),
-          streak: Math.max(data.stats.streak || 1, state.stats.streak || 1),
-          unlockedBadges: { ...(state.stats.unlockedBadges || {}), ...(data.stats.unlockedBadges || {}) }
+          ...localStats,
+          ...cloudStats,
+          xp: Math.max(cloudStats.xp || 0, localStats.xp || 0),
+          creatorXp: Math.max(cloudStats.creatorXp || 0, localStats.creatorXp || 0),
+          streak: Math.max(cloudStats.streak || 1, localStats.streak || 1),
+          totalAnswered: Math.max(cloudStats.totalAnswered || 0, localStats.totalAnswered || 0),
+          totalCorrect: Math.max(cloudStats.totalCorrect || 0, localStats.totalCorrect || 0),
+          unlockedBadges: { ...(cloudStats.unlockedBadges || {}), ...(localStats.unlockedBadges || {}) },
+          badgeHistory: { ...(cloudStats.badgeHistory || {}), ...(localStats.badgeHistory || {}) },
+          completedCategories: Array.from(new Set([...(cloudStats.completedCategories || []), ...(localStats.completedCategories || [])]))
         };
+
+        if (Array.isArray(cloudStats.customBadges) && cloudStats.customBadges.length > 0) {
+          const cloudBadgeIds = new Set(cloudStats.customBadges.map(b => b.id));
+          const localOnlyBadges = (state.customBadges || []).filter(b => !cloudBadgeIds.has(b.id));
+          state.customBadges = [...cloudStats.customBadges, ...localOnlyBadges];
+          localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+        }
 
         localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
         localStorage.setItem(userStatsKey, JSON.stringify(state.stats));
         updateTopBar();
+        renderTrophiesView();
 
-        if (localXp > cloudXp) {
+        if ((localStats.xp || 0) > (cloudStats.xp || 0)) {
           syncStatsToCloud();
         }
       } else {
@@ -452,13 +502,7 @@ async function fetchCurrentUserRole() {
       }
     } else {
       state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || (email === 'padoreau85@gmail.com' ? 'creator' : 'reader');
-      // Initialiser le profil dans Supabase s'il n'existe pas encore
-      await supabaseClient.from('profiles').upsert({
-        id: state.currentUser.id,
-        email: state.currentUser.email,
-        role: state.currentRole,
-        stats: state.stats
-      });
+      await syncStatsToCloud();
     }
   } catch (e) {
     state.currentRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role) || (email === 'padoreau85@gmail.com' ? 'creator' : 'reader');
@@ -545,9 +589,6 @@ async function dbSaveUserProgress(q) {
     stats: q.stats
   };
   localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
-
-  // Protection mode test local : ne pas modifier Supabase en ligne
-  if (isLocalEnvironment()) return;
 
   if (!supabaseClient) return;
 
@@ -689,16 +730,15 @@ async function handleAuthLoginSubmit(e) {
 
     state.currentUser = data.user;
     await fetchCurrentUserRole();
-    await loadUserProgress();
     updateUserRoleUI();
     closeAuthModal();
 
     const roleStr = isCreator() ? "Créateur 🦖" : "Lecteur 📖";
     alert(`Bienvenue ${email} !\nConnecté avec succès en tant que ${roleStr}.`);
-    if (isCreator()) {
-      await fetchSupabaseData(true);
-      await autoSyncLocalQuestionsToCloud();
-    }
+
+    // Synchronisation complète des questions et de la progression de ce compte
+    await fetchSupabaseData(true);
+    await syncLocalProgressToCloud();
   } catch (err) {
     console.error("Erreur connexion:", err);
     if (alertBox) {
@@ -1287,11 +1327,30 @@ function closeQuestionDetailModal() {
 async function fetchSupabaseData(silent = false) {
   if (!supabaseClient) return;
   try {
-    const [qRes, cRes, tRes] = await Promise.all([
+    const promises = [
       supabaseClient.from('questions').select('*').order('created_at', { ascending: false }),
       supabaseClient.from('cases').select('*').order('created_at', { ascending: false }),
       supabaseClient.from('custom_tags').select('*').order('created_at', { ascending: true })
-    ]);
+    ];
+
+    if (state.currentUser && state.currentUser.id) {
+      promises.push(
+        supabaseClient.from('user_progress').select('*').eq('user_id', state.currentUser.id)
+      );
+    }
+
+    const [qRes, cRes, tRes, upRes] = await Promise.all(promises);
+
+    const cloudProgressMap = new Map();
+    if (upRes && !upRes.error && upRes.data && Array.isArray(upRes.data)) {
+      upRes.data.forEach(up => {
+        cloudProgressMap.set(up.question_id, up);
+        state.userProgress[up.question_id] = up;
+      });
+      if (state.currentUser) {
+        localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
+      }
+    }
 
     if (!qRes.error && qRes.data) {
       // 1. Sauvegarder la progression actuelle et les questions locales pour éviter toute perte d'explications
@@ -1315,6 +1374,7 @@ async function fetchSupabaseData(silent = false) {
       } catch (e) {}
 
       const cloudQuestions = qRes.data.map(q => {
+        const cloudProg = cloudProgressMap.get(q.id);
         const localProg = localProgressMap.get(q.id) || storedProgress[q.id];
         const localQ = localQuestionMap.get(q.id);
         
@@ -1322,13 +1382,22 @@ async function fetchSupabaseData(silent = false) {
         let mastered = q.mastered || false;
         let flagged = q.flagged || false;
 
-        // Préserver en priorité absolue la progression de révision de l'utilisateur
+        // Priorité absolue à user_progress de Supabase pour le compte connecté
+        if (cloudProg) {
+          if (typeof cloudProg.mastered !== 'undefined') mastered = cloudProg.mastered;
+          if (typeof cloudProg.flagged !== 'undefined') flagged = cloudProg.flagged;
+          if (cloudProg.stats) stats = { ...stats, ...cloudProg.stats };
+        }
+
+        // Si la machine locale a une révision plus récente (ex: révision hors-ligne ou session active)
         if (localProg) {
-          if (localProg.stats && (localProg.stats.lastReviewed || (localProg.stats.seen && localProg.stats.seen > 0) || localProg.stats.nextReviewDate)) {
-            stats = { ...stats, ...localProg.stats };
+          if (!cloudProg || (localProg.stats && (localProg.stats.seen || 0) > (stats.seen || 0))) {
+            if (localProg.stats && (localProg.stats.lastReviewed || (localProg.stats.seen && localProg.stats.seen > 0) || localProg.stats.nextReviewDate)) {
+              stats = { ...stats, ...localProg.stats };
+            }
+            if (typeof localProg.mastered !== 'undefined') mastered = localProg.mastered;
+            if (typeof localProg.flagged !== 'undefined') flagged = localProg.flagged;
           }
-          if (typeof localProg.mastered !== 'undefined') mastered = localProg.mastered;
-          if (typeof localProg.flagged !== 'undefined') flagged = localProg.flagged;
         }
 
         // Récupérer optionExplanations depuis la colonne Supabase (optionexplanations ou optionExplanations)
@@ -1383,6 +1452,15 @@ async function fetchSupabaseData(silent = false) {
 
       state.questions = [...cloudQuestions, ...localOnlyQuestions];
       localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
+
+      // Sauvegarder dans le cache local pour répétition espacée
+      const syncProg = {};
+      state.questions.forEach(q => {
+        if (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed || q.mastered || q.flagged)) {
+          syncProg[q.id] = { stats: q.stats, mastered: q.mastered, flagged: q.flagged };
+        }
+      });
+      localStorage.setItem('pathosorus_user_progress', JSON.stringify(syncProg));
     }
 
     if (!cRes.error && cRes.data) {
@@ -1410,14 +1488,29 @@ async function fetchSupabaseData(silent = false) {
       }
     } catch(e) {}
 
-    await loadUserProgress();
-
     updateTopBar();
     renderHierarchySelector();
     renderTagsCloud();
     renderDPCardsOnPlay();
     renderSpacedRepetitionDashboard();
     renderBank();
+    checkAndUnlockBadges();
+    renderTrophiesView();
+
+    // Auto-push vers Supabase : si des questions ont des justifications locales mais vides sur Supabase
+    if (state.currentUser && isCreator()) {
+      const needSync = state.questions.filter(q => {
+        const hasNotes = Array.isArray(q.optionExplanations) && q.optionExplanations.some(e => e && e.trim());
+        const remoteEmpty = !q.optionexplanations || q.optionexplanations.length === 0 || q.optionexplanations.every(e => !e || !e.trim());
+        return hasNotes && remoteEmpty;
+      });
+      if (needSync.length > 0) {
+        console.log(`Auto-push vers Supabase de ${needSync.length} question(s) avec justifications locales...`);
+        for (const q of needSync) {
+          await dbUpsertQuestion(q);
+        }
+      }
+    }
 
     if (!silent) alert("Données synchronisées depuis le Cloud Supabase !");
   } catch (err) {
@@ -1549,12 +1642,6 @@ function formatQuestionForSupabase(q) {
 }
 
 async function dbUpsertQuestion(q) {
-  // Protection absolue : sur l'environnement local de test, on n'écrit JAMAIS dans la base Supabase en ligne !
-  if (isLocalEnvironment()) {
-    console.log("🛡️ Mode Test Local : Question enregistrée dans votre navigateur. Supabase en ligne reste 100% protégé.");
-    return { success: true, localOnly: true, isLocalEnv: true };
-  }
-
   if (!supabaseClient) return { success: true, localOnly: true };
   if (!state.currentUser) {
     console.warn("Utilisateur non connecté : question enregistrée en local.");
@@ -1748,10 +1835,8 @@ function initApp() {
   renderSpacedRepetitionDashboard();
   renderBank();
 
-  // Initialisation du Cloud Supabase
-  if (initSupabase()) {
-    fetchSupabaseData(true);
-  }
+  // Initialisation du Cloud Supabase & Authentification
+  initSupabase();
 
   initClipboardPasteListener();
 
@@ -2727,27 +2812,22 @@ window.onTrophyConditionTypeChange = onTrophyConditionTypeChange;
 async function saveCustomBadge(badge) {
   state.customBadges.push(badge);
   localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
-  if (supabaseClient && isCreator() && !isLocalEnvironment()) {
-    try {
-      await supabaseClient.from('custom_badges').upsert(badge);
-    } catch(e) {
-      console.warn("Table custom_badges non configurée (sauvegardé en local) :", e);
-    }
-  }
   renderTrophiesView();
+  // Sauvegarde dans profiles.stats.customBadges pour synchronisation garantie sur tous les appareils du compte
+  if (state.currentUser) {
+    saveStats();
+  }
 }
 
 async function deleteCustomBadge(badgeId) {
   if (!confirm("Voulez-vous vraiment supprimer ce trophée personnalisé ?")) return;
   state.customBadges = (state.customBadges || []).filter(b => b.id !== badgeId);
   localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
-  if (supabaseClient && isCreator() && !isLocalEnvironment()) {
-    try {
-      await supabaseClient.from('custom_badges').delete().eq('id', badgeId);
-    } catch(e) {}
-  }
   renderTrophiesView();
   showRewardToast("Trophée supprimé.", 'trash-2');
+  if (state.currentUser) {
+    saveStats();
+  }
 }
 window.deleteCustomBadge = deleteCustomBadge;
 
