@@ -5309,25 +5309,145 @@ function resetQuestionForm() {
   onFormatChange();
 }
 
-function updateEditorDatalists() {
-  const organDatalist = document.getElementById('datalist-organs');
-  const categoryDatalist = document.getElementById('datalist-categories');
-  const entityDatalist = document.getElementById('datalist-entities');
+function populateHierarchyDatalists(organInputId, categoryInputId, entityInputId, organDatalistId, categoryDatalistId, entityDatalistId) {
+  const organInput = document.getElementById(organInputId);
+  const categoryInput = document.getElementById(categoryInputId);
+  const entityInput = document.getElementById(entityInputId);
 
-  const tree = getHierarchyTree(true);
-  const organs = Object.keys(tree);
-  const categories = new Set();
-  const entities = new Set();
+  const organDatalist = document.getElementById(organDatalistId);
+  const categoryDatalist = document.getElementById(categoryDatalistId);
+  const entityDatalist = document.getElementById(entityDatalistId);
 
-  [...state.questions, ...state.cases].forEach(q => {
-    if (q.category) categories.add(q.category);
-    if (q.entity) entities.add(q.entity);
+  const typedOrgan = (organInput ? organInput.value : '').trim();
+  const typedCat = (categoryInput ? categoryInput.value : '').trim();
+
+  const allItems = [...(state.questions || []), ...(state.cases || [])];
+
+  const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+  // 1. Tous les organes uniques
+  const organMap = new Map(); // normOrgan -> casse d'origine
+  allItems.forEach(q => {
+    const o = (q.organ || '').trim();
+    if (o && norm(o) !== 'autre') {
+      const k = norm(o);
+      if (!organMap.has(k)) organMap.set(k, o);
+    }
   });
 
-  if (organDatalist) organDatalist.innerHTML = organs.map(o => `<option value="${o}">`).join('');
-  if (categoryDatalist) categoryDatalist.innerHTML = Array.from(categories).map(c => `<option value="${c}">`).join('');
-  if (entityDatalist) entityDatalist.innerHTML = Array.from(entities).map(e => `<option value="${e}">`).join('');
+  const allOrgans = Array.from(organMap.values()).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+
+  if (organDatalist) {
+    organDatalist.innerHTML = allOrgans.map(o => `<option value="${escapeHtml(o)}">`).join('');
+  }
+
+  // 2. Identifier les organes correspondants pour typedOrgan
+  const normTypedOrgan = norm(typedOrgan);
+  let matchedOrgans = [];
+  if (normTypedOrgan) {
+    if (organMap.has(normTypedOrgan)) {
+      matchedOrgans = [organMap.get(normTypedOrgan)];
+    } else {
+      matchedOrgans = allOrgans.filter(o => norm(o).startsWith(normTypedOrgan));
+      if (matchedOrgans.length === 0) {
+        matchedOrgans = allOrgans.filter(o => norm(o).includes(normTypedOrgan));
+      }
+    }
+  }
+
+  const organMatches = (itemOrgan) => {
+    if (!normTypedOrgan) return true; // Si aucun organe n'est saisi, afficher toutes les catégories
+    if (matchedOrgans.length > 0) {
+      const normItem = norm(itemOrgan);
+      return matchedOrgans.some(mo => norm(mo) === normItem);
+    }
+    // Organe nouveau en cours de création
+    return norm(itemOrgan) === normTypedOrgan;
+  };
+
+  // 3. Catégories filtrées strictement par l'organe saisi
+  const categoryMap = new Map(); // normCat -> casse d'origine
+  allItems.forEach(q => {
+    const o = (q.organ || '').trim();
+    const c = (q.category || '').trim();
+    if (!organMatches(o)) return;
+    if (c && norm(c) !== 'general') {
+      const k = norm(c);
+      if (!categoryMap.has(k)) categoryMap.set(k, c);
+    }
+  });
+
+  const availableCategories = Array.from(categoryMap.values()).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+
+  if (categoryDatalist) {
+    categoryDatalist.innerHTML = availableCategories.map(c => `<option value="${escapeHtml(c)}">`).join('');
+  }
+
+  // 4. Lésions / Entités filtrées strictement par l'organe ET la catégorie
+  const normTypedCat = norm(typedCat);
+  let matchedCategories = [];
+  if (normTypedCat) {
+    if (categoryMap.has(normTypedCat)) {
+      matchedCategories = [categoryMap.get(normTypedCat)];
+    } else {
+      matchedCategories = availableCategories.filter(cat => norm(cat).startsWith(normTypedCat));
+      if (matchedCategories.length === 0) {
+        matchedCategories = availableCategories.filter(cat => norm(cat).includes(normTypedCat));
+      }
+    }
+  }
+
+  const categoryMatches = (itemCat) => {
+    if (!normTypedCat) return true; // Si pas de catégorie saisie, afficher toutes les lésions de cet organe
+    if (matchedCategories.length > 0) {
+      const normItem = norm(itemCat);
+      return matchedCategories.some(mc => norm(mc) === normItem);
+    }
+    return norm(itemCat) === normTypedCat;
+  };
+
+  const entityMap = new Map(); // normEnt -> casse d'origine
+  allItems.forEach(q => {
+    const o = (q.organ || '').trim();
+    const c = (q.category || '').trim();
+    const e = (q.entity || '').trim();
+    if (!organMatches(o)) return;
+    if (!categoryMatches(c)) return;
+    if (e && norm(e) !== 'non specifie') {
+      const k = norm(e);
+      if (!entityMap.has(k)) entityMap.set(k, e);
+    }
+  });
+
+  const availableEntities = Array.from(entityMap.values()).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+
+  if (entityDatalist) {
+    entityDatalist.innerHTML = availableEntities.map(e => `<option value="${escapeHtml(e)}">`).join('');
+  }
 }
+
+function updateEditorDatalists() {
+  // 1. Filtrage hiérarchique pour le formulaire de Questions simples
+  populateHierarchyDatalists(
+    'form-q-organ',
+    'form-q-category',
+    'form-q-entity',
+    'datalist-organs',
+    'datalist-categories',
+    'datalist-entities'
+  );
+
+  // 2. Filtrage hiérarchique indépendant pour le Dossier Progressif (DP)
+  populateHierarchyDatalists(
+    'form-dp-organ',
+    'form-dp-category',
+    'form-dp-entity',
+    'datalist-dp-organs',
+    'datalist-dp-categories',
+    'datalist-dp-entities'
+  );
+}
+window.updateEditorDatalists = updateEditorDatalists;
 
 function renderEditorTagsSelector() {
   const container = document.getElementById('editor-tags-pills');
@@ -6155,6 +6275,7 @@ function editQuestion(id) {
   document.getElementById('form-q-organ').value = q.organ || '';
   document.getElementById('form-q-category').value = q.category || '';
   document.getElementById('form-q-entity').value = q.entity || '';
+  updateEditorDatalists();
   document.getElementById('form-q-text').value = q.question || '';
   document.getElementById('form-q-context').value = q.context || '';
   document.getElementById('form-q-explanation').value = q.explanation || '';
@@ -6561,6 +6682,7 @@ function editDP(id) {
   document.getElementById('form-dp-category').value = c.category || '';
   document.getElementById('form-dp-entity').value = c.entity || '';
   document.getElementById('form-dp-synopsis').value = c.synopsis;
+  updateEditorDatalists();
 
   state.editorSelectedTags = new Set(c.tags || []);
   renderDPTagsSelector();

@@ -716,6 +716,9 @@
       <datalist id="datalist-organs"></datalist>
       <datalist id="datalist-categories"></datalist>
       <datalist id="datalist-entities"></datalist>
+      <datalist id="datalist-dp-organs"></datalist>
+      <datalist id="datalist-dp-categories"></datalist>
+      <datalist id="datalist-dp-entities"></datalist>
 
       <!-- 5A. QUESTION SIMPLE -->
       <div id="creator-box-simple" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
@@ -783,11 +786,11 @@
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 1 : Organe *</label>
-                <input type="text" id="form-q-organ" list="datalist-organs" required placeholder="ex: Sein, Poumon..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+                <input type="text" id="form-q-organ" list="datalist-organs" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Sein, Poumon..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
               </div>
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 2 : Catégorie *</label>
-                <input type="text" id="form-q-category" list="datalist-categories" required placeholder="ex: Tumeurs épithéliales..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+                <input type="text" id="form-q-category" list="datalist-categories" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Tumeurs épithéliales..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
               </div>
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 3 : Lésion précise *</label>
@@ -1024,15 +1027,15 @@
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 1 : Organe *</label>
-                <input type="text" id="form-dp-organ" list="datalist-organs" required placeholder="ex: Tube Digestif, Sein..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                <input type="text" id="form-dp-organ" list="datalist-dp-organs" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Tube Digestif, Sein..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
               </div>
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 2 : Catégorie *</label>
-                <input type="text" id="form-dp-category" list="datalist-categories" required placeholder="ex: Tumeurs mésenchymateuses..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                <input type="text" id="form-dp-category" list="datalist-dp-categories" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Tumeurs mésenchymateuses..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
               </div>
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 3 : Lésion finale *</label>
-                <input type="text" id="form-dp-entity" list="datalist-entities" required placeholder="ex: GIST gastrique..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                <input type="text" id="form-dp-entity" list="datalist-dp-entities" required placeholder="ex: GIST gastrique..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
               </div>
             </div>
           </div>
@@ -1595,7 +1598,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="seed_data.js?v=20261022_1745"></script>
-  <script src="app.js?v=20261022_1745"></script>
+  <script src="seed_data.js?v=20261022_1750"></script>
+  <script src="app.js?v=20261022_1750"></script>
 </body>
 </html>
