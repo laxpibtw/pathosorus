@@ -1185,7 +1185,10 @@ function openQuestionDetail(id) {
       optionsContainer.innerHTML = (q.options || []).map((opt, idx) => {
         const isCorrect = (q.correct || []).includes(idx);
         const letter = String.fromCharCode(65 + idx);
-        const itemExp = (q.optionExplanations && q.optionExplanations[idx]) ? q.optionExplanations[idx].trim() : '';
+        const exps = (Array.isArray(q.optionExplanations) && q.optionExplanations.length > 0)
+          ? q.optionExplanations
+          : (Array.isArray(q.optionexplanations) ? q.optionexplanations : []);
+        const itemExp = (exps && exps[idx]) ? exps[idx].trim() : '';
         return `
           <div class="space-y-1.5">
             <div class="flex items-center space-x-2.5 p-3 rounded-xl border text-xs font-medium ${
@@ -1291,10 +1294,12 @@ async function fetchSupabaseData(silent = false) {
     ]);
 
     if (!qRes.error && qRes.data) {
-      // 1. Sauvegarder la progression actuelle de l'utilisateur (lastReviewed, nextReviewDate, intervalDays, seen, correct, mastered, flagged)
+      // 1. Sauvegarder la progression actuelle et les questions locales pour éviter toute perte d'explications
       const localProgressMap = new Map();
+      const localQuestionMap = new Map();
       (state.questions || []).forEach(oldQ => {
         if (oldQ && oldQ.id) {
+          localQuestionMap.set(oldQ.id, oldQ);
           localProgressMap.set(oldQ.id, {
             stats: oldQ.stats,
             mastered: oldQ.mastered,
@@ -1311,6 +1316,7 @@ async function fetchSupabaseData(silent = false) {
 
       const cloudQuestions = qRes.data.map(q => {
         const localProg = localProgressMap.get(q.id) || storedProgress[q.id];
+        const localQ = localQuestionMap.get(q.id);
         
         let stats = q.stats || { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 };
         let mastered = q.mastered || false;
@@ -1325,17 +1331,46 @@ async function fetchSupabaseData(silent = false) {
           if (typeof localProg.flagged !== 'undefined') flagged = localProg.flagged;
         }
 
+        // Récupérer optionExplanations depuis la colonne Supabase (optionexplanations ou optionExplanations)
+        let optExp = (Array.isArray(q.optionexplanations) && q.optionexplanations.length > 0)
+          ? q.optionexplanations
+          : ((Array.isArray(q.optionExplanations) && q.optionExplanations.length > 0) ? q.optionExplanations : []);
+
+        // Filet de sécurité : si le Cloud a renvoyé des explications vides mais que le navigateur local avait déjà des explications renseignées, préserver les notes locales !
+        if ((!optExp || optExp.length === 0 || optExp.every(e => !e || !e.trim())) && localQ) {
+          const localExp = (Array.isArray(localQ.optionExplanations) && localQ.optionExplanations.length > 0)
+            ? localQ.optionExplanations
+            : (Array.isArray(localQ.optionexplanations) ? localQ.optionexplanations : []);
+          if (localExp.some(e => e && e.trim())) {
+            optExp = localExp;
+          }
+        }
+
+        const expImgs = (Array.isArray(q.explanationimages) && q.explanationimages.length > 0)
+          ? q.explanationimages
+          : ((Array.isArray(q.explanationImages) && q.explanationImages.length > 0) ? q.explanationImages : (localQ?.explanationImages || []));
+
+        const accAns = (Array.isArray(q.acceptedanswers) && q.acceptedanswers.length > 0)
+          ? q.acceptedanswers
+          : ((Array.isArray(q.acceptedAnswers) && q.acceptedAnswers.length > 0) ? q.acceptedAnswers : (q.format === 'ouverte' ? (q.options || []) : []));
+
+        const diff = q.difficulty || (stats && stats.difficulty) || 'facile';
+        const extClues = q.extremeClues || q.extremeclues || (stats && stats.extremeClues) || '';
+
         return {
           ...q,
           options: q.options || [],
           correct: q.correct || [],
-          optionExplanations: q.optionExplanations || [],
-          acceptedAnswers: q.acceptedAnswers || (q.format === 'ouverte' ? (q.options || []) : []),
+          optionExplanations: optExp,
+          optionexplanations: optExp,
+          acceptedAnswers: accAns,
+          acceptedanswers: accAns,
           tags: q.tags || [],
           images: q.images || [],
-          explanationImages: q.explanationImages || [],
-          difficulty: q.difficulty || 'facile',
-          extremeClues: q.extremeClues || '',
+          explanationImages: expImgs,
+          explanationimages: expImgs,
+          difficulty: diff,
+          extremeClues: extClues,
           stats,
           mastered,
           flagged
@@ -1416,17 +1451,23 @@ async function syncLocalToSupabase() {
       await supabaseClient.from('custom_tags').upsert(tagRows);
     }
     if (state.questions.length > 0) {
-      const { error: qErr } = await supabaseClient.from('questions').upsert(state.questions);
-      if (qErr && qErr.message && (qErr.message.includes('optionExplanations') || qErr.message.includes('explanationImages') || qErr.message.includes('acceptedAnswers'))) {
-        const sanitized = state.questions.map(q => {
+      const formatted = state.questions.map(q => formatQuestionForSupabase(q));
+      let { error: qErr } = await supabaseClient.from('questions').upsert(formatted);
+      if (qErr && qErr.message && (qErr.message.toLowerCase().includes('column') || qErr.message.toLowerCase().includes('schema cache'))) {
+        const msg = qErr.message.toLowerCase();
+        const sanitized = formatted.map(q => {
           const copy = { ...q };
-          if (qErr.message.includes('optionExplanations')) delete copy.optionExplanations;
-          if (qErr.message.includes('explanationImages')) delete copy.explanationImages;
-          if (qErr.message.includes('acceptedAnswers')) delete copy.acceptedAnswers;
+          if (msg.includes('difficulty')) delete copy.difficulty;
+          if (msg.includes('extremeclues')) delete copy.extremeclues;
+          if (msg.includes('optionexplanations')) delete copy.optionexplanations;
+          if (msg.includes('explanationimages')) delete copy.explanationimages;
+          if (msg.includes('acceptedanswers')) delete copy.acceptedanswers;
           return copy;
         });
-        await supabaseClient.from('questions').upsert(sanitized);
-      } else if (qErr) {
+        const retryRes = await supabaseClient.from('questions').upsert(sanitized);
+        qErr = retryRes.error;
+      }
+      if (qErr) {
         throw qErr;
       }
     }
@@ -1457,6 +1498,56 @@ async function syncSupabaseToLocal() {
   closeSupabaseModal();
 }
 
+function formatQuestionForSupabase(q) {
+  const optExp = (Array.isArray(q.optionExplanations) && q.optionExplanations.length > 0)
+    ? q.optionExplanations
+    : (Array.isArray(q.optionexplanations) ? q.optionexplanations : []);
+
+  const expImgs = (Array.isArray(q.explanationImages) && q.explanationImages.length > 0)
+    ? q.explanationImages
+    : (Array.isArray(q.explanationimages) ? q.explanationimages : []);
+
+  const accAns = (Array.isArray(q.acceptedAnswers) && q.acceptedAnswers.length > 0)
+    ? q.acceptedAnswers
+    : (Array.isArray(q.acceptedanswers)
+      ? q.acceptedanswers
+      : (q.format === 'ouverte' && Array.isArray(q.options) ? q.options : []));
+
+  const diff = q.difficulty || (q.stats && q.stats.difficulty) || 'facile';
+  const extClues = q.extremeClues || q.extremeclues || (q.stats && q.stats.extremeClues) || '';
+
+  // Stats JSONB supporte nativement difficulty et extremeClues sans altération DDL de la table distante
+  const stats = {
+    ...(q.stats || {}),
+    difficulty: diff,
+    extremeClues: extClues
+  };
+
+  return {
+    id: q.id,
+    created_at: q.created_at || new Date().toISOString(),
+    format: q.format || 'qcm',
+    organ: q.organ || '',
+    category: q.category || '',
+    entity: q.entity || '',
+    question: q.question || '',
+    context: q.context || '',
+    options: Array.isArray(q.options) ? q.options : [],
+    correct: Array.isArray(q.correct) ? q.correct : (typeof q.correct === 'number' ? [q.correct] : []),
+    explanation: q.explanation || '',
+    trap: q.trap || '',
+    tags: Array.isArray(q.tags) ? q.tags : [],
+    images: Array.isArray(q.images) ? q.images : [],
+    mastered: Boolean(q.mastered),
+    flagged: Boolean(q.flagged),
+    stats,
+    // Colonnes PostgreSQL en minuscules conformes à PostgREST
+    optionexplanations: optExp,
+    explanationimages: expImgs,
+    acceptedanswers: accAns
+  };
+}
+
 async function dbUpsertQuestion(q) {
   // Protection absolue : sur l'environnement local de test, on n'écrit JAMAIS dans la base Supabase en ligne !
   if (isLocalEnvironment()) {
@@ -1474,29 +1565,26 @@ async function dbUpsertQuestion(q) {
     return { error: { message: "Votre compte est en mode Lecteur. Seuls les Créateurs peuvent publier dans la banque collective en ligne." } };
   }
   try {
-    const payload = { ...q };
+    const payload = formatQuestionForSupabase(q);
     let res = await supabaseClient.from('questions').upsert(payload);
     
-    // En cas de colonnes non encore créées sur la table Supabase distante (rétrocompatibilité schéma)
+    // En cas de colonnes manquantes dans un schéma distant plus ancien
     if (res.error && (
       res.error.code === 'PGRST204' ||
       (res.error.message && (
         res.error.message.toLowerCase().includes('column') ||
-        res.error.message.toLowerCase().includes('schema cache') ||
-        res.error.message.includes('difficulty') ||
-        res.error.message.includes('extremeClues') ||
-        res.error.message.includes('optionExplanations') ||
-        res.error.message.includes('explanationImages') ||
-        res.error.message.includes('acceptedAnswers')
+        res.error.message.toLowerCase().includes('schema cache')
       ))
     )) {
-      console.warn("Avertissement colonne Supabase manquante, repli sur schéma de base...", res.error.message);
+      console.warn("Avertissement colonne Supabase manquante, repli ciblé...", res.error.message);
       const fallback = { ...payload };
-      delete fallback.difficulty;
-      delete fallback.extremeClues;
-      delete fallback.optionExplanations;
-      delete fallback.explanationImages;
-      delete fallback.acceptedAnswers;
+      const msg = (res.error.message || '').toLowerCase();
+      // On ne retire QUE la colonne précisément identifiée comme manquante par PostgreSQL
+      if (msg.includes('difficulty')) delete fallback.difficulty;
+      if (msg.includes('extremeclues')) delete fallback.extremeclues;
+      if (msg.includes('explanationimages')) delete fallback.explanationimages;
+      if (msg.includes('acceptedanswers')) delete fallback.acceptedanswers;
+      if (msg.includes('optionexplanations')) delete fallback.optionexplanations;
       res = await supabaseClient.from('questions').upsert(fallback);
     }
 
@@ -1615,9 +1703,14 @@ function initApp() {
   state.questions.forEach(q => {
     if (typeof q.mastered === 'undefined') q.mastered = false;
     if (!q.stats) q.stats = { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 };
-    if (!q.explanationImages) q.explanationImages = [];
+    if (!q.explanationImages) q.explanationImages = q.explanationimages || [];
     if (!q.images) q.images = [];
-    if (!q.acceptedAnswers) q.acceptedAnswers = (q.format === 'ouverte' ? (q.options || []) : []);
+    if (!q.acceptedAnswers) q.acceptedAnswers = q.acceptedanswers || (q.format === 'ouverte' ? (q.options || []) : []);
+    const optExp = (Array.isArray(q.optionExplanations) && q.optionExplanations.length > 0)
+      ? q.optionExplanations
+      : (Array.isArray(q.optionexplanations) ? q.optionexplanations : []);
+    q.optionExplanations = optExp;
+    q.optionexplanations = optExp;
   });
 
   // Restaurer immédiatement la progression locale des révisions (lastReviewed, nextReviewDate)
@@ -3142,11 +3235,15 @@ function startHierarchySession(level, organ, category, entity) {
 // --- SESSIONS DE QUIZ SIMPLE ---
 function shuffleQuestionOptions(q) {
   // Copie profonde pour ne JAMAIS muter la question originale dans state.questions
+  const optExp = (Array.isArray(q.optionExplanations) && q.optionExplanations.length > 0)
+    ? q.optionExplanations
+    : (Array.isArray(q.optionexplanations) ? q.optionexplanations : []);
+
   const sessionQ = {
     ...q,
     options: [...(q.options || [])],
     correct: Array.isArray(q.correct) ? [...q.correct] : [q.correct],
-    optionExplanations: q.optionExplanations ? [...q.optionExplanations] : []
+    optionExplanations: [...optExp]
   };
 
   // Ne pas mélanger le format 'piege' (Vrai / Faux) ni le format 'ouverte' (Question ouverte sans choix)
@@ -3559,7 +3656,10 @@ function evaluateSessionAnswer(selectedIndices) {
 
     // Révélation de l'explication spécifique à cet item
     const expDiv = document.getElementById('opt-exp-' + idx);
-    const itemExplanation = (q.optionExplanations && q.optionExplanations[idx]) ? q.optionExplanations[idx].trim() : '';
+    const exps = (Array.isArray(q.optionExplanations) && q.optionExplanations.length > 0)
+      ? q.optionExplanations
+      : (Array.isArray(q.optionexplanations) ? q.optionexplanations : []);
+    const itemExplanation = (exps && exps[idx]) ? exps[idx].trim() : '';
     if (expDiv && itemExplanation) {
       expDiv.innerHTML = `
         <i data-lucide="lightbulb" class="w-4 h-4 text-amber-400 shrink-0 mt-0.5"></i>
@@ -4067,7 +4167,7 @@ function renderEditorOptions() {
         <label class="flex items-center cursor-pointer" title="${isQCM ? 'Cocher si cette réponse est vraie' : 'Sélectionner si cette réponse est la seule vraie'}">
           <input type="${isQCM ? 'checkbox' : 'radio'}" name="editor_choice_indicator" ${opt.correct ? 'checked' : ''} onchange="handleEditorOptionCorrectChange(${idx}, this.checked)" class="text-teal-500 focus:ring-teal-500 w-4 h-4 rounded cursor-pointer">
         </label>
-        <input type="text" value="${escapeHtml(opt.text || '')}" oninput="updateEditorOptionText(${idx}, this.value)" placeholder="Proposition ${letter} *" class="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-medium">
+        <input type="text" id="form-opt-text-${idx}" data-idx="${idx}" value="${escapeHtml(opt.text || '')}" oninput="updateEditorOptionText(${idx}, this.value)" placeholder="Proposition ${letter} *" class="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-medium">
         ${canDelete ? `
           <button type="button" onclick="removeEditorOption(${idx})" title="Supprimer la proposition ${letter}" class="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800/80 transition">
             <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
@@ -4076,7 +4176,7 @@ function renderEditorOptions() {
       </div>
       <div class="flex items-center space-x-2 pl-8">
         <i data-lucide="lightbulb" class="w-3.5 h-3.5 text-amber-400/80 shrink-0"></i>
-        <input type="text" value="${escapeHtml(opt.explanation || '')}" oninput="updateEditorOptionExplanation(${idx}, this.value)" placeholder="Justification / commentaire pour l'item ${letter} (optionnel)..." class="flex-1 px-2.5 py-1 rounded-lg bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-300 placeholder-slate-500 focus:outline-none focus:border-amber-500/50">
+        <input type="text" id="form-opt-exp-${idx}" data-idx="${idx}" value="${escapeHtml(opt.explanation || '')}" oninput="updateEditorOptionExplanation(${idx}, this.value)" placeholder="Justification / commentaire pour l'item ${letter} (optionnel)..." class="flex-1 px-2.5 py-1 rounded-lg bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-300 placeholder-slate-500 focus:outline-none focus:border-amber-500/50">
       </div>
     `;
 
@@ -4551,11 +4651,14 @@ async function handleSaveQuestionForm(e) {
     correct = [0];
     optionExplanations = [];
   } else {
-    (state.editorQuestionOptions || []).forEach(opt => {
-      const val = (opt.text || '').trim();
+    (state.editorQuestionOptions || []).forEach((opt, idx) => {
+      const textInput = document.getElementById(`form-opt-text-${idx}`);
+      const expInput = document.getElementById(`form-opt-exp-${idx}`);
+      const val = (textInput ? textInput.value : (opt.text || '')).trim();
+      const exp = (expInput ? expInput.value : (opt.explanation || '')).trim();
       if (val) {
         options.push(val);
-        optionExplanations.push((opt.explanation || '').trim());
+        optionExplanations.push(exp);
         if (opt.correct) correct.push(options.length - 1);
       }
     });
@@ -4732,7 +4835,9 @@ function editQuestion(id) {
     onFormatChange();
   } else {
     const correctIndices = new Set(Array.isArray(q.correct) ? q.correct : [q.correct]);
-    const exps = Array.isArray(q.optionExplanations) ? q.optionExplanations : [];
+    const exps = (Array.isArray(q.optionExplanations) && q.optionExplanations.length > 0)
+      ? q.optionExplanations
+      : (Array.isArray(q.optionexplanations) ? q.optionexplanations : []);
 
     state.editorQuestionOptions = (q.options || []).map((optText, idx) => ({
       text: optText || '',
