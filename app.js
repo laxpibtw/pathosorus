@@ -4669,10 +4669,18 @@ function renderHierarchySelector() {
           <span>Choisissez l'Organe :</span>
         </span>
         ${state.playHierarchy.selectedOrgan ? `
-          <button onclick="startHierarchySession('organ', '${escapeJsString(state.playHierarchy.selectedOrgan)}')" class="text-xs font-bold text-teal-400 hover:text-teal-300 flex items-center space-x-1 bg-teal-500/10 px-2.5 py-1 rounded-lg border border-teal-500/20 transition">
-            <i data-lucide="play" class="w-3.5 h-3.5"></i>
-            <span>Tester tout "${escapeHtml(state.playHierarchy.selectedOrgan)}" (${tree[state.playHierarchy.selectedOrgan].count}Q actives)</span>
-          </button>
+          <div class="flex items-center space-x-2">
+            ${isCreator() ? `
+              <button type="button" onclick="renameOrganPrompt('${escapeJsString(state.playHierarchy.selectedOrgan)}')" class="text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center space-x-1 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20 transition shadow-sm" title="Renommer ou fusionner cet organe sur tous les QCM et DP">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                <span>Renommer</span>
+              </button>
+            ` : ''}
+            <button onclick="startHierarchySession('organ', '${escapeJsString(state.playHierarchy.selectedOrgan)}')" class="text-xs font-bold text-teal-400 hover:text-teal-300 flex items-center space-x-1 bg-teal-500/10 px-2.5 py-1 rounded-lg border border-teal-500/20 transition">
+              <i data-lucide="play" class="w-3.5 h-3.5"></i>
+              <span>Tester tout "${escapeHtml(state.playHierarchy.selectedOrgan)}" (${tree[state.playHierarchy.selectedOrgan].count}Q actives)</span>
+            </button>
+          </div>
         ` : ''}
       </div>
       <div class="flex flex-wrap gap-2">
@@ -4707,10 +4715,18 @@ function renderHierarchySelector() {
             <span>Sous-organe / Catégorie dans <em>${escapeHtml(state.playHierarchy.selectedOrgan)}</em> :</span>
           </span>
           ${state.playHierarchy.selectedCategory ? `
-            <button onclick="startHierarchySession('category', '${escapeJsString(state.playHierarchy.selectedOrgan)}', '${escapeJsString(state.playHierarchy.selectedCategory)}')" class="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center space-x-1.5 bg-sky-500/10 px-3 py-1.5 rounded-lg border border-sky-500/20 transition shadow-sm">
-              <i data-lucide="play" class="w-3.5 h-3.5"></i>
-              <span>Tester "${escapeHtml(state.playHierarchy.selectedCategory)}" (${orgObj.categories[state.playHierarchy.selectedCategory].count}Q)</span>
-            </button>
+            <div class="flex items-center space-x-2">
+              ${isCreator() ? `
+                <button type="button" onclick="renameCategoryPrompt('${escapeJsString(state.playHierarchy.selectedOrgan)}', '${escapeJsString(state.playHierarchy.selectedCategory)}')" class="text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center space-x-1 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20 transition shadow-sm" title="Renommer cette catégorie">
+                  <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                  <span>Renommer</span>
+                </button>
+              ` : ''}
+              <button onclick="startHierarchySession('category', '${escapeJsString(state.playHierarchy.selectedOrgan)}', '${escapeJsString(state.playHierarchy.selectedCategory)}')" class="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center space-x-1.5 bg-sky-500/10 px-3 py-1.5 rounded-lg border border-sky-500/20 transition shadow-sm">
+                <i data-lucide="play" class="w-3.5 h-3.5"></i>
+                <span>Tester "${escapeHtml(state.playHierarchy.selectedCategory)}" (${orgObj.categories[state.playHierarchy.selectedCategory].count}Q)</span>
+              </button>
+            </div>
           ` : ''}
         </div>
         <div class="flex flex-wrap gap-2">
@@ -7877,6 +7893,431 @@ function createNewGlobalTag(tagName) {
 }
 
 // =========================================================================
+// --- MODIFICATION & FUSION GLOBALE : ORGANES, CATÉGORIES ET LÉSIONS ---
+// =========================================================================
+async function renameOrgan(oldOrgan, newOrgan) {
+  if (!isCreator()) {
+    alert("Action réservée aux comptes Créateurs.");
+    return false;
+  }
+  const cleanOld = (oldOrgan || '').trim();
+  const cleanNew = (newOrgan || '').trim();
+  if (!cleanOld || !cleanNew) {
+    alert("Les noms d'organes ne peuvent pas être vides.");
+    return false;
+  }
+  if (cleanOld.toLowerCase() === cleanNew.toLowerCase() && cleanOld === cleanNew) {
+    return false;
+  }
+
+  // Questions et cas affectés
+  const affectedQuestions = (state.questions || []).filter(q => (q.organ || '').trim().toLowerCase() === cleanOld.toLowerCase());
+  const affectedCases = (state.cases || []).filter(c => (c.organ || '').trim().toLowerCase() === cleanOld.toLowerCase());
+
+  if (affectedQuestions.length === 0 && affectedCases.length === 0) {
+    alert(`Aucune question ni aucun cas trouvé pour l'organe "${cleanOld}".`);
+    return false;
+  }
+
+  // Détecter si on fusionne avec un organe existant
+  const otherExisting = (state.questions || []).some(q => (q.organ || '').trim().toLowerCase() === cleanNew.toLowerCase()) ||
+                        (state.cases || []).some(c => (c.organ || '').trim().toLowerCase() === cleanNew.toLowerCase());
+
+  const confirmMsg = `Renommer l'organe "${cleanOld}" en "${cleanNew}" ?\n\n` +
+    `• ${affectedQuestions.length} question(s) QCM seront mises à jour\n` +
+    `• ${affectedCases.length} Dossier(s) Progressif(s) seront mis à jour\n` +
+    (otherExisting ? `\n⚠️ L'organe "${cleanNew}" existe déjà : tous les QCM et DP seront fusionnés sous cet organe !\n` : '') +
+    `\nCette modification sera sauvegardée et synchronisée pour toute l'équipe.`;
+
+  if (!confirm(confirmMsg)) return false;
+
+  // 1. Mettre à jour les questions en mémoire et localement
+  affectedQuestions.forEach(q => {
+    q.organ = cleanNew;
+  });
+  saveQuestions();
+
+  // 2. Mettre à jour les DP en mémoire et localement
+  affectedCases.forEach(c => {
+    c.organ = cleanNew;
+  });
+  saveCases();
+
+  // 3. Mettre à jour les Fiches OMS (lesionNotes)
+  if (state.lesionNotes) {
+    const updatedNotes = {};
+    const notesToDeleteFromCloud = [];
+    const notesToUpsertToCloud = [];
+
+    Object.keys(state.lesionNotes).forEach(k => {
+      const note = state.lesionNotes[k];
+      if (note && (note.organ || '').trim().toLowerCase() === cleanOld.toLowerCase()) {
+        const newKey = `${cleanNew}::${note.category || 'Général'}::${note.entity || 'Lésion non spécifiée'}`;
+        const updatedNote = { ...note, organ: cleanNew, key: newKey };
+        updatedNotes[newKey] = updatedNote;
+        notesToDeleteFromCloud.push(k);
+        notesToUpsertToCloud.push(updatedNote);
+      } else {
+        updatedNotes[k] = note;
+      }
+    });
+    state.lesionNotes = updatedNotes;
+    localStorage.setItem(STORAGE_KEY_LESION_NOTES, JSON.stringify(state.lesionNotes));
+
+    if (supabaseClient && state.currentUser && !isLocalEnvironment()) {
+      for (const oldKey of notesToDeleteFromCloud) {
+        try { await supabaseClient.from('lesion_notes').delete().eq('key', oldKey); } catch(e){}
+      }
+      for (const n of notesToUpsertToCloud) {
+        try {
+          await supabaseClient.from('lesion_notes').upsert({
+            key: n.key,
+            organ: n.organ,
+            category: n.category,
+            entity: n.entity,
+            content: n.content,
+            updated_at: new Date().toISOString(),
+            author_name: n.authorName || 'Équipe',
+            author_email: n.authorEmail || ''
+          });
+        } catch(e){}
+      }
+    }
+  }
+
+  // 4. Mettre à jour les trophées personnalisés ciblant cet organe
+  if (state.customBadges) {
+    let badgesChanged = false;
+    state.customBadges.forEach(b => {
+      if ((b.targetOrgan || '').trim().toLowerCase() === cleanOld.toLowerCase()) {
+        b.targetOrgan = cleanNew;
+        badgesChanged = true;
+        if (supabaseClient && state.currentUser && !isLocalEnvironment()) {
+          dbUpsertCustomBadge(b);
+        }
+      }
+    });
+    if (badgesChanged) {
+      localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+    }
+  }
+
+  // 5. Synchronisation Supabase pour les questions et DP
+  if (supabaseClient && state.currentUser && !isLocalEnvironment()) {
+    try {
+      const qPayloads = affectedQuestions.map(q => formatQuestionForSupabase(q));
+      if (qPayloads.length > 0) {
+        const res = await supabaseClient.from('questions').upsert(qPayloads);
+        if (res && res.error) {
+          console.warn("Repli unitaire pour mise à jour questions:", res.error);
+          for (const q of affectedQuestions) {
+            await dbUpsertQuestion(q);
+          }
+        }
+      }
+      for (const c of affectedCases) {
+        await dbUpsertCase(c);
+      }
+      saveStats();
+    } catch(err) {
+      console.warn("Avertissement synchronisation distante renommage organe:", err);
+    }
+  }
+
+  // 6. Mettre à jour les sélections actives
+  if (state.bankSelectedOrgan && state.bankSelectedOrgan.toLowerCase() === cleanOld.toLowerCase()) {
+    state.bankSelectedOrgan = cleanNew;
+  }
+  if (state.playHierarchy && state.playHierarchy.selectedOrgan && state.playHierarchy.selectedOrgan.toLowerCase() === cleanOld.toLowerCase()) {
+    state.playHierarchy.selectedOrgan = cleanNew;
+  }
+
+  // 7. Rafraîchir les interfaces
+  renderBank();
+  renderHierarchySelector();
+  renderDPCardsOnPlay();
+  renderTrophiesView();
+  updateTopBar();
+
+  showRewardToast(`Organe "${cleanOld}" renommé en "${cleanNew}" (${affectedQuestions.length} QCM mis à jour) !`, 'check-circle');
+  return true;
+}
+window.renameOrgan = renameOrgan;
+
+function renameOrganPrompt(currentOrgan) {
+  if (isReader()) {
+    alert("Action réservée aux comptes Créateurs.");
+    return;
+  }
+  const newName = prompt(`Renommer l'organe "${currentOrgan}" sur TOUTES les questions et cas :\n\n(Astuce : vous pouvez saisir le nom d'un organe existant pour les fusionner)`, currentOrgan);
+  if (newName === null) return;
+  const trimmed = newName.trim();
+  if (!trimmed) {
+    alert("Le nom de l'organe ne peut pas être vide.");
+    return;
+  }
+  renameOrgan(currentOrgan, trimmed);
+}
+window.renameOrganPrompt = renameOrganPrompt;
+
+async function renameCategory(organ, oldCat, newCat) {
+  if (!isCreator()) {
+    alert("Action réservée aux comptes Créateurs.");
+    return false;
+  }
+  const cleanOrgan = (organ || '').trim();
+  const cleanOld = (oldCat || '').trim();
+  const cleanNew = (newCat || '').trim();
+  if (!cleanOld || !cleanNew) {
+    alert("Les noms de catégories ne peuvent pas être vides.");
+    return false;
+  }
+  if (cleanOld.toLowerCase() === cleanNew.toLowerCase() && cleanOld === cleanNew) {
+    return false;
+  }
+
+  const affectedQuestions = (state.questions || []).filter(q => 
+    (!cleanOrgan || (q.organ || '').trim().toLowerCase() === cleanOrgan.toLowerCase()) &&
+    (q.category || '').trim().toLowerCase() === cleanOld.toLowerCase()
+  );
+  const affectedCases = (state.cases || []).filter(c => 
+    (!cleanOrgan || (c.organ || '').trim().toLowerCase() === cleanOrgan.toLowerCase()) &&
+    (c.category || '').trim().toLowerCase() === cleanOld.toLowerCase()
+  );
+
+  if (affectedQuestions.length === 0 && affectedCases.length === 0) {
+    alert(`Aucune question ni aucun cas trouvé pour la catégorie "${cleanOld}".`);
+    return false;
+  }
+
+  const confirmMsg = `Renommer la catégorie "${cleanOld}" en "${cleanNew}"${cleanOrgan ? ` dans "${cleanOrgan}"` : ''} ?\n\n` +
+    `• ${affectedQuestions.length} question(s) QCM seront mises à jour\n` +
+    `• ${affectedCases.length} Dossier(s) Progressif(s) seront mis à jour`;
+
+  if (!confirm(confirmMsg)) return false;
+
+  affectedQuestions.forEach(q => { q.category = cleanNew; });
+  saveQuestions();
+
+  affectedCases.forEach(c => { c.category = cleanNew; });
+  saveCases();
+
+  if (state.lesionNotes) {
+    const updatedNotes = {};
+    const notesToDeleteFromCloud = [];
+    const notesToUpsertToCloud = [];
+
+    Object.keys(state.lesionNotes).forEach(k => {
+      const note = state.lesionNotes[k];
+      if (note && (!cleanOrgan || (note.organ || '').trim().toLowerCase() === cleanOrgan.toLowerCase()) &&
+          (note.category || '').trim().toLowerCase() === cleanOld.toLowerCase()) {
+        const newKey = `${note.organ || 'Autre'}::${cleanNew}::${note.entity || 'Lésion non spécifiée'}`;
+        const updatedNote = { ...note, category: cleanNew, key: newKey };
+        updatedNotes[newKey] = updatedNote;
+        notesToDeleteFromCloud.push(k);
+        notesToUpsertToCloud.push(updatedNote);
+      } else {
+        updatedNotes[k] = note;
+      }
+    });
+    state.lesionNotes = updatedNotes;
+    localStorage.setItem(STORAGE_KEY_LESION_NOTES, JSON.stringify(state.lesionNotes));
+
+    if (supabaseClient && state.currentUser && !isLocalEnvironment()) {
+      for (const oldKey of notesToDeleteFromCloud) {
+        try { await supabaseClient.from('lesion_notes').delete().eq('key', oldKey); } catch(e){}
+      }
+      for (const n of notesToUpsertToCloud) {
+        try {
+          await supabaseClient.from('lesion_notes').upsert({
+            key: n.key,
+            organ: n.organ,
+            category: n.category,
+            entity: n.entity,
+            content: n.content,
+            updated_at: new Date().toISOString(),
+            author_name: n.authorName || 'Équipe',
+            author_email: n.authorEmail || ''
+          });
+        } catch(e){}
+      }
+    }
+  }
+
+  if (supabaseClient && state.currentUser && !isLocalEnvironment()) {
+    try {
+      const qPayloads = affectedQuestions.map(q => formatQuestionForSupabase(q));
+      if (qPayloads.length > 0) {
+        await supabaseClient.from('questions').upsert(qPayloads);
+      }
+      for (const c of affectedCases) await dbUpsertCase(c);
+      saveStats();
+    } catch(err) {
+      console.warn("Erreur sync Supabase renommage catégorie:", err);
+    }
+  }
+
+  if (state.bankSelectedCategory && state.bankSelectedCategory.toLowerCase() === cleanOld.toLowerCase()) {
+    state.bankSelectedCategory = cleanNew;
+  }
+  if (state.playHierarchy && state.playHierarchy.selectedCategory && state.playHierarchy.selectedCategory.toLowerCase() === cleanOld.toLowerCase()) {
+    state.playHierarchy.selectedCategory = cleanNew;
+  }
+
+  renderBank();
+  renderHierarchySelector();
+  renderDPCardsOnPlay();
+  updateTopBar();
+
+  showRewardToast(`Catégorie "${cleanOld}" renommée en "${cleanNew}" (${affectedQuestions.length} QCM mis à jour) !`, 'check-circle');
+  return true;
+}
+window.renameCategory = renameCategory;
+
+function renameCategoryPrompt(organ, currentCat) {
+  if (isReader()) {
+    alert("Action réservée aux comptes Créateurs.");
+    return;
+  }
+  const newName = prompt(`Renommer la catégorie "${currentCat}"${organ ? ` dans "${organ}"` : ''} :\n\n(Astuce : vous pouvez saisir une catégorie existante pour les fusionner)`, currentCat);
+  if (newName === null) return;
+  const trimmed = newName.trim();
+  if (!trimmed) {
+    alert("Le nom de la catégorie ne peut pas être vide.");
+    return;
+  }
+  renameCategory(organ, currentCat, trimmed);
+}
+window.renameCategoryPrompt = renameCategoryPrompt;
+
+async function renameLesion(organ, category, oldEntity, newEntity) {
+  if (!isCreator()) {
+    alert("Action réservée aux comptes Créateurs.");
+    return false;
+  }
+  const cleanOrgan = (organ || '').trim();
+  const cleanCat = (category || '').trim();
+  const cleanOld = (oldEntity || '').trim();
+  const cleanNew = (newEntity || '').trim();
+  if (!cleanOld || !cleanNew) {
+    alert("Les noms de lésions ne peuvent pas être vides.");
+    return false;
+  }
+  if (cleanOld.toLowerCase() === cleanNew.toLowerCase() && cleanOld === cleanNew) {
+    return false;
+  }
+
+  const affectedQuestions = (state.questions || []).filter(q => 
+    (!cleanOrgan || (q.organ || '').trim().toLowerCase() === cleanOrgan.toLowerCase()) &&
+    (!cleanCat || (q.category || '').trim().toLowerCase() === cleanCat.toLowerCase()) &&
+    (q.entity || '').trim().toLowerCase() === cleanOld.toLowerCase()
+  );
+  const affectedCases = (state.cases || []).filter(c => 
+    (!cleanOrgan || (c.organ || '').trim().toLowerCase() === cleanOrgan.toLowerCase()) &&
+    (!cleanCat || (c.category || '').trim().toLowerCase() === cleanCat.toLowerCase()) &&
+    (c.entity || '').trim().toLowerCase() === cleanOld.toLowerCase()
+  );
+
+  if (affectedQuestions.length === 0 && affectedCases.length === 0) {
+    alert(`Aucune question ni aucun cas trouvé pour la lésion "${cleanOld}".`);
+    return false;
+  }
+
+  const confirmMsg = `Renommer la lésion "${cleanOld}" en "${cleanNew}" ?\n\n` +
+    `• ${affectedQuestions.length} question(s) QCM seront mises à jour\n` +
+    `• ${affectedCases.length} Dossier(s) Progressif(s) seront mis à jour`;
+
+  if (!confirm(confirmMsg)) return false;
+
+  affectedQuestions.forEach(q => { q.entity = cleanNew; });
+  saveQuestions();
+
+  affectedCases.forEach(c => { c.entity = cleanNew; });
+  saveCases();
+
+  if (state.lesionNotes) {
+    const updatedNotes = {};
+    const notesToDeleteFromCloud = [];
+    const notesToUpsertToCloud = [];
+
+    Object.keys(state.lesionNotes).forEach(k => {
+      const note = state.lesionNotes[k];
+      if (note && (!cleanOrgan || (note.organ || '').trim().toLowerCase() === cleanOrgan.toLowerCase()) &&
+          (!cleanCat || (note.category || '').trim().toLowerCase() === cleanCat.toLowerCase()) &&
+          (note.entity || '').trim().toLowerCase() === cleanOld.toLowerCase()) {
+        const newKey = `${note.organ || 'Autre'}::${note.category || 'Général'}::${cleanNew}`;
+        const updatedNote = { ...note, entity: cleanNew, key: newKey };
+        updatedNotes[newKey] = updatedNote;
+        notesToDeleteFromCloud.push(k);
+        notesToUpsertToCloud.push(updatedNote);
+      } else {
+        updatedNotes[k] = note;
+      }
+    });
+    state.lesionNotes = updatedNotes;
+    localStorage.setItem(STORAGE_KEY_LESION_NOTES, JSON.stringify(state.lesionNotes));
+
+    if (supabaseClient && state.currentUser && !isLocalEnvironment()) {
+      for (const oldKey of notesToDeleteFromCloud) {
+        try { await supabaseClient.from('lesion_notes').delete().eq('key', oldKey); } catch(e){}
+      }
+      for (const n of notesToUpsertToCloud) {
+        try {
+          await supabaseClient.from('lesion_notes').upsert({
+            key: n.key,
+            organ: n.organ,
+            category: n.category,
+            entity: n.entity,
+            content: n.content,
+            updated_at: new Date().toISOString(),
+            author_name: n.authorName || 'Équipe',
+            author_email: n.authorEmail || ''
+          });
+        } catch(e){}
+      }
+    }
+  }
+
+  if (supabaseClient && state.currentUser && !isLocalEnvironment()) {
+    try {
+      const qPayloads = affectedQuestions.map(q => formatQuestionForSupabase(q));
+      if (qPayloads.length > 0) {
+        await supabaseClient.from('questions').upsert(qPayloads);
+      }
+      for (const c of affectedCases) await dbUpsertCase(c);
+      saveStats();
+    } catch(err) {
+      console.warn("Erreur sync Supabase renommage lésion:", err);
+    }
+  }
+
+  renderBank();
+  renderHierarchySelector();
+  renderDPCardsOnPlay();
+  updateTopBar();
+
+  showRewardToast(`Lésion "${cleanOld}" renommée en "${cleanNew}" (${affectedQuestions.length} QCM mis à jour) !`, 'check-circle');
+  return true;
+}
+window.renameLesion = renameLesion;
+
+function renameLesionPrompt(organ, category, currentEntity) {
+  if (isReader()) {
+    alert("Action réservée aux comptes Créateurs.");
+    return;
+  }
+  const newName = prompt(`Renommer la lésion "${currentEntity}" :\n\n(Astuce : vous pouvez saisir une lésion existante pour les fusionner)`, currentEntity);
+  if (newName === null) return;
+  const trimmed = newName.trim();
+  if (!trimmed) {
+    alert("Le nom de la lésion ne peut pas être vide.");
+    return;
+  }
+  renameLesion(organ, category, currentEntity, trimmed);
+}
+window.renameLesionPrompt = renameLesionPrompt;
+
+// =========================================================================
 // --- EXPLORATEUR DE LA BANQUE PAR ONGLETS (ORGANE), SOUS-ONGLETS (CATÉGORIE) ET LÉSIONS ---
 // =========================================================================
 function selectBankOrgan(organ) {
@@ -8451,10 +8892,18 @@ function renderBank() {
             <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">Onglet Organe :</span>
           </div>
           ${state.bankSelectedOrgan !== 'all' ? `
-            <button onclick="startHierarchySession('organ', '${escapeJsString(state.bankSelectedOrgan)}')" class="px-3 py-1 rounded-xl bg-teal-600/10 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold transition flex items-center space-x-1.5 shadow-sm">
-              <i data-lucide="play" class="w-3.5 h-3.5"></i>
-              <span>⚡ Taffer tout "${escapeHtml(state.bankSelectedOrgan)}"</span>
-            </button>
+            <div class="flex items-center space-x-2">
+              ${isCreator() ? `
+                <button onclick="renameOrganPrompt('${escapeJsString(state.bankSelectedOrgan)}')" class="px-2.5 py-1 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition flex items-center space-x-1.5 shadow-sm" title="Renommer ou fusionner cet organe sur tous les QCM et DP">
+                  <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                  <span>Renommer "${escapeHtml(state.bankSelectedOrgan)}"</span>
+                </button>
+              ` : ''}
+              <button onclick="startHierarchySession('organ', '${escapeJsString(state.bankSelectedOrgan)}')" class="px-3 py-1 rounded-xl bg-teal-600/10 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold transition flex items-center space-x-1.5 shadow-sm">
+                <i data-lucide="play" class="w-3.5 h-3.5"></i>
+                <span>⚡ Taffer tout "${escapeHtml(state.bankSelectedOrgan)}"</span>
+              </button>
+            </div>
           ` : ''}
         </div>
         <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
@@ -8528,6 +8977,12 @@ function renderBank() {
             </div>
             <div class="flex items-center space-x-2 self-start sm:self-auto">
               ${curCat !== 'all' ? `
+                ${isCreator() ? `
+                  <button onclick="renameCategoryPrompt('${escapeJsString(state.bankSelectedOrgan)}', '${escapeJsString(curCat)}')" class="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition flex items-center space-x-1 shadow-sm" title="Renommer ou fusionner cette catégorie">
+                    <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                    <span>Renommer "${escapeHtml(curCat)}"</span>
+                  </button>
+                ` : ''}
                 <button onclick="startHierarchySession('category', '${escapeJsString(state.bankSelectedOrgan)}', '${escapeJsString(curCat)}')" class="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-sm shadow-sky-500/20">
                   <i data-lucide="play" class="w-3.5 h-3.5"></i>
                   <span>⚡ Taffer "${escapeHtml(curCat)}" (${activeQInCurSelection || totalQInCurSelection}Q)</span>
@@ -8708,6 +9163,12 @@ function renderBank() {
       </div>
 
       <div class="flex flex-wrap items-center gap-2 shrink-0 self-end sm:self-auto">
+        ${isCreator() ? `
+          <button class="btn-rename-lesion px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center space-x-1 transition shadow-sm" title="Renommer cette lésion sur tous les QCM et DP">
+            <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+            <span>Renommer</span>
+          </button>
+        ` : ''}
         <button class="btn-toggle-lesion-topo px-3 py-1.5 rounded-xl ${
           hasNote 
             ? 'bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' 
@@ -8731,6 +9192,14 @@ function renderBank() {
     `;
 
     header.querySelector('h3').textContent = lesion.entity;
+
+    const renameLesionBtn = header.querySelector('.btn-rename-lesion');
+    if (renameLesionBtn) {
+      renameLesionBtn.onclick = (e) => {
+        e.stopPropagation();
+        renameLesionPrompt(lesion.organ, lesion.category, lesion.entity);
+      };
+    }
 
     const topoBtn = header.querySelector('.btn-toggle-lesion-topo');
     if (topoBtn) {
