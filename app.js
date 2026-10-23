@@ -7,9 +7,9 @@ const STORAGE_KEY_CASES = "pathotrainer_custom_cases_v3";
 const STORAGE_KEY_TAGS = "pathotrainer_custom_tags_v3";
 const STORAGE_KEY_STATS = "pathotrainer_custom_stats_v3";
 const STORAGE_KEY_LESION_NOTES = "pathotrainer_custom_lesion_notes_v1";
-const STORAGE_KEY_STATEMENT_TEMPLATES = "pathotrainer_statement_templates_v1";
+const STORAGE_KEY_STATEMENT_TEMPLATES = "pathotrainer_statement_templates_v2";
 
-const DEFAULT_STATEMENT_TEMPLATES = [
+const OLD_DEFAULT_STATEMENT_TEMPLATES = [
   "Quelles sont les propositions vraies concernant",
   "Quel est le diagnostic le plus probable devant",
   "Parmi les propositions suivantes concernant",
@@ -693,10 +693,11 @@ async function fetchCurrentUserRole() {
     localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
   }
 
-  if (cloudStats.statementTemplates && Array.isArray(cloudStats.statementTemplates) && cloudStats.statementTemplates.length > 0) {
-    const mergedTemplates = Array.from(new Set([...(state.statementTemplates || []), ...cloudStats.statementTemplates]));
+  if (cloudStats.statementTemplates && Array.isArray(cloudStats.statementTemplates)) {
+    const cleanedCloud = cloudStats.statementTemplates.filter(t => typeof t === 'string' && t.trim().length > 0 && !OLD_DEFAULT_STATEMENT_TEMPLATES.includes(t.trim()));
+    const mergedTemplates = Array.from(new Set([...(state.statementTemplates || []), ...cleanedCloud]));
     state.statementTemplates = mergedTemplates;
-    localStorage.setItem(STORAGE_KEY_STATEMENT_TEMPLATES, JSON.stringify(mergedTemplates));
+    saveStatementTemplates();
     renderStatementTemplates();
   }
 
@@ -2376,6 +2377,7 @@ function initApp() {
   if (storedStats) state.stats = Object.assign(state.stats, JSON.parse(storedStats));
 
   state.statementTemplates = getSavedStatementTemplates();
+  saveStatementTemplates();
   renderStatementTemplates();
 
   updateTopBar();
@@ -6573,23 +6575,25 @@ async function handleSaveQuestionForm(e) {
   switchTab('bank');
 }
 
-// --- MODÈLES DE PHRASES PRÉ-CONSTRUITES D'ÉNONCÉ ---
+// --- MODÈLES DE PHRASES PRÉ-CONSTRUITES D'ÉNONCÉ (GÉNÉRALISTES / TOUS ORGANES) ---
 function getSavedStatementTemplates() {
-  const stored = localStorage.getItem(STORAGE_KEY_STATEMENT_TEMPLATES);
+  const stored = localStorage.getItem(STORAGE_KEY_STATEMENT_TEMPLATES) || localStorage.getItem("pathotrainer_statement_templates_v1");
   if (stored) {
     try {
       const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.filter(t => typeof t === 'string' && t.trim().length > 0 && !OLD_DEFAULT_STATEMENT_TEMPLATES.includes(t.trim()));
+      }
     } catch(e) {}
   }
-  return [...DEFAULT_STATEMENT_TEMPLATES];
+  return [];
 }
 
 function saveStatementTemplates() {
-  localStorage.setItem(STORAGE_KEY_STATEMENT_TEMPLATES, JSON.stringify(state.statementTemplates));
+  localStorage.setItem(STORAGE_KEY_STATEMENT_TEMPLATES, JSON.stringify(state.statementTemplates || []));
   if (state.currentUser) {
     if (!state.stats) state.stats = {};
-    state.stats.statementTemplates = state.statementTemplates;
+    state.stats.statementTemplates = state.statementTemplates || [];
     saveStats();
   }
 }
@@ -6598,8 +6602,22 @@ function renderStatementTemplates() {
   const container = document.getElementById('statement-templates-bar');
   if (!container) return;
 
-  if (!state.statementTemplates || state.statementTemplates.length === 0) {
+  if (!state.statementTemplates) {
     state.statementTemplates = getSavedStatementTemplates();
+  }
+
+  // Nettoyer les anciennes phrases pré-faites si encore présentes en mémoire
+  state.statementTemplates = state.statementTemplates.filter(t => typeof t === 'string' && t.trim().length > 0 && !OLD_DEFAULT_STATEMENT_TEMPLATES.includes(t.trim()));
+
+  if (state.statementTemplates.length === 0) {
+    container.innerHTML = `
+      <div class="text-[11px] text-slate-500 italic py-1 flex items-center space-x-1.5">
+        <i data-lucide="info" class="w-3.5 h-3.5 text-slate-500 shrink-0"></i>
+        <span>Aucune phrase type enregistrée. Cliquez sur <strong>+ Ajouter une phrase type</strong> pour créer vos modèles réutilisables sur tous les organes.</span>
+      </div>
+    `;
+    if (window.lucide) lucide.createIcons();
+    return;
   }
 
   container.innerHTML = state.statementTemplates.map((tmpl, idx) => `
@@ -6608,7 +6626,7 @@ function renderStatementTemplates() {
         <i data-lucide="sparkles" class="w-3 h-3 text-teal-400 shrink-0"></i>
         <span>${escapeHtml(tmpl)}...</span>
       </button>
-      <button type="button" onclick="event.stopPropagation(); deleteStatementTemplate(${idx})" class="ml-1.5 text-slate-500 hover:text-rose-400 transition opacity-0 group-hover:opacity-100 p-0.5 rounded" title="Supprimer ce modèle">
+      <button type="button" onclick="event.stopPropagation(); deleteStatementTemplate(${idx})" class="ml-1.5 text-slate-500 hover:text-rose-400 transition opacity-60 group-hover:opacity-100 p-0.5 rounded" title="Supprimer cette phrase type">
         <i data-lucide="x" class="w-2.5 h-2.5"></i>
       </button>
     </div>
@@ -6630,9 +6648,10 @@ function applyStatementTemplate(idx) {
 
   let finalText = tmpl.trim();
   if (entity) {
-    finalText = `${finalText} ${entity} ?`;
+    const cleanStem = finalText.replace(/\?+$/, '').trim();
+    finalText = `${cleanStem} ${entity} ?`;
   } else {
-    finalText = `${finalText} `;
+    finalText = finalText.endsWith(' ') ? finalText : `${finalText} `;
   }
 
   input.value = finalText;
@@ -6643,7 +6662,7 @@ function applyStatementTemplate(idx) {
 window.applyStatementTemplate = applyStatementTemplate;
 
 function promptAddNewStatementTemplate() {
-  const val = prompt("Saisissez votre nouvelle phrase type d'énoncé :\n\n(ex: 'Quelles sont les propositions vraies concernant', 'Quel profil immunohistochimique permet d'affirmer')");
+  const val = prompt("Saisissez votre nouvelle phrase type d'énoncé (disponible pour tous les organes) :\n\n(ex: 'Quelles sont les propositions exactes concernant', 'Quel est le diagnostic le plus probable devant')");
   if (val === null) return;
   const trimmed = val.trim().replace(/\.\.\.$/, '').trim();
   if (!trimmed) {
@@ -6658,17 +6677,17 @@ function promptAddNewStatementTemplate() {
   state.statementTemplates.push(trimmed);
   saveStatementTemplates();
   renderStatementTemplates();
-  showRewardToast(`Phrase type "${trimmed}" ajoutée !`, 'plus-circle');
+  showRewardToast(`Phrase type enregistrée pour tous les organes !`, 'sparkles');
 }
 window.promptAddNewStatementTemplate = promptAddNewStatementTemplate;
 
 function deleteStatementTemplate(idx) {
-  if (!confirm("Voulez-vous supprimer ce modèle de phrase type ?")) return;
+  if (!confirm("Voulez-vous supprimer cette phrase type ?")) return;
   if (!state.statementTemplates) return;
   state.statementTemplates.splice(idx, 1);
   saveStatementTemplates();
   renderStatementTemplates();
-  showRewardToast("Modèle supprimé.", 'trash-2');
+  showRewardToast("Phrase type supprimée.", 'trash-2');
 }
 window.deleteStatementTemplate = deleteStatementTemplate;
 
