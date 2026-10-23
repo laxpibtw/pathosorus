@@ -2873,8 +2873,10 @@ function getBadgesStatus() {
       }
     }
 
+    const displayName = (state.stats && state.stats.trophyCustomNames && state.stats.trophyCustomNames[b.id]) || b.name;
     results.push({
       ...b,
+      name: displayName,
       status,
       progressPercent,
       progressText,
@@ -2925,12 +2927,15 @@ function getBadgesStatus() {
 
       const progressPercent = Math.min(100, Math.round((completedInOrg / targetCount) * 100));
 
+      const defaultLabel = t.label;
+      const displayName = (state.stats && state.stats.trophyCustomNames && state.stats.trophyCustomNames[badgeId]) || defaultLabel;
+
       results.push({
         id: badgeId,
         category: 'organ',
         organ: org,
         icon: t.pct === 100 ? 'crown' : (t.pct >= 80 ? 'shield-check' : 'folder'),
-        name: t.label,
+        name: displayName,
         description: `Accomplir au moins ${t.pct}% des questions de la rubrique ${org} (${targetCount} Q)`,
         tier: t.tier,
         status,
@@ -2995,8 +3000,10 @@ function getBadgesStatus() {
       }
     }
 
+    const displayName = (state.stats && state.stats.trophyCustomNames && state.stats.trophyCustomNames[b.id]) || b.name;
     results.push({
       ...b,
+      name: displayName,
       isCustom: true,
       organ: b.targetOrgan,
       status,
@@ -3750,6 +3757,11 @@ function renderTrophiesGrid() {
             ${pillarBadge}
             <div class="flex items-center space-x-1.5">
               ${statusBadge}
+              ${isCreator() ? `
+                <button onclick="${b.isCustom ? `openEditTrophyModal('${escapeJsString(b.id)}')` : `renameTrophyPrompt('${escapeJsString(b.id)}')`}" class="p-1 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-slate-800 transition" title="${b.isCustom ? 'Modifier ce trophée' : 'Renommer ce trophée'}">
+                  <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                </button>
+              ` : ''}
               ${(b.isCustom && isCreator()) ? `
                 <button onclick="deleteCustomBadge('${escapeJsString(b.id)}')" class="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition" title="Supprimer ce trophée">
                   <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
@@ -3833,6 +3845,36 @@ function recaptureFirstContestedBadge() {
 }
 
 // --- GESTION DES TROPHÉES PERSONNALISÉS ---
+async function dbUpsertCustomBadge(b) {
+  if (!supabaseClient || !state.currentUser) return;
+  try {
+    await supabaseClient.from('custom_badges').upsert({
+      id: b.id,
+      name: b.name,
+      description: b.description || '',
+      icon: b.icon || '🏆',
+      tier: b.tier || 'gold',
+      xpReward: b.xpReward || 50,
+      conditionType: b.conditionType || 'organ_mastery',
+      targetOrgan: b.targetOrgan || '',
+      targetCount: b.targetCount || 5,
+      created_by: b.created_by || (state.currentUser ? state.currentUser.email : 'Créateur'),
+      created_at: b.created_at || new Date().toISOString()
+    });
+  } catch(e) {
+    console.warn("Avertissement upsert custom_badge Supabase:", e);
+  }
+}
+
+async function dbDeleteCustomBadge(id) {
+  if (!supabaseClient || !state.currentUser) return;
+  try {
+    await supabaseClient.from('custom_badges').delete().eq('id', id);
+  } catch(e) {
+    console.warn("Avertissement delete custom_badge Supabase:", e);
+  }
+}
+
 function openCreateTrophyModal() {
   if (isReader()) {
     alert("La création de trophées est réservée aux comptes Créateurs.");
@@ -3840,6 +3882,21 @@ function openCreateTrophyModal() {
   }
   const modal = document.getElementById('modal-create-trophy');
   if (!modal) return;
+
+  const editIdInput = document.getElementById('trophy-edit-id');
+  if (editIdInput) editIdInput.value = '';
+
+  const form = document.getElementById('form-create-trophy');
+  if (form) form.reset();
+
+  const titleEl = document.getElementById('trophy-modal-title');
+  if (titleEl) titleEl.textContent = "Créer un Trophée Personnalisé";
+
+  const subEl = document.getElementById('trophy-modal-subtitle');
+  if (subEl) subEl.textContent = "Ajoutez un défi d'équipe pour vos co-internes et vous-même";
+
+  const submitText = document.getElementById('trophy-modal-submit-text');
+  if (submitText) submitText.textContent = "Créer le Trophée";
 
   const organSelect = document.getElementById('trophy-input-organ');
   if (organSelect) {
@@ -3855,12 +3912,115 @@ function openCreateTrophyModal() {
 }
 window.openCreateTrophyModal = openCreateTrophyModal;
 
+function openEditTrophyModal(badgeId) {
+  if (isReader()) {
+    alert("La modification de trophées est réservée aux comptes Créateurs.");
+    return;
+  }
+  const badge = (state.customBadges || []).find(b => b.id === badgeId);
+  if (!badge) {
+    renameTrophyPrompt(badgeId);
+    return;
+  }
+
+  const modal = document.getElementById('modal-create-trophy');
+  if (!modal) return;
+
+  const editIdInput = document.getElementById('trophy-edit-id');
+  if (editIdInput) editIdInput.value = badgeId;
+
+  const titleEl = document.getElementById('trophy-modal-title');
+  if (titleEl) titleEl.textContent = "Modifier le Trophée Personnalisé";
+
+  const subEl = document.getElementById('trophy-modal-subtitle');
+  if (subEl) subEl.textContent = "Modifiez le nom et les caractéristiques de ce trophée";
+
+  const submitText = document.getElementById('trophy-modal-submit-text');
+  if (submitText) submitText.textContent = "Enregistrer les modifications";
+
+  const nameEl = document.getElementById('trophy-input-name');
+  if (nameEl) nameEl.value = badge.name || '';
+
+  const descEl = document.getElementById('trophy-input-desc');
+  if (descEl) descEl.value = badge.description || '';
+
+  const iconEl = document.getElementById('trophy-input-icon');
+  if (iconEl) iconEl.value = badge.icon || '🏆';
+
+  const tierEl = document.getElementById('trophy-input-tier');
+  if (tierEl) tierEl.value = badge.tier || 'gold';
+
+  const xpEl = document.getElementById('trophy-input-xp');
+  if (xpEl) xpEl.value = String(badge.xpReward || 50);
+
+  const condEl = document.getElementById('trophy-input-cond-type');
+  if (condEl) condEl.value = badge.conditionType || 'organ_mastery';
+
+  const organSelect = document.getElementById('trophy-input-organ');
+  if (organSelect) {
+    const tree = getHierarchyTree(true);
+    const organs = Object.keys(tree).sort();
+    organSelect.innerHTML = organs.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
+    if (badge.targetOrgan) organSelect.value = badge.targetOrgan;
+  }
+
+  const countEl = document.getElementById('trophy-input-count');
+  if (countEl) countEl.value = badge.targetCount || 5;
+
+  onTrophyConditionTypeChange();
+
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  if (window.lucide) lucide.createIcons();
+}
+window.openEditTrophyModal = openEditTrophyModal;
+
+function renameTrophyPrompt(badgeId) {
+  if (isReader()) {
+    alert("Le renommage de trophées est réservé aux comptes Créateurs.");
+    return;
+  }
+  const allBadges = getBadgesStatus();
+  const badge = allBadges.find(b => b.id === badgeId);
+  if (!badge) return;
+
+  const currentName = badge.name;
+  const newName = prompt(`Modifier le nom du trophée "${currentName}" :`, currentName);
+  if (newName === null) return;
+  const trimmed = newName.trim();
+  if (!trimmed) {
+    alert("Le nom ne peut pas être vide.");
+    return;
+  }
+
+  const customIdx = (state.customBadges || []).findIndex(b => b.id === badgeId);
+  if (customIdx !== -1) {
+    state.customBadges[customIdx].name = trimmed;
+    localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+    if (state.currentUser) {
+      saveStats();
+      dbUpsertCustomBadge(state.customBadges[customIdx]);
+    }
+  } else {
+    if (!state.stats) state.stats = {};
+    if (!state.stats.trophyCustomNames) state.stats.trophyCustomNames = {};
+    state.stats.trophyCustomNames[badgeId] = trimmed;
+    saveStats();
+  }
+
+  renderTrophiesView();
+  showRewardToast(`🏆 Trophée renommé en "${trimmed}" !`, 'award');
+}
+window.renameTrophyPrompt = renameTrophyPrompt;
+
 function closeCreateTrophyModal() {
   const modal = document.getElementById('modal-create-trophy');
   if (modal) {
     modal.classList.add('hidden');
     modal.classList.remove('flex');
   }
+  const editIdInput = document.getElementById('trophy-edit-id');
+  if (editIdInput) editIdInput.value = '';
 }
 window.closeCreateTrophyModal = closeCreateTrophyModal;
 
@@ -3900,6 +4060,7 @@ async function saveCustomBadge(badge) {
   // Sauvegarde dans profiles.stats.customBadges pour synchronisation garantie sur tous les appareils du compte
   if (state.currentUser) {
     saveStats();
+    dbUpsertCustomBadge(badge);
   }
 }
 
@@ -3911,12 +4072,16 @@ async function deleteCustomBadge(badgeId) {
   showRewardToast("Trophée supprimé.", 'trash-2');
   if (state.currentUser) {
     saveStats();
+    dbDeleteCustomBadge(badgeId);
   }
 }
 window.deleteCustomBadge = deleteCustomBadge;
 
 async function handleCreateTrophySubmit(e) {
   e.preventDefault();
+  const editIdInput = document.getElementById('trophy-edit-id');
+  const editId = editIdInput ? editIdInput.value.trim() : '';
+
   const name = document.getElementById('trophy-input-name').value.trim();
   const description = document.getElementById('trophy-input-desc').value.trim();
   const icon = document.getElementById('trophy-input-icon').value || '🏆';
@@ -3929,6 +4094,32 @@ async function handleCreateTrophySubmit(e) {
   if (!name) {
     alert("Veuillez donner un nom au trophée.");
     return;
+  }
+
+  if (editId) {
+    const idx = (state.customBadges || []).findIndex(b => b.id === editId);
+    if (idx !== -1) {
+      state.customBadges[idx] = {
+        ...state.customBadges[idx],
+        name,
+        description,
+        icon,
+        tier,
+        xpReward,
+        conditionType,
+        targetOrgan,
+        targetCount
+      };
+      localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+      if (state.currentUser) {
+        saveStats();
+        dbUpsertCustomBadge(state.customBadges[idx]);
+      }
+      closeCreateTrophyModal();
+      renderTrophiesView();
+      showRewardToast(`🏆 Trophée "${name}" mis à jour avec succès !`, 'award');
+      return;
+    }
   }
 
   const badge = {
@@ -4503,7 +4694,7 @@ function renderHierarchySelector() {
   });
   html += `</div></div>`;
 
-  // Niveau 2
+  // Niveau 2 (Sous-organe / Catégorie - Max 2 Niveaux pour éviter les spoilers de diagnostic)
   if (state.playHierarchy.selectedOrgan) {
     const orgObj = tree[state.playHierarchy.selectedOrgan];
     const categories = Object.keys(orgObj.categories).sort();
@@ -4513,10 +4704,10 @@ function renderHierarchySelector() {
         <div class="flex items-center justify-between">
           <span class="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
             <span class="w-5 h-5 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-mono">2</span>
-            <span>Catégorie dans <em>${escapeHtml(state.playHierarchy.selectedOrgan)}</em> :</span>
+            <span>Sous-organe / Catégorie dans <em>${escapeHtml(state.playHierarchy.selectedOrgan)}</em> :</span>
           </span>
           ${state.playHierarchy.selectedCategory ? `
-            <button onclick="startHierarchySession('category', '${escapeJsString(state.playHierarchy.selectedOrgan)}', '${escapeJsString(state.playHierarchy.selectedCategory)}')" class="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center space-x-1 bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20 transition">
+            <button onclick="startHierarchySession('category', '${escapeJsString(state.playHierarchy.selectedOrgan)}', '${escapeJsString(state.playHierarchy.selectedCategory)}')" class="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center space-x-1.5 bg-sky-500/10 px-3 py-1.5 rounded-lg border border-sky-500/20 transition shadow-sm">
               <i data-lucide="play" class="w-3.5 h-3.5"></i>
               <span>Tester "${escapeHtml(state.playHierarchy.selectedCategory)}" (${orgObj.categories[state.playHierarchy.selectedCategory].count}Q)</span>
             </button>
@@ -4533,44 +4724,14 @@ function renderHierarchySelector() {
           isSelected 
             ? 'bg-sky-600 text-white shadow-md shadow-sky-500/30 border border-sky-400' 
             : 'bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
-        }">
+        }" title="${isSelected ? 'Cliquer à nouveau pour lancer le test' : 'Sélectionner ce sous-organe'}">
+          ${isSelected ? '<i data-lucide="play" class="w-3 h-3 text-white"></i>' : ''}
           <span>${escapeHtml(cat)}</span>
           <span class="px-1.5 py-0.2 rounded-full text-[10px] ${isSelected ? 'bg-sky-700 text-white' : 'bg-slate-800 text-slate-400'}">${count}</span>
         </button>
       `;
     });
-    html += `</div>`;
-
-    // Niveau 3
-    if (state.playHierarchy.selectedCategory) {
-      const catObj = orgObj.categories[state.playHierarchy.selectedCategory];
-      const entities = Object.keys(catObj.entities).sort();
-
-      html += `
-        <div class="pt-3 border-t border-slate-800/80 space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
-              <span class="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-[10px] font-mono">3</span>
-              <span>Lésion précise dans <em>${escapeHtml(state.playHierarchy.selectedCategory)}</em> :</span>
-            </span>
-          </div>
-          <div class="flex flex-wrap gap-2">
-      `;
-
-      entities.forEach(ent => {
-        const count = catObj.entities[ent];
-        html += `
-          <button onclick="startHierarchySession('entity', '${escapeJsString(state.playHierarchy.selectedOrgan)}', '${escapeJsString(state.playHierarchy.selectedCategory)}', '${escapeJsString(ent)}')" class="px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-semibold flex items-center space-x-2 transition group shadow-sm">
-            <i data-lucide="play" class="w-3.5 h-3.5 text-indigo-400 group-hover:text-white"></i>
-            <span>${escapeHtml(ent)}</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-900 text-indigo-300 group-hover:bg-indigo-700 group-hover:text-white">${count}Q</span>
-          </button>
-        `;
-      });
-      html += `</div></div>`;
-    }
-
-    html += `</div>`;
+    html += `</div></div>`;
   }
 
   html += `</div>`;
@@ -4586,6 +4747,10 @@ function selectOrganForPlay(organ) {
 }
 
 function selectCategoryForPlay(cat) {
+  if (state.playHierarchy.selectedCategory === cat) {
+    startHierarchySession('category', state.playHierarchy.selectedOrgan, cat);
+    return;
+  }
   state.playHierarchy.selectedCategory = cat;
   state.playHierarchy.selectedEntity = null;
   renderHierarchySelector();
@@ -4762,7 +4927,8 @@ function renderSessionQuestion() {
   const breadcrumbEl = document.getElementById('session-breadcrumb');
 
   if (breadcrumbEl) {
-    breadcrumbEl.textContent = `${q.organ} > ${q.category} > ${q.entity}`;
+    // Indice d'entraînement : organe et sous-organe max, lésion masquée
+    breadcrumbEl.textContent = q.category ? `${q.organ} > ${q.category}` : `${q.organ}`;
   }
   if (hintBtn) {
     hintBtn.classList.remove('hidden');
@@ -5306,6 +5472,10 @@ function revealSessionFeedback(isExact, q) {
   // Révélation automatique de la classification et de l'organe lors de la correction
   const breadcrumbContainer = document.getElementById('session-breadcrumb-container');
   if (breadcrumbContainer) breadcrumbContainer.classList.remove('hidden');
+  const breadcrumbEl = document.getElementById('session-breadcrumb');
+  if (breadcrumbEl) {
+    breadcrumbEl.textContent = `${q.organ} > ${q.category} > ${q.entity}`;
+  }
 
   const hintBtn = document.getElementById('btn-toggle-organ-hint');
   if (hintBtn) hintBtn.classList.add('hidden');
@@ -7121,8 +7291,8 @@ function renderDPStep() {
   session.selectedInCurrentStep.clear();
 
   document.getElementById('dp-case-title').textContent = session.caseData.title;
-  // Organe & entité masqués pendant le cas clinique pour ne pas spoiler l'enquête diagnostique
-  document.getElementById('dp-case-meta').textContent = "Dossier Clinique Progressif • Organe masqué";
+  // Organe uniquement, sous-organe et lésion masqués pendant le cas clinique pour ne pas spoiler le diagnostic
+  document.getElementById('dp-case-meta').textContent = session.caseData.organ ? `Dossier Clinique Progressif • Organe : ${session.caseData.organ}` : "Dossier Clinique Progressif";
   document.getElementById('dp-step-indicator').textContent = `Étape ${session.currentStepIndex + 1} / ${session.totalSteps}`;
   document.getElementById('dp-progress-bar').style.width = `${((session.currentStepIndex + 1) / session.totalSteps) * 100}%`;
 
@@ -7644,7 +7814,7 @@ function renderDPCardsOnPlay() {
       <div>
         <div class="flex items-center space-x-2 mb-2">
           <span class="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">Dossier Progressif</span>
-          <span class="text-xs text-slate-400 font-mono">${c.organ} > ${c.category} > ${c.entity}</span>
+          <span class="text-xs text-slate-400 font-mono">${escapeHtml(c.organ || 'Général')}</span>
         </div>
         <h4 class="font-bold text-white text-base group-hover:text-indigo-300 transition">${c.title}</h4>
         <p class="text-xs text-slate-400 mt-2 line-clamp-2 leading-relaxed">${c.synopsis}</p>
@@ -8624,7 +8794,7 @@ function renderBank() {
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-[10px] font-extrabold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono">📋 DP (${c.steps.length} étapes)</span>
             <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-              ${escapeHtml(c.category)} > ${escapeHtml(c.entity)}
+              ${escapeHtml(c.organ || 'Général')}
             </span>
           </div>
           <h4 class="font-bold text-sm text-white">${escapeHtml(c.title)}</h4>

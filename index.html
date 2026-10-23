@@ -232,9 +232,9 @@
           <div>
             <h2 class="text-base font-bold text-white flex items-center space-x-2">
               <i data-lucide="git-branch" class="w-4 h-4 text-teal-400"></i>
-              <span>Classification & Révisions Actives (3 Niveaux)</span>
+              <span>Classification & Entraînement (Organe & Sous-organe)</span>
             </h2>
-            <p class="text-xs text-slate-400 mt-0.5">Testez tout un organe, une catégorie ou une lésion (les questions neutralisées sont filtrées).</p>
+            <p class="text-xs text-slate-400 mt-0.5">Testez tout un organe ou une catégorie / sous-organe (les questions neutralisées sont filtrées).</p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <button onclick="startColleaguesQuestionsSession()" id="btn-play-colleagues-shortcut" class="px-3.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-bold flex items-center space-x-1.5 transition">
@@ -1555,8 +1555,8 @@
             <i data-lucide="award" class="w-4 h-4"></i>
           </div>
           <div>
-            <h3 class="font-bold text-white text-base">Créer un Trophée Personnalisé</h3>
-            <p class="text-xs text-slate-400">Ajoutez un défi d'équipe pour vos co-internes et vous-même</p>
+            <h3 id="trophy-modal-title" class="font-bold text-white text-base">Créer un Trophée Personnalisé</h3>
+            <p id="trophy-modal-subtitle" class="text-xs text-slate-400">Ajoutez un défi d'équipe pour vos co-internes et vous-même</p>
           </div>
         </div>
         <button onclick="closeCreateTrophyModal()" class="text-slate-400 hover:text-white transition">
@@ -1565,6 +1565,7 @@
       </div>
 
       <form id="form-create-trophy" onsubmit="handleCreateTrophySubmit(event)" class="space-y-4">
+        <input type="hidden" id="trophy-edit-id" value="">
         <div>
           <label class="block text-xs font-semibold text-slate-300 mb-1">Nom du Trophée *</label>
           <input type="text" id="trophy-input-name" required placeholder="ex: Grand Maître de la Thyroïde, Chasseur de Mitoses..." class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 text-xs">
@@ -1647,7 +1648,7 @@
           <button type="button" onclick="closeCreateTrophyModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">Annuler</button>
           <button type="submit" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition flex items-center space-x-1.5 shadow-sm shadow-amber-500/20">
             <i data-lucide="award" class="w-4 h-4"></i>
-            <span>Créer le Trophée</span>
+            <span id="trophy-modal-submit-text">Créer le Trophée</span>
           </button>
         </div>
       </form>
