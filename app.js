@@ -7,6 +7,17 @@ const STORAGE_KEY_CASES = "pathotrainer_custom_cases_v3";
 const STORAGE_KEY_TAGS = "pathotrainer_custom_tags_v3";
 const STORAGE_KEY_STATS = "pathotrainer_custom_stats_v3";
 const STORAGE_KEY_LESION_NOTES = "pathotrainer_custom_lesion_notes_v1";
+const STORAGE_KEY_STATEMENT_TEMPLATES = "pathotrainer_statement_templates_v1";
+
+const DEFAULT_STATEMENT_TEMPLATES = [
+  "Quelles sont les propositions vraies concernant",
+  "Quel est le diagnostic le plus probable devant",
+  "Parmi les propositions suivantes concernant",
+  "Quel marqueur immunohistochimique permet de confirmer",
+  "Quelle anomalie moléculaire est caractéristique de",
+  "Quel critère histologique permet d'affirmer",
+  "Quel est le principal diagnostic différentiel de"
+];
 
 let state = {
   currentUser: null,
@@ -17,6 +28,7 @@ let state = {
   customTags: [],
   customBadges: [],
   lesionNotes: {}, // map "Organ::Category::Entity" -> { key, organ, category, entity, content, updatedAt, authorName, authorEmail }
+  statementTemplates: [],
   stats: {
     xp: 0,
     creatorXp: 0,
@@ -679,6 +691,13 @@ async function fetchCurrentUserRole() {
       return true;
     });
     localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+  }
+
+  if (cloudStats.statementTemplates && Array.isArray(cloudStats.statementTemplates) && cloudStats.statementTemplates.length > 0) {
+    const mergedTemplates = Array.from(new Set([...(state.statementTemplates || []), ...cloudStats.statementTemplates]));
+    state.statementTemplates = mergedTemplates;
+    localStorage.setItem(STORAGE_KEY_STATEMENT_TEMPLATES, JSON.stringify(mergedTemplates));
+    renderStatementTemplates();
   }
 
   localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
@@ -2356,6 +2375,9 @@ function initApp() {
   const storedStats = localStorage.getItem(STORAGE_KEY_STATS);
   if (storedStats) state.stats = Object.assign(state.stats, JSON.parse(storedStats));
 
+  state.statementTemplates = getSavedStatementTemplates();
+  renderStatementTemplates();
+
   updateTopBar();
   renderHierarchySelector();
   renderTagsCloud();
@@ -2470,6 +2492,7 @@ function switchTab(viewId) {
       if (lockedEl) lockedEl.classList.add('hidden');
       if (contentEl) contentEl.classList.remove('hidden');
       setCreatorMode(state.creatorMode);
+      renderStatementTemplates();
     }
   }
 
@@ -4671,6 +4694,10 @@ function renderHierarchySelector() {
         ${state.playHierarchy.selectedOrgan ? `
           <div class="flex items-center space-x-2">
             ${isCreator() ? `
+              <button type="button" onclick="createQuestionForOrgan('${escapeJsString(state.playHierarchy.selectedOrgan)}')" class="text-xs font-bold text-teal-400 hover:text-teal-300 flex items-center space-x-1 bg-teal-500/10 px-2.5 py-1 rounded-lg border border-teal-500/20 transition shadow-sm" title="Créer un QCM dans cet organe">
+                <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+                <span>+ Créer QCM</span>
+              </button>
               <button type="button" onclick="renameOrganPrompt('${escapeJsString(state.playHierarchy.selectedOrgan)}')" class="text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center space-x-1 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20 transition shadow-sm" title="Renommer ou fusionner cet organe sur tous les QCM et DP">
                 <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
                 <span>Renommer</span>
@@ -4717,6 +4744,10 @@ function renderHierarchySelector() {
           ${state.playHierarchy.selectedCategory ? `
             <div class="flex items-center space-x-2">
               ${isCreator() ? `
+                <button type="button" onclick="createQuestionForCategory('${escapeJsString(state.playHierarchy.selectedOrgan)}', '${escapeJsString(state.playHierarchy.selectedCategory)}')" class="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center space-x-1 bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20 transition shadow-sm" title="Créer un QCM dans cette catégorie">
+                  <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+                  <span>+ Créer QCM</span>
+                </button>
                 <button type="button" onclick="renameCategoryPrompt('${escapeJsString(state.playHierarchy.selectedOrgan)}', '${escapeJsString(state.playHierarchy.selectedCategory)}')" class="text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center space-x-1 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20 transition shadow-sm" title="Renommer cette catégorie">
                   <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
                   <span>Renommer</span>
@@ -5641,6 +5672,7 @@ function resetQuestionForm() {
   renderEditorTagsSelector();
   updateEditorDatalists();
   updateQuestionAuthorSelect();
+  renderStatementTemplates();
   onFormatChange();
 }
 
@@ -6541,6 +6573,195 @@ async function handleSaveQuestionForm(e) {
   switchTab('bank');
 }
 
+// --- MODÈLES DE PHRASES PRÉ-CONSTRUITES D'ÉNONCÉ ---
+function getSavedStatementTemplates() {
+  const stored = localStorage.getItem(STORAGE_KEY_STATEMENT_TEMPLATES);
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch(e) {}
+  }
+  return [...DEFAULT_STATEMENT_TEMPLATES];
+}
+
+function saveStatementTemplates() {
+  localStorage.setItem(STORAGE_KEY_STATEMENT_TEMPLATES, JSON.stringify(state.statementTemplates));
+  if (state.currentUser) {
+    if (!state.stats) state.stats = {};
+    state.stats.statementTemplates = state.statementTemplates;
+    saveStats();
+  }
+}
+
+function renderStatementTemplates() {
+  const container = document.getElementById('statement-templates-bar');
+  if (!container) return;
+
+  if (!state.statementTemplates || state.statementTemplates.length === 0) {
+    state.statementTemplates = getSavedStatementTemplates();
+  }
+
+  container.innerHTML = state.statementTemplates.map((tmpl, idx) => `
+    <div class="inline-flex items-center bg-slate-900 border border-slate-800 hover:border-teal-500/50 rounded-xl px-2.5 py-1 text-xs text-slate-300 hover:text-white transition group shrink-0 shadow-sm">
+      <button type="button" onclick="applyStatementTemplate(${idx})" class="font-medium hover:text-teal-300 transition text-left flex items-center space-x-1" title="Cliquer pour insérer dans l'énoncé">
+        <i data-lucide="sparkles" class="w-3 h-3 text-teal-400 shrink-0"></i>
+        <span>${escapeHtml(tmpl)}...</span>
+      </button>
+      <button type="button" onclick="event.stopPropagation(); deleteStatementTemplate(${idx})" class="ml-1.5 text-slate-500 hover:text-rose-400 transition opacity-0 group-hover:opacity-100 p-0.5 rounded" title="Supprimer ce modèle">
+        <i data-lucide="x" class="w-2.5 h-2.5"></i>
+      </button>
+    </div>
+  `).join('');
+
+  if (window.lucide) lucide.createIcons();
+}
+window.renderStatementTemplates = renderStatementTemplates;
+
+function applyStatementTemplate(idx) {
+  if (!state.statementTemplates) state.statementTemplates = getSavedStatementTemplates();
+  const tmpl = state.statementTemplates[idx];
+  if (!tmpl) return;
+
+  const input = document.getElementById('form-q-text');
+  if (!input) return;
+
+  const entity = (document.getElementById('form-q-entity')?.value || '').trim();
+
+  let finalText = tmpl.trim();
+  if (entity) {
+    finalText = `${finalText} ${entity} ?`;
+  } else {
+    finalText = `${finalText} `;
+  }
+
+  input.value = finalText;
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+  showRewardToast("Énoncé pré-rempli !", 'sparkles');
+}
+window.applyStatementTemplate = applyStatementTemplate;
+
+function promptAddNewStatementTemplate() {
+  const val = prompt("Saisissez votre nouvelle phrase type d'énoncé :\n\n(ex: 'Quelles sont les propositions vraies concernant', 'Quel profil immunohistochimique permet d'affirmer')");
+  if (val === null) return;
+  const trimmed = val.trim().replace(/\.\.\.$/, '').trim();
+  if (!trimmed) {
+    alert("Le modèle ne peut pas être vide.");
+    return;
+  }
+  if (!state.statementTemplates) state.statementTemplates = getSavedStatementTemplates();
+  if (state.statementTemplates.includes(trimmed)) {
+    alert("Cette phrase type existe déjà.");
+    return;
+  }
+  state.statementTemplates.push(trimmed);
+  saveStatementTemplates();
+  renderStatementTemplates();
+  showRewardToast(`Phrase type "${trimmed}" ajoutée !`, 'plus-circle');
+}
+window.promptAddNewStatementTemplate = promptAddNewStatementTemplate;
+
+function deleteStatementTemplate(idx) {
+  if (!confirm("Voulez-vous supprimer ce modèle de phrase type ?")) return;
+  if (!state.statementTemplates) return;
+  state.statementTemplates.splice(idx, 1);
+  saveStatementTemplates();
+  renderStatementTemplates();
+  showRewardToast("Modèle supprimé.", 'trash-2');
+}
+window.deleteStatementTemplate = deleteStatementTemplate;
+
+// --- CRÉATION DE QUESTION DEPUIS LA HIÉRARCHIE (ORGANE, CATÉGORIE, LÉSION) ---
+function createQuestionForOrgan(organ) {
+  if (isReader()) {
+    alert("La rédaction de questions est réservée aux comptes Créateurs.");
+    switchTab('create');
+    return;
+  }
+
+  switchTab('create');
+  setCreatorMode('simple');
+  resetQuestionForm();
+
+  const organEl = document.getElementById('form-q-organ');
+  const catEl = document.getElementById('form-q-category');
+  const entEl = document.getElementById('form-q-entity');
+
+  if (organEl) organEl.value = organ || '';
+  if (catEl) catEl.value = '';
+  if (entEl) entEl.value = '';
+
+  const dpOrgan = document.getElementById('form-dp-organ');
+  const dpCategory = document.getElementById('form-dp-category');
+  const dpEntity = document.getElementById('form-dp-entity');
+  if (dpOrgan) dpOrgan.value = organ || '';
+  if (dpCategory) dpCategory.value = '';
+  if (dpEntity) dpEntity.value = '';
+
+  updateEditorDatalists();
+  renderStatementTemplates();
+
+  state.bankSelectedOrgan = organ;
+
+  setTimeout(() => {
+    if (catEl) {
+      catEl.focus();
+      catEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, 120);
+
+  if (typeof showRewardToast === 'function') {
+    showRewardToast(`Organe prêt : ${organ}`, 'plus-circle');
+  }
+}
+window.createQuestionForOrgan = createQuestionForOrgan;
+
+function createQuestionForCategory(organ, category) {
+  if (isReader()) {
+    alert("La rédaction de questions est réservée aux comptes Créateurs.");
+    switchTab('create');
+    return;
+  }
+
+  switchTab('create');
+  setCreatorMode('simple');
+  resetQuestionForm();
+
+  const organEl = document.getElementById('form-q-organ');
+  const catEl = document.getElementById('form-q-category');
+  const entEl = document.getElementById('form-q-entity');
+
+  if (organEl) organEl.value = organ || '';
+  if (catEl) catEl.value = category || '';
+  if (entEl) entEl.value = '';
+
+  const dpOrgan = document.getElementById('form-dp-organ');
+  const dpCategory = document.getElementById('form-dp-category');
+  const dpEntity = document.getElementById('form-dp-entity');
+  if (dpOrgan) dpOrgan.value = organ || '';
+  if (dpCategory) dpCategory.value = category || '';
+  if (dpEntity) dpEntity.value = '';
+
+  updateEditorDatalists();
+  renderStatementTemplates();
+
+  state.bankSelectedOrgan = organ;
+  state.bankSelectedCategory = category;
+
+  setTimeout(() => {
+    if (entEl) {
+      entEl.focus();
+      entEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, 120);
+
+  if (typeof showRewardToast === 'function') {
+    showRewardToast(`Catégorie prête : ${category}`, 'plus-circle');
+  }
+}
+window.createQuestionForCategory = createQuestionForCategory;
+
 function createQuestionForLesion(organ, category, entity) {
   if (isReader()) {
     alert("La rédaction de questions est réservée aux comptes Créateurs.");
@@ -6570,6 +6791,7 @@ function createQuestionForLesion(organ, category, entity) {
   if (dpEntity) dpEntity.value = entity || '';
 
   updateEditorDatalists();
+  renderStatementTemplates();
 
   // Mémoriser pour le positionnement dans Ma Banque
   state.bankSelectedOrgan = organ;
@@ -6629,6 +6851,7 @@ function editQuestion(id) {
   renderEditorUploadedImages();
   renderEditorUploadedExplanationImages();
   renderEditorTagsSelector();
+  renderStatementTemplates();
 
   if (q.format === 'piege') {
     onFormatChange();
@@ -8894,6 +9117,10 @@ function renderBank() {
           ${state.bankSelectedOrgan !== 'all' ? `
             <div class="flex items-center space-x-2">
               ${isCreator() ? `
+                <button onclick="createQuestionForOrgan('${escapeJsString(state.bankSelectedOrgan)}')" class="px-2.5 py-1 rounded-xl bg-teal-600/20 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold transition flex items-center space-x-1 shadow-sm" title="Créer une nouvelle question dans cet organe">
+                  <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-teal-400"></i>
+                  <span>+ Créer question</span>
+                </button>
                 <button onclick="renameOrganPrompt('${escapeJsString(state.bankSelectedOrgan)}')" class="px-2.5 py-1 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition flex items-center space-x-1.5 shadow-sm" title="Renommer ou fusionner cet organe sur tous les QCM et DP">
                   <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
                   <span>Renommer "${escapeHtml(state.bankSelectedOrgan)}"</span>
@@ -8978,6 +9205,10 @@ function renderBank() {
             <div class="flex items-center space-x-2 self-start sm:self-auto">
               ${curCat !== 'all' ? `
                 ${isCreator() ? `
+                  <button onclick="createQuestionForCategory('${escapeJsString(state.bankSelectedOrgan)}', '${escapeJsString(curCat)}')" class="px-2.5 py-1.5 rounded-xl bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30 text-xs font-bold transition flex items-center space-x-1 shadow-sm shadow-sky-500/10" title="Créer une nouvelle question dans cette catégorie">
+                    <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-sky-400"></i>
+                    <span>+ Créer question</span>
+                  </button>
                   <button onclick="renameCategoryPrompt('${escapeJsString(state.bankSelectedOrgan)}', '${escapeJsString(curCat)}')" class="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition flex items-center space-x-1 shadow-sm" title="Renommer ou fusionner cette catégorie">
                     <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
                     <span>Renommer "${escapeHtml(curCat)}"</span>
@@ -8988,6 +9219,12 @@ function renderBank() {
                   <span>⚡ Taffer "${escapeHtml(curCat)}" (${activeQInCurSelection || totalQInCurSelection}Q)</span>
                 </button>
               ` : `
+                ${isCreator() ? `
+                  <button onclick="createQuestionForOrgan('${escapeJsString(state.bankSelectedOrgan)}')" class="px-2.5 py-1.5 rounded-xl bg-teal-600/20 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold transition flex items-center space-x-1 shadow-sm" title="Créer une nouvelle question dans cet organe">
+                    <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-teal-400"></i>
+                    <span>+ Créer question</span>
+                  </button>
+                ` : ''}
                 <button onclick="startHierarchySession('organ', '${escapeJsString(state.bankSelectedOrgan)}')" class="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-sm shadow-teal-500/20">
                   <i data-lucide="play" class="w-3.5 h-3.5"></i>
                   <span>⚡ Taffer tout "${escapeHtml(state.bankSelectedOrgan)}" (${orgGroup.questions.filter(q => !q.mastered).length || orgGroup.questions.length}Q)</span>
