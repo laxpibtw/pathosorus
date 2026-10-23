@@ -6624,7 +6624,7 @@ function renderStatementTemplates() {
     <div class="inline-flex items-center bg-slate-900 border border-slate-800 hover:border-teal-500/50 rounded-xl px-2.5 py-1 text-xs text-slate-300 hover:text-white transition group shrink-0 shadow-sm">
       <button type="button" onclick="applyStatementTemplate(${idx})" class="font-medium hover:text-teal-300 transition text-left flex items-center space-x-1" title="Cliquer pour insérer dans l'énoncé">
         <i data-lucide="sparkles" class="w-3 h-3 text-teal-400 shrink-0"></i>
-        <span>${escapeHtml(tmpl)}...</span>
+        <span>${escapeHtml(tmpl)}</span>
       </button>
       <button type="button" onclick="event.stopPropagation(); deleteStatementTemplate(${idx})" class="ml-1.5 text-slate-500 hover:text-rose-400 transition opacity-60 group-hover:opacity-100 p-0.5 rounded" title="Supprimer cette phrase type">
         <i data-lucide="x" class="w-2.5 h-2.5"></i>
@@ -6644,27 +6644,23 @@ function applyStatementTemplate(idx) {
   const input = document.getElementById('form-q-text');
   if (!input) return;
 
-  const entity = (document.getElementById('form-q-entity')?.value || '').trim();
-
   let finalText = tmpl.trim();
-  if (entity) {
-    const cleanStem = finalText.replace(/\?+$/, '').trim();
-    finalText = `${cleanStem} ${entity} ?`;
-  } else {
-    finalText = finalText.endsWith(' ') ? finalText : `${finalText} `;
+  // Ne jamais ajouter le nom de la lésion automatiquement
+  if (!finalText.endsWith('?') && !finalText.endsWith(':') && !finalText.endsWith('.')) {
+    finalText = `${finalText} `;
   }
 
   input.value = finalText;
   input.focus();
   input.setSelectionRange(input.value.length, input.value.length);
-  showRewardToast("Énoncé pré-rempli !", 'sparkles');
+  showRewardToast("Énoncé inséré !", 'sparkles');
 }
 window.applyStatementTemplate = applyStatementTemplate;
 
 function promptAddNewStatementTemplate() {
   const val = prompt("Saisissez votre nouvelle phrase type d'énoncé (disponible pour tous les organes) :\n\n(ex: 'Quelles sont les propositions exactes concernant', 'Quel est le diagnostic le plus probable devant')");
   if (val === null) return;
-  const trimmed = val.trim().replace(/\.\.\.$/, '').trim();
+  const trimmed = val.trim();
   if (!trimmed) {
     alert("Le modèle ne peut pas être vide.");
     return;
