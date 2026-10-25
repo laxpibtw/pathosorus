@@ -1037,7 +1037,10 @@ function updateUserRoleUI() {
     const emailPrefix = email.split('@')[0];
     if (authBtnIcon) authBtnIcon.setAttribute('data-lucide', 'log-out');
     if (authBtnText) authBtnText.textContent = "Déconnexion";
-    if (btnAuthToggle) btnAuthToggle.title = `Déconnecter ${email}`;
+    if (btnAuthToggle) {
+      btnAuthToggle.title = `Déconnecter ${email}`;
+      btnAuthToggle.className = "px-2.5 py-1 rounded-xl text-xs font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-white transition border border-rose-500/30 flex items-center space-x-1";
+    }
 
     if (isCreator()) {
       if (roleBadge) roleBadge.className = "flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-teal-500/20 to-indigo-500/20 border border-teal-500/40 text-teal-300 shadow-sm";
@@ -1059,7 +1062,10 @@ function updateUserRoleUI() {
   } else {
     if (authBtnIcon) authBtnIcon.setAttribute('data-lucide', 'log-in');
     if (authBtnText) authBtnText.textContent = "Connexion";
-    if (btnAuthToggle) btnAuthToggle.title = "Se connecter";
+    if (btnAuthToggle) {
+      btnAuthToggle.title = "Se connecter";
+      btnAuthToggle.className = "px-2.5 py-1 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition border border-slate-700 flex items-center space-x-1";
+    }
     if (roleBadge) roleBadge.className = "flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-800 border border-slate-700 text-slate-400";
     if (roleDot) roleDot.className = "w-2 h-2 rounded-full bg-slate-500";
     if (roleText) roleText.textContent = "Non connecté";
@@ -1088,13 +1094,19 @@ function updateUserRoleUI() {
   if (state.currentUser) {
     if (playGuest) playGuest.classList.add('hidden');
     if (playAuth) playAuth.classList.remove('hidden');
-    if (topUserStats) topUserStats.classList.remove('hidden');
+    if (topUserStats) {
+      topUserStats.style.display = 'flex';
+      topUserStats.classList.remove('hidden');
+    }
     updateTopBar();
     renderSpacedRepetitionDashboard();
   } else {
     if (playGuest) playGuest.classList.remove('hidden');
     if (playAuth) playAuth.classList.add('hidden');
-    if (topUserStats) topUserStats.classList.add('hidden');
+    if (topUserStats) {
+      topUserStats.style.display = 'none';
+      topUserStats.classList.add('hidden');
+    }
     renderGuestShowcaseStats();
   }
 
@@ -1154,20 +1166,15 @@ function toggleAdminInitView() {
 
 async function handleAuthLoginSubmit(e) {
   e.preventDefault();
-  if (!supabaseClient) {
-    alert("Supabase n'est pas initialisé. Vérifiez vos clés dans config.js.");
-    return;
-  }
-
   const emailInput = document.getElementById('auth-input-email');
   const passInput = document.getElementById('auth-input-password');
   const alertBox = document.getElementById('auth-alert-box');
   const btn = document.getElementById('btn-auth-submit');
 
-  const email = (emailInput.value || '').trim();
-  const password = passInput.value || '';
+  const email = (emailInput?.value || '').trim();
+  const password = passInput?.value || '';
 
-  if (!email || !password) return;
+  if (!email) return;
 
   const originalBtnHtml = btn ? btn.innerHTML : '';
   if (btn) {
@@ -1178,45 +1185,24 @@ async function handleAuthLoginSubmit(e) {
   if (alertBox) alertBox.classList.add('hidden');
 
   const normalizedEmail = email.toLowerCase();
+  const isAuthorizedCreator = AUTHORIZED_CREATOR_EMAILS.has(normalizedEmail);
 
   try {
-    let authUser = null;
-
-    // Tentative d'authentification Supabase (court timeout de 3s pour ne jamais bloquer l'interface)
-    try {
-      const loginPromise = supabaseClient.auth.signInWithPassword({ email: normalizedEmail, password });
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout")), 3000)
-      );
-      const { data, error } = await Promise.race([loginPromise, timeoutPromise]);
-      if (!error && data && data.user) {
-        authUser = data.user;
-      }
-    } catch (authErr) {
-      console.warn("Supabase auth (non-bloquant):", authErr);
-    }
-
-    if (!authUser) {
-      authUser = {
-        id: 'usr_' + normalizedEmail.replace(/[^a-z0-9]/gi, '_'),
-        email: normalizedEmail,
-        user_metadata: { role: AUTHORIZED_CREATOR_EMAILS.has(normalizedEmail) ? 'creator' : 'reader' }
-      };
-    }
+    // 1. Initialiser immédiatement l'utilisateur localement (0ms, jamais de blocage UI)
+    const authUser = {
+      id: 'usr_' + normalizedEmail.replace(/[^a-z0-9]/gi, '_'),
+      email: normalizedEmail,
+      user_metadata: { role: isAuthorizedCreator ? 'creator' : 'reader' }
+    };
 
     state.currentUser = authUser;
+    state.currentRole = isAuthorizedCreator ? 'creator' : 'reader';
     localStorage.removeItem('pathosorus_explicit_logout');
     localStorage.setItem('pathosorus_current_email', normalizedEmail);
 
-    // Fermer immédiatement la modale pour débloquer l'interface
+    // 2. Mettre à jour l'interface immédiatement et fermer la modale
     closeAuthModal();
-
-    // Mettre à jour l'interface immédiatement
-    await fetchCurrentUserRole();
-    checkDailyStreak();
     updateUserRoleUI();
-
-    // Basculer sur l'onglet Play et forcer l'affichage du dashboard d'entraînement
     switchTab('play');
     const playGuest = document.getElementById('play-view-guest');
     const playAuth = document.getElementById('play-view-authenticated');
@@ -1225,13 +1211,31 @@ async function handleAuthLoginSubmit(e) {
 
     showToast(`Bienvenue ${normalizedEmail} ! Connecté avec succès.`, "success");
 
-    // Lancer la synchronisation en tâche de fond sans bloquer
-    fetchSupabaseData(true).then(() => {
+    // 3. Tâche de fond non-bloquante : session Supabase, profil, streak et synchronisation des questions
+    (async () => {
+      if (supabaseClient && password) {
+        try {
+          const { data, error } = await supabaseClient.auth.signInWithPassword({
+            email: normalizedEmail,
+            password: password
+          });
+          if (!error && data && data.user) {
+            state.currentUser = data.user;
+          }
+        } catch (authErr) {
+          console.warn("Supabase auth (non-bloquant):", authErr);
+        }
+      }
+
+      await fetchCurrentUserRole();
       checkDailyStreak();
-      syncLocalProgressToCloud();
+      await fetchSupabaseData(true);
+      checkDailyStreak();
+      await syncLocalProgressToCloud();
       renderSpacedRepetitionDashboard();
       updateTopBar();
-    }).catch(err => console.warn("Sync background:", err));
+      if (window.lucide) lucide.createIcons();
+    })().catch(err => console.warn("Sync background login:", err));
 
   } catch (err) {
     console.error("Erreur connexion:", err);
@@ -2118,7 +2122,7 @@ async function fetchSupabaseData(silent = false) {
       supabaseClient.from('custom_tags').select('*').order('created_at', { ascending: true })
     ];
 
-    if (state.currentUser && state.currentUser.id) {
+    if (state.currentUser && state.currentUser.id && isValidUUID(state.currentUser.id)) {
       promises.push(
         supabaseClient.from('user_progress').select('*').eq('user_id', state.currentUser.id)
       );
@@ -2239,7 +2243,9 @@ async function fetchSupabaseData(silent = false) {
 
         // 2. Progression depuis le stockage local de l'utilisateur
         if (localProg && localProg.stats) {
-          if (!stats.lastReviewed || (localProg.stats.lastReviewed && localProg.stats.lastReviewed >= stats.lastReviewed)) {
+          const lpTime = localProg.stats.lastReviewed ? new Date(localProg.stats.lastReviewed).getTime() : 0;
+          const curTime = stats.lastReviewed ? new Date(stats.lastReviewed).getTime() : 0;
+          if (!stats.lastReviewed || lpTime >= curTime) {
             stats = { ...stats, ...localProg.stats };
             if (typeof localProg.mastered !== 'undefined') mastered = Boolean(localProg.mastered);
             if (typeof localProg.flagged !== 'undefined') flagged = Boolean(localProg.flagged);
@@ -2248,7 +2254,9 @@ async function fetchSupabaseData(silent = false) {
 
         // 3. Progression directe depuis la table questions de Supabase (mise à jour par Mac 1 ou 2)
         if (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed)) {
-          if (!stats.lastReviewed || (q.stats.lastReviewed && q.stats.lastReviewed >= stats.lastReviewed)) {
+          const qTime = q.stats.lastReviewed ? new Date(q.stats.lastReviewed).getTime() : 0;
+          const curTime = stats.lastReviewed ? new Date(stats.lastReviewed).getTime() : 0;
+          if (!stats.lastReviewed || qTime >= curTime || (q.stats.seen || 0) >= (stats.seen || 0)) {
             stats = { ...stats, ...q.stats };
             if (typeof q.mastered !== 'undefined') mastered = Boolean(q.mastered);
             if (typeof q.flagged !== 'undefined') flagged = Boolean(q.flagged);
@@ -2257,7 +2265,9 @@ async function fetchSupabaseData(silent = false) {
 
         // 4. Progression spécifique utilisateur Cloud (UPROG ou user_progress)
         if (cloudProg && cloudProg.stats) {
-          if (!stats.lastReviewed || (cloudProg.stats.lastReviewed && cloudProg.stats.lastReviewed >= stats.lastReviewed)) {
+          const cpTime = cloudProg.stats.lastReviewed ? new Date(cloudProg.stats.lastReviewed).getTime() : 0;
+          const curTime = stats.lastReviewed ? new Date(stats.lastReviewed).getTime() : 0;
+          if (!stats.lastReviewed || cpTime >= curTime) {
             stats = { ...stats, ...cloudProg.stats };
             if (typeof cloudProg.mastered !== 'undefined') mastered = Boolean(cloudProg.mastered);
             if (typeof cloudProg.flagged !== 'undefined') flagged = Boolean(cloudProg.flagged);
