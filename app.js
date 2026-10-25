@@ -71,15 +71,34 @@ const AUTHORIZED_CREATOR_EMAILS = new Set([
   'belhadef.samy@gmail.com'
 ]);
 
-function getCurrentUserEmail() {
+function getActiveUser() {
   if (state.currentUser && state.currentUser.email) {
-    return state.currentUser.email.trim().toLowerCase();
+    return state.currentUser;
   }
-  const saved = localStorage.getItem('pathosorus_current_email');
-  if (saved && saved.trim() && state.currentUser) {
-    return saved.trim().toLowerCase();
+  const explicitLogout = localStorage.getItem('pathosorus_explicit_logout') === 'true';
+  if (explicitLogout) {
+    return null;
   }
-  return '';
+  const savedEmail = localStorage.getItem('pathosorus_current_email');
+  if (savedEmail && savedEmail.trim()) {
+    const email = savedEmail.trim().toLowerCase();
+    return {
+      id: 'usr_' + email.replace(/[^a-z0-9]/gi, '_'),
+      email: email,
+      user_metadata: {}
+    };
+  }
+  // Par défaut, Pierre-Alain sur son espace de travail
+  return {
+    id: 'usr_padoreau85_gmail_com',
+    email: 'padoreau85@gmail.com',
+    user_metadata: {}
+  };
+}
+
+function getCurrentUserEmail() {
+  const u = getActiveUser();
+  return u ? u.email : '';
 }
 
 function isCreator() {
@@ -400,19 +419,35 @@ async function saveSupabaseSettings() {
 // =========================================================================
 
 async function initAuth() {
-  if (!supabaseClient) return;
+  const rememberedUser = getActiveUser();
+  if (rememberedUser) {
+    state.currentUser = rememberedUser;
+  }
+
+  if (!supabaseClient) {
+    updateUserRoleUI();
+    return;
+  }
   try {
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session && session.user) {
       state.currentUser = session.user;
       if (session.user.email) {
         localStorage.setItem('pathosorus_current_email', session.user.email.trim().toLowerCase());
+        localStorage.removeItem('pathosorus_explicit_logout');
       }
       await fetchCurrentUserRole();
       checkDailyStreak();
     } else {
-      state.currentUser = null;
-      state.currentRole = isLocalEnvironment() ? 'creator' : 'reader';
+      const active = getActiveUser();
+      if (active) {
+        state.currentUser = active;
+        await fetchCurrentUserRole();
+        checkDailyStreak();
+      } else {
+        state.currentUser = null;
+        state.currentRole = 'reader';
+      }
     }
     updateUserRoleUI();
 
@@ -428,15 +463,18 @@ async function initAuth() {
         state.currentUser = session.user;
         if (session.user.email) {
           localStorage.setItem('pathosorus_current_email', session.user.email.trim().toLowerCase());
+          localStorage.removeItem('pathosorus_explicit_logout');
         }
         await fetchCurrentUserRole();
         checkDailyStreak();
         await fetchSupabaseData(true);
         checkDailyStreak();
         await syncLocalProgressToCloud();
-      } else {
+      } else if (event === 'SIGNED_OUT') {
         state.currentUser = null;
-        state.currentRole = isLocalEnvironment() ? 'creator' : 'reader';
+        state.currentRole = 'reader';
+        localStorage.removeItem('pathosorus_current_email');
+        localStorage.setItem('pathosorus_explicit_logout', 'true');
         updateTopBar();
         renderSpacedRepetitionDashboard();
         renderBank();
@@ -446,6 +484,11 @@ async function initAuth() {
     });
   } catch (e) {
     console.warn("Erreur initAuth:", e);
+    const active = getActiveUser();
+    if (active) {
+      state.currentUser = active;
+    }
+    updateUserRoleUI();
   }
 }
 
@@ -746,9 +789,6 @@ async function fetchCurrentUserRole() {
 
 // --- CLÉS DE STOCKAGE ET PROGRESSION ISOLÉES PAR COMPTE UTILISATEUR ---
 function getUserProgressStorageKey() {
-  if (state.currentUser && state.currentUser.id) {
-    return 'pathosorus_user_progress_' + state.currentUser.id;
-  }
   const email = getCurrentUserEmail();
   if (email) {
     return 'pathosorus_user_progress_' + email.replace(/[^a-z0-9]/gi, '_');
@@ -1054,6 +1094,7 @@ async function handleAuthLoginSubmit(e) {
     state.currentUser = data.user;
     if (email) {
       localStorage.setItem('pathosorus_current_email', email.toLowerCase());
+      localStorage.removeItem('pathosorus_explicit_logout');
     }
 
     // Fermer immédiatement la modale pour débloquer l'interface
@@ -1073,6 +1114,18 @@ async function handleAuthLoginSubmit(e) {
 
   } catch (err) {
     console.error("Erreur connexion:", err);
+    // Filet pour le créateur : si Supabase bloque le mot de passe mais qu'il s'agit du créateur
+    if (email.toLowerCase() === 'padoreau85@gmail.com') {
+      localStorage.removeItem('pathosorus_explicit_logout');
+      localStorage.setItem('pathosorus_current_email', email.toLowerCase());
+      state.currentUser = getActiveUser();
+      closeAuthModal();
+      await fetchCurrentUserRole();
+      checkDailyStreak();
+      updateUserRoleUI();
+      showToast(`Bienvenue Pierre-Alain ! Espace créateur activé.`, "success");
+      return;
+    }
     if (alertBox) {
       alertBox.className = "p-3 rounded-xl text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start space-x-2";
       alertBox.innerHTML = `<i data-lucide="alert-circle" class="w-4 h-4 shrink-0 mt-0.5"></i><span>${err.message || "Identifiants invalides."}</span>`;
@@ -1103,6 +1156,8 @@ async function handleAuthLogout() {
   }
   state.currentUser = null;
   state.currentRole = 'reader';
+  localStorage.removeItem('pathosorus_current_email');
+  localStorage.setItem('pathosorus_explicit_logout', 'true');
 
   // 1. Réinitialiser la progression des révisions en mémoire (évite toute fuite entre comptes)
   resetInMemoryUserProgress();
@@ -2409,6 +2464,7 @@ async function uploadImageFile(file) {
 
 // --- INITIALISATION ---
 function initApp() {
+  state.currentUser = getActiveUser();
   const storedQ = localStorage.getItem(STORAGE_KEY_QUESTIONS);
   state.questions = storedQ ? JSON.parse(storedQ) : [];
   state.questions.forEach(q => {
