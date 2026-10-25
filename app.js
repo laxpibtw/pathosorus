@@ -76,10 +76,10 @@ function getCurrentUserEmail() {
     return state.currentUser.email.trim().toLowerCase();
   }
   const saved = localStorage.getItem('pathosorus_current_email');
-  if (saved && saved.trim()) {
+  if (saved && saved.trim() && state.currentUser) {
     return saved.trim().toLowerCase();
   }
-  return 'padoreau85@gmail.com';
+  return '';
 }
 
 function isCreator() {
@@ -201,15 +201,25 @@ function playSound(type) {
   // Silencieux
 }
 
+function getLocalDateString(d = new Date()) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function getTodayString() {
-  return new Date().toISOString().split('T')[0];
+  return getLocalDateString();
 }
 
 function isQuestionDoneToday(q) {
   if (!q || !q.stats || !q.stats.lastReviewed) return false;
   try {
-    const lastDate = q.stats.lastReviewed.split('T')[0];
-    return lastDate === getTodayString();
+    const revDate = new Date(q.stats.lastReviewed);
+    const now = new Date();
+    return revDate.getFullYear() === now.getFullYear() &&
+           revDate.getMonth() === now.getMonth() &&
+           revDate.getDate() === now.getDate();
   } catch (e) {
     return false;
   }
@@ -399,6 +409,7 @@ async function initAuth() {
         localStorage.setItem('pathosorus_current_email', session.user.email.trim().toLowerCase());
       }
       await fetchCurrentUserRole();
+      checkDailyStreak();
     } else {
       state.currentUser = null;
       state.currentRole = isLocalEnvironment() ? 'creator' : 'reader';
@@ -408,6 +419,7 @@ async function initAuth() {
     // Charger les questions et synchroniser la progression liée au compte
     await fetchSupabaseData(true);
     if (state.currentUser) {
+      checkDailyStreak();
       await syncLocalProgressToCloud();
     }
 
@@ -418,7 +430,9 @@ async function initAuth() {
           localStorage.setItem('pathosorus_current_email', session.user.email.trim().toLowerCase());
         }
         await fetchCurrentUserRole();
+        checkDailyStreak();
         await fetchSupabaseData(true);
+        checkDailyStreak();
         await syncLocalProgressToCloud();
       } else {
         state.currentUser = null;
@@ -736,7 +750,10 @@ function getUserProgressStorageKey() {
     return 'pathosorus_user_progress_' + state.currentUser.id;
   }
   const email = getCurrentUserEmail();
-  return 'pathosorus_user_progress_' + email.replace(/[^a-z0-9]/gi, '_');
+  if (email) {
+    return 'pathosorus_user_progress_' + email.replace(/[^a-z0-9]/gi, '_');
+  }
+  return 'pathosorus_user_progress_guest';
 }
 
 function getDefaultQuestionStats() {
@@ -853,7 +870,7 @@ async function dbSaveUserProgress(q) {
       flagged: Boolean(q.flagged),
       stats: q.stats || getDefaultQuestionStats(),
       updated_at: new Date().toISOString()
-    });
+    }, { onConflict: 'user_id,question_id' });
   } catch (e) {
     console.warn("Erreur sauvegarde progression Supabase user_progress:", e);
   }
@@ -929,8 +946,42 @@ function updateUserRoleUI() {
     if (contentEl) contentEl.classList.remove('hidden');
   }
 
+  // Contrôle de la vue Jouer : Vitrine publique (Invité) vs Dashboard d'entraînement (Connecté)
+  const playGuest = document.getElementById('play-view-guest');
+  const playAuth = document.getElementById('play-view-authenticated');
+  const topUserStats = document.getElementById('top-user-stats');
+
+  if (state.currentUser) {
+    if (playGuest) playGuest.classList.add('hidden');
+    if (playAuth) playAuth.classList.remove('hidden');
+    if (topUserStats) topUserStats.classList.remove('hidden');
+    updateTopBar();
+    renderSpacedRepetitionDashboard();
+  } else {
+    if (playGuest) playGuest.classList.remove('hidden');
+    if (playAuth) playAuth.classList.add('hidden');
+    if (topUserStats) topUserStats.classList.add('hidden');
+    renderGuestShowcaseStats();
+  }
+
   renderBank();
   if (window.lucide) lucide.createIcons();
+}
+
+function renderGuestShowcaseStats() {
+  const qCountEl = document.getElementById('guest-stat-questions-count');
+  const qCountEl2 = document.getElementById('guest-stat-questions-count-2');
+  const cCountEl = document.getElementById('guest-stat-cases-count');
+  const oCountEl = document.getElementById('guest-stat-organs-count');
+
+  const qCount = (state.questions || []).length;
+  if (qCountEl) qCountEl.textContent = qCount;
+  if (qCountEl2) qCountEl2.textContent = qCount;
+  if (cCountEl) cCountEl.textContent = (state.cases || []).length;
+  if (oCountEl) {
+    const organs = new Set((state.questions || []).map(q => q.organ).filter(Boolean));
+    oCountEl.textContent = organs.size || 1;
+  }
 }
 
 function openAuthModal() {
@@ -1009,12 +1060,14 @@ async function handleAuthLoginSubmit(e) {
     closeAuthModal();
 
     await fetchCurrentUserRole();
+    checkDailyStreak();
     updateUserRoleUI();
 
     showToast(`Bienvenue ${email} ! Connecté avec succès.`, "success");
 
     // Lancer la synchronisation en tâche de fond sans bloquer
     fetchSupabaseData(true).then(() => {
+      checkDailyStreak();
       syncLocalProgressToCloud();
     }).catch(err => console.warn("Sync background:", err));
 
@@ -2423,6 +2476,7 @@ function initApp() {
   renderDPCardsOnPlay();
   renderSpacedRepetitionDashboard();
   renderBank();
+  updateUserRoleUI();
 
   // Initialisation du Cloud Supabase & Authentification
   initSupabase();
@@ -2725,11 +2779,14 @@ function getCreatorStats() {
 }
 
 function checkDailyStreak() {
-  const today = getTodayString();
-  const lastActive = state.stats.lastActiveDate;
+  if (!state.currentUser) return;
+
+  const today = getLocalDateString();
+  const rawLast = state.stats.lastActiveDate;
+  const lastActive = rawLast ? rawLast.split('T')[0] : '';
 
   if (!lastActive) {
-    state.stats.streak = 1;
+    state.stats.streak = Math.max(1, state.stats.streak || 1);
     state.stats.lastActiveDate = today;
     saveStats();
     return;
@@ -2739,8 +2796,10 @@ function checkDailyStreak() {
     return;
   }
 
-  const dLast = new Date(lastActive);
-  const dToday = new Date(today);
+  const [ly, lm, ld] = lastActive.split('-').map(Number);
+  const [ty, tm, td] = today.split('-').map(Number);
+  const dLast = new Date(ly, lm - 1, ld);
+  const dToday = new Date(ty, tm - 1, td);
   const diffTime = dToday.getTime() - dLast.getTime();
   const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
@@ -4591,6 +4650,7 @@ function chooseReviewInterval(days) {
   }
 
   saveQuestions();
+  checkDailyStreak();
   playSound('correct');
   nextSessionQuestion();
 }
@@ -4959,6 +5019,12 @@ function shuffleQuestionOptions(q) {
 }
 
 function launchQuizSession(pool, title) {
+  if (!state.currentUser) {
+    openAuthModal();
+    showToast("Veuillez vous connecter pour vous entraîner et enregistrer votre progression !", "info");
+    return;
+  }
+
   // Mélange aléatoire de l'ordre des questions ET mélange aléatoire des propositions (A, B, C...) pour chaque question
   const randomizedQuestions = [...pool]
     .sort(() => 0.5 - Math.random())
@@ -5344,6 +5410,7 @@ function evaluateSessionAnswer(selectedIndices) {
 
   saveQuestions();
   saveStats();
+  checkDailyStreak();
 
   q.options.forEach((_, idx) => {
     const btn = document.getElementById('opt-btn-' + idx);
@@ -5455,6 +5522,7 @@ function validateOpenAnswer() {
 
   saveQuestions();
   saveStats();
+  checkDailyStreak();
 
   renderOpenAnswerResult(isMatch, userText, accepted);
   revealSessionFeedback(isMatch, q);
@@ -5545,6 +5613,7 @@ function overrideOpenAnswerCorrect() {
 
   saveQuestions();
   saveStats();
+  checkDailyStreak();
 
   playSound('correct');
   confetti({ particleCount: 30, spread: 60, origin: { y: 0.8 } });
@@ -7578,6 +7647,11 @@ function deleteDP(id) {
 // --- LECTEUR DE DOSSIER PROGRESSIF (DP SESSION) SANS SPOILER AVEC CORRECTION FINALE ---
 // =========================================================================
 function startDPSession(caseId) {
+  if (!state.currentUser) {
+    openAuthModal();
+    showToast("Veuillez vous connecter pour faire ce dossier progressif !", "info");
+    return;
+  }
   const isFromBank = document.getElementById('view-bank') && !document.getElementById('view-bank').classList.contains('hidden');
   state.sessionReturnView = isFromBank ? 'bank' : 'play';
   const dpCase = state.cases.find(c => c.id === caseId);

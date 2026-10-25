@@ -100,19 +100,21 @@
 
       <!-- Stats Pill, Comptes & Auth -->
       <div class="flex items-center space-x-2">
-        <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold" title="Série de jours actifs (Streak)">
-          <i data-lucide="flame" class="w-3.5 h-3.5 fill-amber-400"></i>
-          <span id="top-streak">1</span> j
-        </div>
+        <div id="top-user-stats" class="hidden sm:flex items-center space-x-2">
+          <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold" title="Série de jours actifs (Streak)">
+            <i data-lucide="flame" class="w-3.5 h-3.5 fill-amber-400"></i>
+            <span id="top-streak">1</span> j
+          </div>
 
-        <div onclick="switchTab('trophies')" class="cursor-pointer flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold transition" title="Niveau Joueur (Paliers PlayStation - Cliquez pour voir vos Trophées)">
-          <i data-lucide="trophy" class="w-3.5 h-3.5 text-amber-400"></i>
-          <span>Nv <strong id="top-level">1</strong></span>
-        </div>
+          <div onclick="switchTab('trophies')" class="cursor-pointer flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold transition" title="Niveau Joueur (Paliers PlayStation - Cliquez pour voir vos Trophées)">
+            <i data-lucide="trophy" class="w-3.5 h-3.5 text-amber-400"></i>
+            <span>Nv <strong id="top-level">1</strong></span>
+          </div>
 
-        <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-semibold" title="Points d'expérience cumulés">
-          <i data-lucide="award" class="w-3.5 h-3.5"></i>
-          <span id="top-xp">0</span> <span class="text-[10px]">XP</span>
+          <div class="flex items-center space-x-1 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-semibold" title="Points d'expérience cumulés">
+            <i data-lucide="award" class="w-3.5 h-3.5"></i>
+            <span id="top-xp">0</span> <span class="text-[10px]">XP</span>
+          </div>
         </div>
 
         <!-- Bouton Gestion des Comptes (visible uniquement pour Créateur) -->
@@ -137,158 +139,261 @@
     <!-- ================= 1. VUE JOUER ================= -->
     <div id="view-play" class="app-view space-y-6">
       
-      <!-- Bannière -->
-      <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 border border-slate-800 p-6 sm:p-7">
-        <div class="relative z-10 max-w-2xl">
-          <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20 text-xs font-semibold mb-2.5">
-            <i data-lucide="repeat" class="w-3.5 h-3.5"></i>
-            <span>Répétition Espacée Intelligente</span>
+      <!-- ================= 1.A VITRINE VISITEUR (DÉCONNECTÉ) ================= -->
+      <div id="play-view-guest" class="space-y-8 py-4">
+
+        <!-- Hero Vitrine -->
+        <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900/90 to-indigo-950/80 border border-slate-800 p-8 sm:p-12 shadow-2xl">
+          <div class="absolute -top-24 -right-24 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none"></div>
+          <div class="absolute -bottom-24 -left-24 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+          <div class="relative z-10 max-w-3xl space-y-5">
+            <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20 text-xs font-bold tracking-wide">
+              <span>🦖 PathoSorus</span>
+              <span class="text-slate-600">•</span>
+              <span>Entraînement en Anatomie & Cytologie Pathologiques (ACP)</span>
+            </div>
+
+            <h1 class="text-3xl sm:text-5xl font-extrabold text-white tracking-tight leading-tight">
+              Maîtrisez l'Anatomie Pathologique avec la <span class="bg-gradient-to-r from-teal-400 via-sky-300 to-indigo-400 bg-clip-text text-transparent">Répétition Espacée</span>.
+            </h1>
+
+            <p class="text-sm sm:text-base text-slate-300 leading-relaxed max-w-2xl">
+              Conçu pour les internes et pathologistes : ancrez durablement les critères diagnostiques OMS, les diagnostics différentiels et les pièges histologiques grâce à une planification adaptative (J1, J3, J7, J30) et des dossiers progressifs par étapes.
+            </p>
+
+            <div class="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <button onclick="openAuthModal()" class="px-6 py-3.5 rounded-xl bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-400 hover:to-teal-500 text-white font-bold text-sm shadow-lg shadow-teal-500/25 flex items-center justify-center space-x-2 transition transform hover:-translate-y-0.5">
+                <i data-lucide="log-in" class="w-4 h-4"></i>
+                <span>Se connecter pour s'entraîner</span>
+              </button>
+              <button onclick="switchTab('bank')" class="px-5 py-3.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700 text-sm font-semibold flex items-center justify-center space-x-2 transition">
+                <i data-lucide="database" class="w-4 h-4 text-teal-400"></i>
+                <span>Explorer la Banque (<span id="guest-stat-questions-count">48</span> Q)</span>
+              </button>
+            </div>
           </div>
-          <h1 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-            Choisissez quand revoir chaque question.
-          </h1>
-          <p class="mt-2 text-xs sm:text-sm text-slate-300 leading-relaxed">
-            À chaque réponse, définissez votre intervalle (<strong>Demain</strong>, <strong>Dans 3 jours</strong>, <strong>Dans 1 semaine</strong> ou <strong>Dans 1 mois</strong>). Le système calcule automatiquement vos cartes échues au jour le jour.
-          </p>
         </div>
+
+        <!-- 3 Cartes Atouts Pédagogiques -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+          <div class="bg-slate-900/80 border border-slate-800 hover:border-teal-500/40 rounded-2xl p-6 transition shadow-lg space-y-3">
+            <div class="w-12 h-12 rounded-2xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center">
+              <i data-lucide="repeat" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-base font-bold text-white">Répétition Espacée Intelligente</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Choisissez votre délai à chaque question (Demain, Dans 3 jours, Dans 1 semaine ou 1 mois). Vos cartes échues sont calculées au jour le jour pour ancrer vos réflexes en mémoire longue.
+            </p>
+          </div>
+
+          <div class="bg-slate-900/80 border border-slate-800 hover:border-indigo-500/40 rounded-2xl p-6 transition shadow-lg space-y-3">
+            <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+              <i data-lucide="layers" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-base font-bold text-white">Dossiers Progressifs Clinico-Pathologiques</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Résolvez des cas complets étape par étape : clinique, macroscopie, morphologie HES, panels immunohistochimiques et signature moléculaire selon les dernières classifications OMS.
+            </p>
+          </div>
+
+          <div class="bg-slate-900/80 border border-slate-800 hover:border-sky-500/40 rounded-2xl p-6 transition shadow-lg space-y-3">
+            <div class="w-12 h-12 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center">
+              <i data-lucide="users" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-base font-bold text-white">Banque Collaborative & Justifications</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              Accédez aux questions rédigées par des confrères et co-internes avec justifications systématiques pour chaque item faux, points pièges et fiches de cours synthétiques par lésion.
+            </p>
+          </div>
+
+        </div>
+
+        <!-- Bandeau Chiffres Clés & Accès -->
+        <div class="rounded-2xl bg-slate-900 border border-slate-800 p-6 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl">
+          <div class="grid grid-cols-3 gap-6 sm:gap-10 text-center w-full md:w-auto">
+            <div>
+              <div id="guest-stat-questions-count-2" class="text-2xl sm:text-3xl font-extrabold text-teal-400">48</div>
+              <div class="text-[11px] text-slate-400 font-medium mt-0.5">Questions validées</div>
+            </div>
+            <div>
+              <div id="guest-stat-cases-count" class="text-2xl sm:text-3xl font-extrabold text-indigo-400">1</div>
+              <div class="text-[11px] text-slate-400 font-medium mt-0.5">Dossier Progressif</div>
+            </div>
+            <div>
+              <div id="guest-stat-organs-count" class="text-2xl sm:text-3xl font-extrabold text-amber-400">7</div>
+              <div class="text-[11px] text-slate-400 font-medium mt-0.5">Spécialités d'organes</div>
+            </div>
+          </div>
+
+          <div class="w-full md:w-auto flex flex-col sm:flex-row items-center gap-3">
+            <button onclick="openAuthModal()" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-teal-500/25">
+              <i data-lucide="user-check" class="w-4 h-4"></i>
+              <span>Créer un compte ou Se connecter</span>
+            </button>
+          </div>
+        </div>
+
       </div>
 
-      <!-- Module : Nouveautés de l'Équipe (Questions Inédites des Collègues) -->
-      <div id="play-new-questions-container"></div>
-
-      <!-- Modules de Suivi & Répétition Espacée -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <!-- ================= 1.B DASHBOARD CONNECTÉ (RÉPÉTITION & ENTRAÎNEMENT) ================= -->
+      <div id="play-view-authenticated" class="hidden space-y-6">
         
-        <!-- Carte 1 : Session du Jour (Cartes échues) -->
-        <div class="bg-slate-900 border border-teal-500/30 hover:border-teal-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg">
-          <div>
-            <div class="flex items-center space-x-3 mb-3">
-              <div class="w-10 h-10 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center shrink-0">
-                <i data-lucide="calendar" class="w-5 h-5"></i>
-              </div>
-              <div>
-                <h3 class="font-bold text-white text-base">Répétition du Jour</h3>
-                <p class="text-xs text-teal-400 font-medium">
-                  <span id="stat-due-today-count">0</span> carte(s) échue(s)
-                </p>
-              </div>
+        <!-- Bannière -->
+        <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 border border-slate-800 p-6 sm:p-7">
+          <div class="relative z-10 max-w-2xl">
+            <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20 text-xs font-semibold mb-2.5">
+              <i data-lucide="repeat" class="w-3.5 h-3.5"></i>
+              <span>Répétition Espacée Intelligente</span>
             </div>
-            <p class="text-xs text-slate-400 leading-relaxed">
-              Vos cartes échues selon vos délais personnalisés et les questions marquées en révision.
+            <h1 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              Choisissez quand revoir chaque question.
+            </h1>
+            <p class="mt-2 text-xs sm:text-sm text-slate-300 leading-relaxed">
+              À chaque réponse, définissez votre intervalle (<strong>Demain</strong>, <strong>Dans 3 jours</strong>, <strong>Dans 1 semaine</strong> ou <strong>Dans 1 mois</strong>). Le système calcule automatiquement vos cartes échues au jour le jour.
             </p>
           </div>
-          <button onclick="startSpacedRepetitionDueSession()" id="btn-play-due-today" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-teal-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
-            <i data-lucide="play" class="w-3.5 h-3.5"></i>
-            <span id="label-due-today">Lancer la session du jour (0)</span>
-          </button>
         </div>
 
-        <!-- Carte 2 : Questions de l'Équipe / Co-internes (NOUVEAU) -->
-        <div class="bg-slate-900 border border-indigo-500/30 hover:border-indigo-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg relative overflow-hidden group">
-          <div class="absolute -top-10 -right-10 w-24 h-24 bg-indigo-500/10 rounded-full blur-xl pointer-events-none"></div>
-          <div>
-            <div class="flex items-center space-x-3 mb-3">
-              <div class="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center shrink-0">
-                <i data-lucide="users" class="w-5 h-5"></i>
+        <!-- Module : Nouveautés de l'Équipe (Questions Inédites des Collègues) -->
+        <div id="play-new-questions-container"></div>
+
+        <!-- Modules de Suivi & Répétition Espacée -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          
+          <!-- Carte 1 : Session du Jour (Cartes échues) -->
+          <div class="bg-slate-900 border border-teal-500/30 hover:border-teal-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg">
+            <div>
+              <div class="flex items-center space-x-3 mb-3">
+                <div class="w-10 h-10 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center shrink-0">
+                  <i data-lucide="calendar" class="w-5 h-5"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-white text-base">Répétition du Jour</h3>
+                  <p class="text-xs text-teal-400 font-medium">
+                    <span id="stat-due-today-count">0</span> carte(s) échue(s)
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 class="font-bold text-white text-base flex items-center space-x-1.5">
-                  <span>Questions des Collègues</span>
-                  <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Équipe</span>
-                </h3>
-                <p class="text-xs text-indigo-400 font-medium">
-                  <span id="stat-colleagues-count">0</span> question(s) d'autres rédacteurs
-                </p>
-              </div>
+              <p class="text-xs text-slate-400 leading-relaxed">
+                Vos cartes échues selon vos délais personnalisés et les questions marquées en révision.
+              </p>
             </div>
-            <p class="text-xs text-slate-400 leading-relaxed">
-              Révisez exclusivement les questions créées par vos confrères (Samy et autres rédacteurs, hors vos créations).
-            </p>
-          </div>
-          <button onclick="startColleaguesQuestionsSession()" id="btn-play-colleagues" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-indigo-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
-            <i data-lucide="play" id="icon-play-colleagues" class="w-3.5 h-3.5"></i>
-            <span id="label-colleagues-count">Réviser les questions de l'équipe (0)</span>
-          </button>
-        </div>
-
-        <!-- Carte 3 : Questions Neutralisées / Maîtrisées -->
-        <div class="bg-slate-900 border border-emerald-500/30 hover:border-emerald-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg">
-          <div>
-            <div class="flex items-center space-x-3 mb-3">
-              <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center shrink-0">
-                <i data-lucide="award" class="w-5 h-5"></i>
-              </div>
-              <div>
-                <h3 class="font-bold text-white text-base">Questions Maîtrisées</h3>
-                <p class="text-xs text-emerald-400 font-medium">
-                  <span id="stat-mastered-count">0</span> neutralisée(s) • <span id="stat-active-count">0</span> active(s)
-                </p>
-              </div>
-            </div>
-            <p class="text-xs text-slate-400 leading-relaxed">
-              Ces questions sont exclues de vos sessions habituelles. Testez-les à tout moment pour vérifier vos acquis.
-            </p>
-          </div>
-          <button onclick="startMasteredReviewSession()" id="btn-play-mastered" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-emerald-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
-            <i data-lucide="play" class="w-3.5 h-3.5"></i>
-            <span id="label-mastered-count">Tester mes maîtrisées (0)</span>
-          </button>
-        </div>
-
-      </div>
-
-      <!-- Sélecteur Hiérarchique à 3 Niveaux (QUESTIONS ACTIVES) -->
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <h2 class="text-base font-bold text-white flex items-center space-x-2">
-              <i data-lucide="git-branch" class="w-4 h-4 text-teal-400"></i>
-              <span>Classification & Entraînement (Organe & Sous-organe)</span>
-            </h2>
-            <p class="text-xs text-slate-400 mt-0.5">Testez tout un organe ou une catégorie / sous-organe (les questions neutralisées sont filtrées).</p>
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <button onclick="startColleaguesQuestionsSession()" id="btn-play-colleagues-shortcut" class="px-3.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-bold flex items-center space-x-1.5 transition">
-              <i data-lucide="users" class="w-3.5 h-3.5"></i>
-              <span id="label-colleagues-shortcut">Questions des Collègues (0)</span>
-            </button>
-            <button onclick="startGlobalSprint()" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 hover:text-white border border-slate-700 text-xs font-bold flex items-center space-x-1.5 transition">
-              <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
-              <span>Sprint Quotidien (Actives)</span>
+            <button onclick="startSpacedRepetitionDueSession()" id="btn-play-due-today" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-teal-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
+              <i data-lucide="play" class="w-3.5 h-3.5"></i>
+              <span id="label-due-today">Lancer la session du jour (0)</span>
             </button>
           </div>
-        </div>
 
-        <div id="hierarchy-selector-container"></div>
-      </div>
-
-      <!-- Section : Dossiers Progressifs (DP) -->
-      <div class="space-y-3">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-2">
-            <div class="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
-              <i data-lucide="layers" class="w-4 h-4"></i>
+          <!-- Carte 2 : Questions de l'Équipe / Co-internes (NOUVEAU) -->
+          <div class="bg-slate-900 border border-indigo-500/30 hover:border-indigo-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg relative overflow-hidden group">
+            <div class="absolute -top-10 -right-10 w-24 h-24 bg-indigo-500/10 rounded-full blur-xl pointer-events-none"></div>
+            <div>
+              <div class="flex items-center space-x-3 mb-3">
+                <div class="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center shrink-0">
+                  <i data-lucide="users" class="w-5 h-5"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-white text-base flex items-center space-x-1.5">
+                    <span>Questions des Collègues</span>
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Équipe</span>
+                  </h3>
+                  <p class="text-xs text-indigo-400 font-medium">
+                    <span id="stat-colleagues-count">0</span> question(s) d'autres rédacteurs
+                  </p>
+                </div>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed">
+                Révisez exclusivement les questions créées par vos confrères (Samy et autres rédacteurs, hors vos créations).
+              </p>
             </div>
-            <h3 class="text-base font-bold text-white">Mes Dossiers Progressifs Clinico-Pathologiques (DP)</h3>
+            <button onclick="startColleaguesQuestionsSession()" id="btn-play-colleagues" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-indigo-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
+              <i data-lucide="play" id="icon-play-colleagues" class="w-3.5 h-3.5"></i>
+              <span id="label-colleagues-count">Réviser les questions de l'équipe (0)</span>
+            </button>
           </div>
-          <button onclick="switchTab('create'); setCreatorMode('dp');" class="text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center space-x-1">
-            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
-            <span>Nouveau DP</span>
-          </button>
-        </div>
-        <div id="home-dp-cards-container" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-      </div>
 
-      <!-- Raccourcis par Tags (#HES, #IHC, etc.) -->
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-lg">
-        <div class="flex items-center justify-between">
-          <h3 class="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center space-x-2">
-            <i data-lucide="tag" class="w-4 h-4"></i>
-            <span>Sessions Ciblées par Tag (#)</span>
-          </h3>
-          <span class="text-[11px] text-slate-400">Cliquez sur un tag pour réviser cette modalité</span>
+          <!-- Carte 3 : Questions Neutralisées / Maîtrisées -->
+          <div class="bg-slate-900 border border-emerald-500/30 hover:border-emerald-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg">
+            <div>
+              <div class="flex items-center space-x-3 mb-3">
+                <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                  <i data-lucide="award" class="w-5 h-5"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-white text-base">Questions Maîtrisées</h3>
+                  <p class="text-xs text-emerald-400 font-medium">
+                    <span id="stat-mastered-count">0</span> neutralisée(s) • <span id="stat-active-count">0</span> active(s)
+                  </p>
+                </div>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed">
+                Ces questions sont exclues de vos sessions habituelles. Testez-les à tout moment pour vérifier vos acquis.
+              </p>
+            </div>
+            <button onclick="startMasteredReviewSession()" id="btn-play-mastered" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-emerald-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
+              <i data-lucide="play" class="w-3.5 h-3.5"></i>
+              <span id="label-mastered-count">Tester mes maîtrisées (0)</span>
+            </button>
+          </div>
+
         </div>
-        <div id="home-tags-container" class="flex flex-wrap gap-2 pt-1"></div>
+
+        <!-- Sélecteur Hiérarchique à 3 Niveaux (QUESTIONS ACTIVES) -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-xl">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+            <div>
+              <h2 class="text-base font-bold text-white flex items-center space-x-2">
+                <i data-lucide="git-branch" class="w-4 h-4 text-teal-400"></i>
+                <span>Classification & Entraînement (Organe & Sous-organe)</span>
+              </h2>
+              <p class="text-xs text-slate-400 mt-0.5">Testez tout un organe ou une catégorie / sous-organe (les questions neutralisées sont filtrées).</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button onclick="startColleaguesQuestionsSession()" id="btn-play-colleagues-shortcut" class="px-3.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-bold flex items-center space-x-1.5 transition">
+                <i data-lucide="users" class="w-3.5 h-3.5"></i>
+                <span id="label-colleagues-shortcut">Questions des Collègues (0)</span>
+              </button>
+              <button onclick="startGlobalSprint()" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 hover:text-white border border-slate-700 text-xs font-bold flex items-center space-x-1.5 transition">
+                <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
+                <span>Sprint Quotidien (Actives)</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="hierarchy-selector-container"></div>
+        </div>
+
+        <!-- Section : Dossiers Progressifs (DP) -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <div class="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+                <i data-lucide="layers" class="w-4 h-4"></i>
+              </div>
+              <h3 class="text-base font-bold text-white">Mes Dossiers Progressifs Clinico-Pathologiques (DP)</h3>
+            </div>
+            <button onclick="switchTab('create'); setCreatorMode('dp');" class="text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center space-x-1">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Nouveau DP</span>
+            </button>
+          </div>
+          <div id="home-dp-cards-container" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+        </div>
+
+        <!-- Raccourcis par Tags (#HES, #IHC, etc.) -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-lg">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center space-x-2">
+              <i data-lucide="tag" class="w-4 h-4"></i>
+              <span>Sessions Ciblées par Tag (#)</span>
+            </h3>
+            <span class="text-[11px] text-slate-400">Cliquez sur un tag pour réviser cette modalité</span>
+          </div>
+          <div id="home-tags-container" class="flex flex-wrap gap-2 pt-1"></div>
+        </div>
+
       </div>
 
     </div>
@@ -1680,6 +1785,6 @@
 
   <!-- Scripts -->
   <script src="seed_data.js?v=20261025_1130"></script>
-  <script src="app.js?v=20261025_1130"></script>
+  <script src="app.js?v=20261025_1145"></script>
 </body>
 </html>
