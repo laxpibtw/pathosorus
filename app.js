@@ -1254,32 +1254,18 @@ async function handleAuthLoginSubmit(e) {
   }
 }
 
-async function handleAuthLogout() {
+function handleAuthLogout() {
   if (!confirm("Voulez-vous vous déconnecter de PathoSorus ?")) return;
-  if (state.currentUser) {
-    saveStats();
-    await syncLocalProgressToCloud();
-  }
 
-  // 1. Marquer immédiatement la déconnexion explicite
+  const previousUser = state.currentUser;
+
+  // 1. Déconnexion locale INSTANTANÉE (0 ms, aucun blocage UI)
   localStorage.setItem('pathosorus_explicit_logout', 'true');
   localStorage.removeItem('pathosorus_current_email');
   state.currentUser = null;
   state.currentRole = 'reader';
 
-  if (supabaseClient) {
-    try {
-      await supabaseClient.auth.signOut();
-    } catch (e) {
-      console.warn("Erreur signOut:", e);
-    }
-  }
-
-  // 2. Réinitialiser la progression des révisions en mémoire (évite toute fuite entre comptes)
-  resetInMemoryUserProgress();
-  saveQuestions();
-
-  // 3. Réinitialiser les statistiques vers un profil visiteur propre
+  // 2. Réinitialiser les statistiques vers un profil visiteur propre
   state.stats = {
     xp: 0,
     creatorXp: 0,
@@ -1292,14 +1278,40 @@ async function handleAuthLogout() {
     badgeHistory: {}
   };
   localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+
+  // 3. Basculer immédiatement l'interface utilisateur (0 ms)
+  closeAuthModal();
   updateUserRoleUI();
   updateTopBar();
-  renderSpacedRepetitionDashboard();
+  switchTab('play');
+  const playGuest = document.getElementById('play-view-guest');
+  const playAuth = document.getElementById('play-view-authenticated');
+  if (playGuest) playGuest.classList.remove('hidden');
+  if (playAuth) playAuth.classList.add('hidden');
+  renderGuestShowcaseStats();
   renderBank();
   renderHierarchySelector();
   renderTrophiesView();
+  showToast("Vous avez été déconnecté avec succès.", "info");
+  if (window.lucide) lucide.createIcons();
 
-  switchTab('play');
+  // 4. Synchronisation finale et signOut Supabase en tâche de fond (non-bloquant)
+  (async () => {
+    if (previousUser) {
+      try {
+        await syncLocalProgressToCloud();
+      } catch (e) {
+        console.warn("Sync background logout:", e);
+      }
+    }
+    if (supabaseClient) {
+      try {
+        await supabaseClient.auth.signOut();
+      } catch (e) {
+        console.warn("Erreur signOut:", e);
+      }
+    }
+  })().catch(() => {});
 }
 
 async function handleMasterAdminSignUp() {
