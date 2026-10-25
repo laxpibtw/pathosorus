@@ -2474,10 +2474,17 @@ function formatQuestionForSupabase(q) {
   const diff = q.difficulty || (q.stats && q.stats.difficulty) || 'facile';
   const extClues = q.extremeClues || q.extremeclues || (q.stats && q.stats.extremeClues) || '';
 
-  // IMPORTANT : La table collective `questions` ne stocke que les métadonnées de la question
-  // (difficulté, indices extrêmes, auteur) et JAMAIS la progression individuelle d'un utilisateur
+  // Conserver fidèlement les métadonnées et la progression des révisions
   const authorEmail = q.created_by || (q.stats && q.stats.created_by) || ((state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : 'padoreau85@gmail.com');
-  const questionMetadataStats = {
+  const existingStats = (q.stats && typeof q.stats === 'object') ? q.stats : {};
+  const questionStats = {
+    ...existingStats,
+    seen: existingStats.seen || 0,
+    correct: existingStats.correct || 0,
+    consecutiveCorrect: existingStats.consecutiveCorrect || 0,
+    intervalDays: existingStats.intervalDays || 0,
+    lastReviewed: existingStats.lastReviewed || null,
+    nextReviewDate: existingStats.nextReviewDate || null,
     difficulty: diff,
     extremeClues: extClues,
     created_by: authorEmail
@@ -2498,9 +2505,9 @@ function formatQuestionForSupabase(q) {
     trap: q.trap || '',
     tags: Array.isArray(q.tags) ? q.tags : [],
     images: Array.isArray(q.images) ? q.images : [],
-    mastered: false, // Ne pas figer de statut individuel sur la banque partagée
-    flagged: false,  // Ne pas figer d'erreur individuelle sur la banque partagée
-    stats: questionMetadataStats,
+    mastered: Boolean(q.mastered),
+    flagged: Boolean(q.flagged),
+    stats: questionStats,
     // Colonnes PostgreSQL en minuscules conformes à PostgREST
     optionexplanations: optExp,
     explanationimages: expImgs,
