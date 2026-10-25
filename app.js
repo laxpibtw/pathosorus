@@ -71,12 +71,21 @@ const AUTHORIZED_CREATOR_EMAILS = new Set([
   'belhadef.samy@gmail.com'
 ]);
 
-function isCreator() {
+function getCurrentUserEmail() {
   if (state.currentUser && state.currentUser.email) {
-    const em = state.currentUser.email.toLowerCase();
-    if (AUTHORIZED_CREATOR_EMAILS.has(em)) {
-      return true;
-    }
+    return state.currentUser.email.trim().toLowerCase();
+  }
+  const saved = localStorage.getItem('pathosorus_current_email');
+  if (saved && saved.trim()) {
+    return saved.trim().toLowerCase();
+  }
+  return 'padoreau85@gmail.com';
+}
+
+function isCreator() {
+  const em = getCurrentUserEmail();
+  if (AUTHORIZED_CREATOR_EMAILS.has(em)) {
+    return true;
   }
   return state.currentRole === 'creator';
 }
@@ -240,7 +249,14 @@ function initSupabase() {
   const lib = window.supabase;
   if (url && key && lib && typeof lib.createClient === 'function') {
     try {
-      supabaseClient = lib.createClient(url, key);
+      supabaseClient = lib.createClient(url, key, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          lock: async (name, acquireTimeout, fn) => { return await fn(); }
+        }
+      });
       updateSupabaseUI(true);
       initAuth();
       return true;
@@ -379,10 +395,13 @@ async function initAuth() {
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session && session.user) {
       state.currentUser = session.user;
+      if (session.user.email) {
+        localStorage.setItem('pathosorus_current_email', session.user.email.trim().toLowerCase());
+      }
       await fetchCurrentUserRole();
     } else {
       state.currentUser = null;
-      state.currentRole = 'reader';
+      state.currentRole = isLocalEnvironment() ? 'creator' : 'reader';
     }
     updateUserRoleUI();
 
@@ -395,14 +414,15 @@ async function initAuth() {
     supabaseClient.auth.onAuthStateChange(async (event, session) => {
       if (session && session.user) {
         state.currentUser = session.user;
+        if (session.user.email) {
+          localStorage.setItem('pathosorus_current_email', session.user.email.trim().toLowerCase());
+        }
         await fetchCurrentUserRole();
         await fetchSupabaseData(true);
         await syncLocalProgressToCloud();
       } else {
         state.currentUser = null;
-        state.currentRole = 'reader';
-        resetInMemoryUserProgress();
-        saveQuestions();
+        state.currentRole = isLocalEnvironment() ? 'creator' : 'reader';
         updateTopBar();
         renderSpacedRepetitionDashboard();
         renderBank();
@@ -715,7 +735,8 @@ function getUserProgressStorageKey() {
   if (state.currentUser && state.currentUser.id) {
     return 'pathosorus_user_progress_' + state.currentUser.id;
   }
-  return 'pathosorus_user_progress_guest';
+  const email = getCurrentUserEmail();
+  return 'pathosorus_user_progress_' + email.replace(/[^a-z0-9]/gi, '_');
 }
 
 function getDefaultQuestionStats() {
@@ -963,27 +984,40 @@ async function handleAuthLoginSubmit(e) {
 
   if (!email || !password) return;
 
+  const originalBtnHtml = btn ? btn.innerHTML : '';
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = `<span>Connexion en cours...</span>`;
+    btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Connexion en cours...</span>`;
+    if (window.lucide) lucide.createIcons();
   }
   if (alertBox) alertBox.classList.add('hidden');
 
   try {
-    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    const loginPromise = supabaseClient.auth.signInWithPassword({ email, password });
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("Délai de connexion dépassé (timeout 10s). Vérifiez vos identifiants ou le réseau.")), 10000)
+    );
+    const { data, error } = await Promise.race([loginPromise, timeoutPromise]);
     if (error) throw error;
 
     state.currentUser = data.user;
-    await fetchCurrentUserRole();
-    updateUserRoleUI();
+    if (email) {
+      localStorage.setItem('pathosorus_current_email', email.toLowerCase());
+    }
+
+    // Fermer immédiatement la modale pour débloquer l'interface
     closeAuthModal();
 
-    const roleStr = isCreator() ? "Créateur 🦖" : "Lecteur 📖";
-    alert(`Bienvenue ${email} !\nConnecté avec succès en tant que ${roleStr}.`);
+    await fetchCurrentUserRole();
+    updateUserRoleUI();
 
-    // Synchronisation complète des questions et de la progression de ce compte
-    await fetchSupabaseData(true);
-    await syncLocalProgressToCloud();
+    showToast(`Bienvenue ${email} ! Connecté avec succès.`, "success");
+
+    // Lancer la synchronisation en tâche de fond sans bloquer
+    fetchSupabaseData(true).then(() => {
+      syncLocalProgressToCloud();
+    }).catch(err => console.warn("Sync background:", err));
+
   } catch (err) {
     console.error("Erreur connexion:", err);
     if (alertBox) {
@@ -995,7 +1029,7 @@ async function handleAuthLoginSubmit(e) {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = `<i data-lucide="log-in" class="w-4 h-4"></i><span>Se connecter</span>`;
+      btn.innerHTML = originalBtnHtml || `<i data-lucide="log-in" class="w-4 h-4"></i><span>Se connecter</span>`;
       if (window.lucide) lucide.createIcons();
     }
   }
@@ -1917,7 +1951,8 @@ async function fetchSupabaseData(silent = false) {
         if (raw) storedProgress = JSON.parse(raw);
       } catch (e) {}
 
-      const isMainCreator = state.currentUser && state.currentUser.email && state.currentUser.email.toLowerCase() === 'padoreau85@gmail.com';
+      const currentEmail = getCurrentUserEmail();
+      const isMainCreator = currentEmail === 'padoreau85@gmail.com';
 
       const cloudQuestions = qRes.data.map(q => {
         const cloudProg = cloudProgressMap.get(q.id);
@@ -1928,29 +1963,33 @@ async function fetchSupabaseData(silent = false) {
         let mastered = false;
         let flagged = false;
 
-        // RÈGLE FONDAMENTALE D'ISOLATION DES COMPTES :
-        // La progression personnelle (intervalles, révisions, maîtrisées) provient en priorité
-        // de user_progress du compte connecté, ou du cache local réservé à cet utilisateur.
-        if (cloudProg) {
-          mastered = Boolean(cloudProg.mastered);
-          flagged = Boolean(cloudProg.flagged);
-          if (cloudProg.stats) stats = { ...stats, ...cloudProg.stats };
-        } else if (localProg) {
-          if (localProg.stats) stats = { ...stats, ...localProg.stats };
-          if (typeof localProg.mastered !== 'undefined') mastered = Boolean(localProg.mastered);
-          if (typeof localProg.flagged !== 'undefined') flagged = Boolean(localProg.flagged);
-        } else if (isMainCreator && q.stats && (q.stats.seen > 0 || q.stats.lastReviewed)) {
-          // Filet de sécurité pour le compte créateur principal : récupérer l'historique initial de la banque
+        // 1. Préserver d'abord toute progression locale existante pour ne JAMAIS perdre les réponses du jour
+        if (localQ && localQ.stats && (localQ.stats.seen > 0 || localQ.stats.lastReviewed)) {
+          stats = { ...stats, ...localQ.stats };
+          if (typeof localQ.mastered !== 'undefined') mastered = Boolean(localQ.mastered);
+          if (typeof localQ.flagged !== 'undefined') flagged = Boolean(localQ.flagged);
+        }
+
+        // 2. Progression depuis le stockage local de l'utilisateur
+        if (localProg && localProg.stats) {
+          if (!stats.lastReviewed || (localProg.stats.lastReviewed && localProg.stats.lastReviewed >= stats.lastReviewed)) {
+            stats = { ...stats, ...localProg.stats };
+            if (typeof localProg.mastered !== 'undefined') mastered = Boolean(localProg.mastered);
+            if (typeof localProg.flagged !== 'undefined') flagged = Boolean(localProg.flagged);
+          }
+        }
+
+        // 3. Progression Cloud
+        if (cloudProg && cloudProg.stats) {
+          if (!stats.lastReviewed || (cloudProg.stats.lastReviewed && cloudProg.stats.lastReviewed >= stats.lastReviewed)) {
+            stats = { ...stats, ...cloudProg.stats };
+            if (typeof cloudProg.mastered !== 'undefined') mastered = Boolean(cloudProg.mastered);
+            if (typeof cloudProg.flagged !== 'undefined') flagged = Boolean(cloudProg.flagged);
+          }
+        } else if (isMainCreator && q.stats && (q.stats.seen > 0 || q.stats.lastReviewed) && !stats.seen) {
           stats = { ...stats, ...q.stats };
           if (typeof q.mastered !== 'undefined') mastered = Boolean(q.mastered);
           if (typeof q.flagged !== 'undefined') flagged = Boolean(q.flagged);
-        }
-
-        // Si la session locale a une révision encore plus récente pour ce même utilisateur
-        if (cloudProg && localProg && localProg.stats && (localProg.stats.seen || 0) > (stats.seen || 0)) {
-          stats = { ...stats, ...localProg.stats };
-          if (typeof localProg.mastered !== 'undefined') mastered = Boolean(localProg.mastered);
-          if (typeof localProg.flagged !== 'undefined') flagged = Boolean(localProg.flagged);
         }
 
         // Récupérer optionExplanations depuis la colonne Supabase (optionexplanations ou optionExplanations)
@@ -2097,9 +2136,7 @@ async function fetchSupabaseData(silent = false) {
       });
       if (needSync.length > 0) {
         console.log(`☁️ Auto-push vers Supabase de ${needSync.length} question(s) avec justifications...`);
-        for (const q of needSync) {
-          await dbUpsertQuestion(q);
-        }
+        Promise.all(needSync.map(q => dbUpsertQuestion(q))).catch(e => console.warn("Auto-push background:", e));
       }
     }
 
@@ -2338,8 +2375,8 @@ function initApp() {
   try {
     const userStorageKey = getUserProgressStorageKey();
     let rawProg = localStorage.getItem(userStorageKey);
-    if (!rawProg && (!state.currentUser || !state.currentUser.id)) {
-      rawProg = localStorage.getItem('pathosorus_user_progress');
+    if (!rawProg) {
+      rawProg = localStorage.getItem('pathosorus_user_progress_guest') || localStorage.getItem('pathosorus_user_progress');
       if (rawProg) {
         localStorage.setItem(userStorageKey, rawProg);
       }
@@ -4362,7 +4399,7 @@ window.onAuthorSelectChange = onAuthorSelectChange;
 
 // --- RÉVISIONS DES QUESTIONS DES COLLÈGUES / ÉQUIPE ---
 function getColleaguesQuestions(activeOnly = true, toReviewTodayOnly = false) {
-  const currentEmail = (state.currentUser && state.currentUser.email || '').trim().toLowerCase();
+  const currentEmail = getCurrentUserEmail();
 
   return (state.questions || []).filter(q => {
     if (activeOnly && q.mastered) return false;
@@ -4382,7 +4419,7 @@ function getColleaguesQuestions(activeOnly = true, toReviewTodayOnly = false) {
 }
 
 function getMyAuthoredQuestions(activeOnly = true) {
-  const currentEmail = (state.currentUser && state.currentUser.email || '').trim().toLowerCase();
+  const currentEmail = getCurrentUserEmail();
   if (!currentEmail) return [];
 
   return (state.questions || []).filter(q => {
