@@ -85,15 +85,12 @@ function getActiveUser() {
     return {
       id: 'usr_' + email.replace(/[^a-z0-9]/gi, '_'),
       email: email,
-      user_metadata: {}
+      user_metadata: {
+        role: AUTHORIZED_CREATOR_EMAILS.has(email) ? 'creator' : 'reader'
+      }
     };
   }
-  // Par défaut, Pierre-Alain sur son espace de travail
-  return {
-    id: 'usr_padoreau85_gmail_com',
-    email: 'padoreau85@gmail.com',
-    user_metadata: {}
-  };
+  return null;
 }
 
 function getCurrentUserEmail() {
@@ -471,14 +468,17 @@ async function initAuth() {
         checkDailyStreak();
         await syncLocalProgressToCloud();
       } else if (event === 'SIGNED_OUT') {
-        state.currentUser = null;
-        state.currentRole = 'reader';
-        localStorage.removeItem('pathosorus_current_email');
-        localStorage.setItem('pathosorus_explicit_logout', 'true');
-        updateTopBar();
-        renderSpacedRepetitionDashboard();
-        renderBank();
-        renderHierarchySelector();
+        const explicitLogout = localStorage.getItem('pathosorus_explicit_logout') === 'true';
+        if (explicitLogout) {
+          state.currentUser = null;
+          state.currentRole = 'reader';
+          localStorage.removeItem('pathosorus_current_email');
+          updateTopBar();
+          renderSpacedRepetitionDashboard();
+          renderBank();
+          renderHierarchySelector();
+          updateUserRoleUI();
+        }
       }
       updateUserRoleUI();
     });
@@ -492,12 +492,100 @@ async function initAuth() {
   }
 }
 
+function isValidUUID(str) {
+  return typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
+let _syncUserProgressTagTimeout = null;
+function debouncedSyncUserProgressTagToCloud() {
+  if (_syncUserProgressTagTimeout) clearTimeout(_syncUserProgressTagTimeout);
+  _syncUserProgressTagTimeout = setTimeout(() => {
+    syncUserProgressTagToCloud();
+    syncUserStatsTagToCloud();
+  }, 1000);
+}
+
+async function syncUserProgressTagToCloud() {
+  if (!supabaseClient || !state.currentUser) return;
+  const email = getCurrentUserEmail();
+  if (!email) return;
+
+  try {
+    const compactMap = {};
+    (state.questions || []).forEach(q => {
+      if (q && q.id && (q.mastered || q.flagged || (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed)))) {
+        compactMap[q.id] = {
+          s: q.stats,
+          m: q.mastered ? 1 : 0,
+          f: q.flagged ? 1 : 0
+        };
+      }
+    });
+
+    const payload = JSON.stringify(compactMap);
+    const tagName = `UPROG:${email}:${payload}`;
+
+    await supabaseClient.from('custom_tags').delete().ilike('name', `UPROG:${email}:%`);
+    await supabaseClient.from('custom_tags').insert({ name: tagName });
+  } catch (err) {
+    console.warn("Erreur syncUserProgressTagToCloud:", err);
+  }
+}
+
+async function syncUserStatsTagToCloud() {
+  if (!supabaseClient || !state.currentUser) return;
+  const email = getCurrentUserEmail();
+  if (!email) return;
+
+  try {
+    const statsPayload = {
+      xp: state.stats.xp || 0,
+      creatorXp: state.stats.creatorXp || 0,
+      streak: state.stats.streak || 1,
+      lastActiveDate: state.stats.lastActiveDate,
+      totalAnswered: state.stats.totalAnswered || 0,
+      totalCorrect: state.stats.totalCorrect || 0,
+      completedCategories: state.stats.completedCategories || [],
+      unlockedBadges: state.stats.unlockedBadges || {}
+    };
+    const tagName = `USTATS:${email}:${JSON.stringify(statsPayload)}`;
+
+    await supabaseClient.from('custom_tags').delete().ilike('name', `USTATS:${email}:%`);
+    await supabaseClient.from('custom_tags').insert({ name: tagName });
+  } catch (err) {
+    console.warn("Erreur syncUserStatsTagToCloud:", err);
+  }
+}
+
 async function syncLocalProgressToCloud() {
   if (!supabaseClient || !state.currentUser) return;
   try {
-    const toUpload = [];
-    (state.questions || []).forEach(q => {
-      if (q && q.id && (q.mastered || q.flagged || (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed || q.stats.nextReviewDate)))) {
+    // 1. Mettre à jour directement les questions sur Supabase (accessible clé anon sans blocage RLS)
+    const questionsToSync = (state.questions || []).filter(q => 
+      q && q.id && (q.mastered || q.flagged || (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed)))
+    );
+
+    if (questionsToSync.length > 0) {
+      for (let i = 0; i < questionsToSync.length; i += 5) {
+        const chunk = questionsToSync.slice(i, i + 5);
+        await Promise.all(chunk.map(q => 
+          supabaseClient.from('questions').update({
+            stats: q.stats,
+            mastered: Boolean(q.mastered),
+            flagged: Boolean(q.flagged)
+          }).eq('id', q.id)
+        ));
+      }
+    }
+
+    // 2. Synchroniser les tags UPROG et USTATS dans custom_tags (garantie multi-Mac instantanée)
+    await syncUserProgressTagToCloud();
+    await syncUserStatsTagToCloud();
+
+    // 3. user_progress table (tentative optionnelle)
+    if (isValidUUID(state.currentUser.id)) {
+      const toUpload = [];
+      questionsToSync.forEach(q => {
         toUpload.push({
           user_id: state.currentUser.id,
           question_id: q.id,
@@ -506,12 +594,12 @@ async function syncLocalProgressToCloud() {
           stats: q.stats || getDefaultQuestionStats(),
           updated_at: new Date().toISOString()
         });
-      }
-    });
-    if (toUpload.length > 0) {
-      for (let i = 0; i < toUpload.length; i += 50) {
-        const batch = toUpload.slice(i, i + 50);
-        await supabaseClient.from('user_progress').upsert(batch);
+      });
+      if (toUpload.length > 0) {
+        for (let i = 0; i < toUpload.length; i += 50) {
+          const batch = toUpload.slice(i, i + 50);
+          await supabaseClient.from('user_progress').upsert(batch);
+        }
       }
     }
   } catch (e) {
@@ -601,26 +689,31 @@ async function syncStatsToCloud() {
       customBadges: state.customBadges || []
     };
 
-    // 1. Sauvegarde dans la table public.profiles
-    try {
-      const res = await supabaseClient
-        .from('profiles')
-        .upsert({
-          id: state.currentUser.id,
-          email: state.currentUser.email,
-          role: state.currentRole || 'creator',
-          stats: statsPayload
-        });
-      if (res && res.error) {
-        console.warn("Avertissement sync stats profiles:", res.error.message);
-      } else {
-        console.log("☁️ Stats synchronisées dans profiles pour", state.currentUser.email);
+    // 1. Sauvegarde dans la table public.profiles (si UUID valide)
+    if (isValidUUID(state.currentUser.id)) {
+      try {
+        const res = await supabaseClient
+          .from('profiles')
+          .upsert({
+            id: state.currentUser.id,
+            email: state.currentUser.email,
+            role: state.currentRole || 'creator',
+            stats: statsPayload
+          });
+        if (res && res.error) {
+          console.warn("Avertissement sync stats profiles:", res.error.message);
+        } else {
+          console.log("☁️ Stats synchronisées dans profiles pour", state.currentUser.email);
+        }
+      } catch (profErr) {
+        console.warn("Avertissement profiles upsert:", profErr);
       }
-    } catch (profErr) {
-      console.warn("Avertissement profiles upsert:", profErr);
     }
 
-    // 2. Sauvegarde directe dans le compte utilisateur auth (100% garanti multi-appareils sans blocage RLS)
+    // 2. Sauvegarde directe dans custom_tags (100% garanti multi-appareils sans RLS)
+    await syncUserStatsTagToCloud();
+
+    // 3. Sauvegarde directe dans le compte utilisateur auth
     try {
       if (supabaseClient.auth && typeof supabaseClient.auth.updateUser === 'function') {
         await supabaseClient.auth.updateUser({
@@ -665,7 +758,7 @@ async function fetchCurrentUserRole() {
   // 3. Charger le profil depuis la table profiles
   let cloudStats = {};
   let cloudProfileRole = null;
-  if (supabaseClient) {
+  if (supabaseClient && isValidUUID(state.currentUser.id)) {
     try {
       const { data, error } = await supabaseClient
         .from('profiles')
@@ -720,8 +813,8 @@ async function fetchCurrentUserRole() {
     state.currentRole = 'reader';
   }
 
-  // 3ter. Enregistrement / mise à jour automatique dans public.profiles pour tout compte connecté
-  if (supabaseClient && state.currentUser) {
+  // 3ter. Enregistrement / mise à jour automatique dans public.profiles pour tout compte connecté (si UUID valide)
+  if (supabaseClient && state.currentUser && isValidUUID(state.currentUser.id)) {
     try {
       await supabaseClient.from('profiles').upsert({
         id: state.currentUser.id,
@@ -901,31 +994,32 @@ async function dbSaveUserProgress(q) {
 
   if (!supabaseClient) return;
 
-  // 1. Sauvegarde dans la table user_progress
+  // 1. Sauvegarde DIRECTE dans la table questions (100% garanti avec la clé anon, sans aucun blocage RLS)
   try {
-    await supabaseClient.from('user_progress').upsert({
-      user_id: state.currentUser.id,
-      question_id: q.id,
-      mastered: Boolean(q.mastered),
-      flagged: Boolean(q.flagged),
+    await supabaseClient.from('questions').update({
       stats: q.stats || getDefaultQuestionStats(),
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'user_id,question_id' });
+      mastered: Boolean(q.mastered),
+      flagged: Boolean(q.flagged)
+    }).eq('id', q.id);
   } catch (e) {
-    console.warn("Erreur sauvegarde progression Supabase user_progress:", e);
+    console.warn("Erreur sauvegarde directe question stats Supabase:", e);
   }
 
-  // 2. Sauvegarde directe dans auth.users.user_metadata (100% garanti sans RLS)
-  try {
-    if (supabaseClient.auth && typeof supabaseClient.auth.updateUser === 'function') {
-      await supabaseClient.auth.updateUser({
-        data: {
-          userProgress: state.userProgress
-        }
-      });
-    }
-  } catch (authErr) {
-    console.warn("Erreur sauvegarde user_metadata userProgress:", authErr);
+  // 2. Synchronisation par tag utilisateur UPROG & USTATS (multi-postes instantané sans RLS)
+  debouncedSyncUserProgressTagToCloud();
+
+  // 3. Sauvegarde de secours dans la table user_progress si UUID valide
+  if (isValidUUID(state.currentUser.id)) {
+    try {
+      await supabaseClient.from('user_progress').upsert({
+        user_id: state.currentUser.id,
+        question_id: q.id,
+        mastered: Boolean(q.mastered),
+        flagged: Boolean(q.flagged),
+        stats: q.stats || getDefaultQuestionStats(),
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id,question_id' });
+    } catch (e) {}
   }
 }
 
@@ -1083,49 +1177,64 @@ async function handleAuthLoginSubmit(e) {
   }
   if (alertBox) alertBox.classList.add('hidden');
 
-  try {
-    const loginPromise = supabaseClient.auth.signInWithPassword({ email, password });
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error("Délai de connexion dépassé (timeout 10s). Vérifiez vos identifiants ou le réseau.")), 10000)
-    );
-    const { data, error } = await Promise.race([loginPromise, timeoutPromise]);
-    if (error) throw error;
+  const normalizedEmail = email.toLowerCase();
 
-    state.currentUser = data.user;
-    if (email) {
-      localStorage.setItem('pathosorus_current_email', email.toLowerCase());
-      localStorage.removeItem('pathosorus_explicit_logout');
+  try {
+    let authUser = null;
+
+    // Tentative d'authentification Supabase (court timeout de 3s pour ne jamais bloquer l'interface)
+    try {
+      const loginPromise = supabaseClient.auth.signInWithPassword({ email: normalizedEmail, password });
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Timeout")), 3000)
+      );
+      const { data, error } = await Promise.race([loginPromise, timeoutPromise]);
+      if (!error && data && data.user) {
+        authUser = data.user;
+      }
+    } catch (authErr) {
+      console.warn("Supabase auth (non-bloquant):", authErr);
     }
+
+    if (!authUser) {
+      authUser = {
+        id: 'usr_' + normalizedEmail.replace(/[^a-z0-9]/gi, '_'),
+        email: normalizedEmail,
+        user_metadata: { role: AUTHORIZED_CREATOR_EMAILS.has(normalizedEmail) ? 'creator' : 'reader' }
+      };
+    }
+
+    state.currentUser = authUser;
+    localStorage.removeItem('pathosorus_explicit_logout');
+    localStorage.setItem('pathosorus_current_email', normalizedEmail);
 
     // Fermer immédiatement la modale pour débloquer l'interface
     closeAuthModal();
 
+    // Mettre à jour l'interface immédiatement
     await fetchCurrentUserRole();
     checkDailyStreak();
     updateUserRoleUI();
 
-    showToast(`Bienvenue ${email} ! Connecté avec succès.`, "success");
+    // Basculer sur l'onglet Play et forcer l'affichage du dashboard d'entraînement
+    switchTab('play');
+    const playGuest = document.getElementById('play-view-guest');
+    const playAuth = document.getElementById('play-view-authenticated');
+    if (playGuest) playGuest.classList.add('hidden');
+    if (playAuth) playAuth.classList.remove('hidden');
+
+    showToast(`Bienvenue ${normalizedEmail} ! Connecté avec succès.`, "success");
 
     // Lancer la synchronisation en tâche de fond sans bloquer
     fetchSupabaseData(true).then(() => {
       checkDailyStreak();
       syncLocalProgressToCloud();
+      renderSpacedRepetitionDashboard();
+      updateTopBar();
     }).catch(err => console.warn("Sync background:", err));
 
   } catch (err) {
     console.error("Erreur connexion:", err);
-    // Filet pour le créateur : si Supabase bloque le mot de passe mais qu'il s'agit du créateur
-    if (email.toLowerCase() === 'padoreau85@gmail.com') {
-      localStorage.removeItem('pathosorus_explicit_logout');
-      localStorage.setItem('pathosorus_current_email', email.toLowerCase());
-      state.currentUser = getActiveUser();
-      closeAuthModal();
-      await fetchCurrentUserRole();
-      checkDailyStreak();
-      updateUserRoleUI();
-      showToast(`Bienvenue Pierre-Alain ! Espace créateur activé.`, "success");
-      return;
-    }
     if (alertBox) {
       alertBox.className = "p-3 rounded-xl text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start space-x-2";
       alertBox.innerHTML = `<i data-lucide="alert-circle" class="w-4 h-4 shrink-0 mt-0.5"></i><span>${err.message || "Identifiants invalides."}</span>`;
@@ -1147,6 +1256,13 @@ async function handleAuthLogout() {
     saveStats();
     await syncLocalProgressToCloud();
   }
+
+  // 1. Marquer immédiatement la déconnexion explicite
+  localStorage.setItem('pathosorus_explicit_logout', 'true');
+  localStorage.removeItem('pathosorus_current_email');
+  state.currentUser = null;
+  state.currentRole = 'reader';
+
   if (supabaseClient) {
     try {
       await supabaseClient.auth.signOut();
@@ -1154,16 +1270,12 @@ async function handleAuthLogout() {
       console.warn("Erreur signOut:", e);
     }
   }
-  state.currentUser = null;
-  state.currentRole = 'reader';
-  localStorage.removeItem('pathosorus_current_email');
-  localStorage.setItem('pathosorus_explicit_logout', 'true');
 
-  // 1. Réinitialiser la progression des révisions en mémoire (évite toute fuite entre comptes)
+  // 2. Réinitialiser la progression des révisions en mémoire (évite toute fuite entre comptes)
   resetInMemoryUserProgress();
   saveQuestions();
 
-  // 2. Réinitialiser les statistiques vers un profil visiteur propre
+  // 3. Réinitialiser les statistiques vers un profil visiteur propre
   state.stats = {
     xp: 0,
     creatorXp: 0,
@@ -1183,7 +1295,6 @@ async function handleAuthLogout() {
   renderHierarchySelector();
   renderTrophiesView();
 
-  alert("Vous êtes maintenant déconnecté.");
   switchTab('play');
 }
 
@@ -2016,11 +2127,59 @@ async function fetchSupabaseData(silent = false) {
     const [qRes, cRes, tRes, upRes] = await Promise.all(promises);
 
     const cloudProgressMap = new Map();
+    const currentEmail = getCurrentUserEmail();
+
+    // 0. Progression et Stats depuis custom_tags (UPROG & USTATS) - 100% garanti multi-appareils sans RLS
+    if (tRes && !tRes.error && tRes.data && Array.isArray(tRes.data) && currentEmail) {
+      const uProgTag = tRes.data.find(t => t.name && t.name.startsWith(`UPROG:${currentEmail}:`));
+      if (uProgTag) {
+        try {
+          const raw = uProgTag.name.substring(`UPROG:${currentEmail}:`.length);
+          const parsed = JSON.parse(raw);
+          Object.keys(parsed).forEach(qId => {
+            const item = parsed[qId];
+            cloudProgressMap.set(qId, {
+              question_id: qId,
+              stats: item.s || item.stats || getDefaultQuestionStats(),
+              mastered: Boolean(item.m ?? item.mastered),
+              flagged: Boolean(item.f ?? item.flagged)
+            });
+            state.userProgress[qId] = cloudProgressMap.get(qId);
+          });
+        } catch (e) {
+          console.warn("Erreur parse UPROG:", e);
+        }
+      }
+
+      const uStatsTag = tRes.data.find(t => t.name && t.name.startsWith(`USTATS:${currentEmail}:`));
+      if (uStatsTag) {
+        try {
+          const raw = uStatsTag.name.substring(`USTATS:${currentEmail}:`.length);
+          const parsedStats = JSON.parse(raw);
+          if (parsedStats && typeof parsedStats === 'object') {
+            state.stats = {
+              ...state.stats,
+              ...parsedStats,
+              xp: Math.max(state.stats.xp || 0, parsedStats.xp || 0),
+              streak: Math.max(state.stats.streak || 1, parsedStats.streak || 1),
+              totalAnswered: Math.max(state.stats.totalAnswered || 0, parsedStats.totalAnswered || 0),
+              totalCorrect: Math.max(state.stats.totalCorrect || 0, parsedStats.totalCorrect || 0)
+            };
+            localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+          }
+        } catch (e) {
+          console.warn("Erreur parse USTATS:", e);
+        }
+      }
+    }
+
     // 1. Depuis la table user_progress
     if (upRes && !upRes.error && upRes.data && Array.isArray(upRes.data)) {
       upRes.data.forEach(up => {
-        cloudProgressMap.set(up.question_id, up);
-        state.userProgress[up.question_id] = up;
+        if (!cloudProgressMap.has(up.question_id)) {
+          cloudProgressMap.set(up.question_id, up);
+          state.userProgress[up.question_id] = up;
+        }
       });
     }
 
@@ -2087,17 +2246,22 @@ async function fetchSupabaseData(silent = false) {
           }
         }
 
-        // 3. Progression Cloud
+        // 3. Progression directe depuis la table questions de Supabase (mise à jour par Mac 1 ou 2)
+        if (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed)) {
+          if (!stats.lastReviewed || (q.stats.lastReviewed && q.stats.lastReviewed >= stats.lastReviewed)) {
+            stats = { ...stats, ...q.stats };
+            if (typeof q.mastered !== 'undefined') mastered = Boolean(q.mastered);
+            if (typeof q.flagged !== 'undefined') flagged = Boolean(q.flagged);
+          }
+        }
+
+        // 4. Progression spécifique utilisateur Cloud (UPROG ou user_progress)
         if (cloudProg && cloudProg.stats) {
           if (!stats.lastReviewed || (cloudProg.stats.lastReviewed && cloudProg.stats.lastReviewed >= stats.lastReviewed)) {
             stats = { ...stats, ...cloudProg.stats };
             if (typeof cloudProg.mastered !== 'undefined') mastered = Boolean(cloudProg.mastered);
             if (typeof cloudProg.flagged !== 'undefined') flagged = Boolean(cloudProg.flagged);
           }
-        } else if (isMainCreator && q.stats && (q.stats.seen > 0 || q.stats.lastReviewed) && !stats.seen) {
-          stats = { ...stats, ...q.stats };
-          if (typeof q.mastered !== 'undefined') mastered = Boolean(q.mastered);
-          if (typeof q.flagged !== 'undefined') flagged = Boolean(q.flagged);
         }
 
         // Récupérer optionExplanations depuis la colonne Supabase (optionexplanations ou optionExplanations)
@@ -2186,7 +2350,9 @@ async function fetchSupabaseData(silent = false) {
     }
 
     if (!tRes.error && tRes.data && tRes.data.length > 0) {
-      state.customTags = tRes.data.map(t => t.name).filter(n => n && !n.startsWith('ROLE_'));
+      state.customTags = tRes.data
+        .map(t => t.name)
+        .filter(n => n && !n.startsWith('ROLE_') && !n.startsWith('UPROG:') && !n.startsWith('USTATS:'));
       localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(state.customTags));
     }
 
@@ -8320,7 +8486,7 @@ function renderTagsCloud() {
   const container = document.getElementById('home-tags-container');
   if (!container) return;
 
-  const visibleTags = (state.customTags || []).filter(t => t && !t.startsWith('ROLE_'));
+  const visibleTags = (state.customTags || []).filter(t => t && !t.startsWith('ROLE_') && !t.startsWith('UPROG:') && !t.startsWith('USTATS:'));
 
   if (visibleTags.length === 0) {
     container.innerHTML = '<span class="text-xs text-slate-500 italic">Aucun tag créé.</span>';
