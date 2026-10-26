@@ -32,7 +32,7 @@
   <!-- Supabase JS SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Config Cloud Supabase -->
-  <script src="config.js?v=20261026_2010"></script>
+  <script src="config.js?v=20261026_2050"></script>
 
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -50,34 +50,42 @@
       border-color: #14b8a6 !important;
       background-color: rgba(13, 148, 136, 0.15) !important;
     }
+    .safe-area-pb {
+      padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0.5rem));
+    }
+    /* Défilement fluide horizontal pour les barres de filtres et d'organes */
+    .touch-scroll-x {
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-teal-500 selection:text-white">
 
   <!-- ================= TOP HEADER ================= -->
   <header class="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+    <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-15 sm:h-16 flex items-center justify-between gap-2 sm:gap-3">
       
       <!-- Brand & Mode Local -->
-      <div class="flex items-center space-x-2.5 shrink-0">
-        <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-teal-500 via-sky-500 to-indigo-500 flex items-center justify-center shadow-md shadow-teal-500/20">
+      <div class="flex items-center space-x-2 sm:space-x-2.5 shrink-0">
+        <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-teal-500 via-sky-500 to-indigo-500 flex items-center justify-center shadow-md shadow-teal-500/20 shrink-0">
           <i data-lucide="microscope" class="w-4 h-4 text-white"></i>
         </div>
         <div>
-          <div class="flex items-center space-x-1.5">
-            <span class="font-black text-base tracking-tight bg-gradient-to-r from-teal-400 via-sky-300 to-indigo-400 bg-clip-text text-transparent">PathoSorus</span>
+          <div class="flex items-center space-x-1 sm:space-x-1.5">
+            <span class="font-black text-sm sm:text-base tracking-tight bg-gradient-to-r from-teal-400 via-sky-300 to-indigo-400 bg-clip-text text-transparent">PathoSorus</span>
             <span class="text-sm select-none">🦖</span>
-            <span id="env-local-shield" class="hidden text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center space-x-1" title="Mode Test Local : Supabase protégé">
+            <span id="env-local-shield" class="hidden text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center space-x-1" title="Mode Test Local : Supabase protégé">
               <i data-lucide="shield-check" class="w-3 h-3 text-amber-400"></i>
-              <span>Local</span>
+              <span class="hidden xs:inline">Local</span>
             </span>
           </div>
           <p class="text-[10px] text-slate-400 font-medium hidden md:block">Répétition espacée & Entraînement</p>
         </div>
       </div>
 
-      <!-- Navigation Segmented Tabs -->
-      <nav class="flex items-center p-1 rounded-2xl bg-slate-950/80 border border-slate-800/80 shadow-inner">
+      <!-- Navigation Segmented Tabs (Desktop & Tablette md+) -->
+      <nav class="hidden md:flex items-center p-1 rounded-2xl bg-slate-950/80 border border-slate-800/80 shadow-inner">
         <button onclick="switchTab('play')" id="nav-btn-play" class="nav-link px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center space-x-1.5 transition text-white bg-teal-600 shadow-sm shadow-teal-500/20">
           <i data-lucide="play" class="w-3.5 h-3.5"></i>
           <span>Jouer</span>
@@ -99,38 +107,38 @@
       </nav>
 
       <!-- Stats Capsule, Comptes & Actions -->
-      <div class="flex items-center space-x-2 shrink-0">
+      <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
         <!-- Capsule unique de progression HUD -->
-        <div id="top-user-stats" onclick="switchTab('trophies')" class="hidden cursor-pointer items-center space-x-2.5 px-3 py-1.5 rounded-xl bg-slate-950/80 hover:bg-slate-900 border border-slate-800/80 text-xs transition shadow-sm group" title="Progression Joueur (Cliquez pour afficher les Trophées & XP)">
+        <div id="top-user-stats" onclick="switchTab('trophies')" class="hidden cursor-pointer items-center space-x-1.5 sm:space-x-2.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-slate-950/80 hover:bg-slate-900 border border-slate-800/80 text-[11px] sm:text-xs transition shadow-sm group" title="Progression Joueur (Cliquez pour afficher les Trophées & XP)">
           <div class="flex items-center space-x-1 text-amber-400 font-bold" title="Série de jours actifs">
-            <i data-lucide="flame" class="w-3.5 h-3.5 fill-amber-400"></i>
+            <i data-lucide="flame" class="w-3 sm:w-3.5 h-3 sm:h-3.5 fill-amber-400"></i>
             <span><span id="top-streak">1</span>j</span>
           </div>
-          <span class="w-px h-3 bg-slate-800"></span>
-          <div class="flex items-center space-x-1 text-amber-300 font-bold" title="Niveau joueur">
-            <i data-lucide="trophy" class="w-3.5 h-3.5 text-amber-400"></i>
+          <span class="w-px h-3 bg-slate-800 hidden xs:inline"></span>
+          <div class="hidden xs:flex items-center space-x-1 text-amber-300 font-bold" title="Niveau joueur">
+            <i data-lucide="trophy" class="w-3 sm:w-3.5 h-3 sm:h-3.5 text-amber-400"></i>
             <span>Nv <strong id="top-level">1</strong></span>
           </div>
           <span class="w-px h-3 bg-slate-800"></span>
           <div class="flex items-center space-x-1 text-indigo-300 font-bold font-mono" title="Points d'expérience">
-            <span id="top-xp">0</span><span class="text-[10px] text-indigo-400 font-sans">XP</span>
+            <span id="top-xp">0</span><span class="text-[9px] sm:text-[10px] text-indigo-400 font-sans">XP</span>
           </div>
         </div>
 
         <!-- Bouton Gestion des Comptes (visible uniquement pour Créateur) -->
-        <button id="btn-accounts-modal" onclick="openAccountsModal()" class="hidden items-center space-x-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-indigo-500/15 text-indigo-300 hover:text-white border border-slate-800 hover:border-indigo-500/40 transition shadow-sm" title="Gérer les comptes collègues">
+        <button id="btn-accounts-modal" onclick="openAccountsModal()" class="hidden items-center space-x-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-indigo-500/15 text-indigo-300 hover:text-white border border-slate-800 hover:border-indigo-500/40 transition shadow-sm" title="Gérer les comptes collègues">
           <i data-lucide="users" class="w-3.5 h-3.5"></i>
           <span class="hidden xl:inline">Comptes</span>
         </button>
 
         <!-- Bouton Synchronisation Instantanée Cloud -->
-        <button id="btn-quick-sync" onclick="syncCloudNow()" class="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-teal-500/15 text-teal-300 hover:text-white transition border border-slate-800 hover:border-teal-500/40 flex items-center space-x-1.5 shadow-sm" title="Synchroniser immédiatement avec la base Cloud">
+        <button id="btn-quick-sync" onclick="syncCloudNow()" class="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-teal-500/15 text-teal-300 hover:text-white transition border border-slate-800 hover:border-teal-500/40 flex items-center space-x-1 sm:space-x-1.5 shadow-sm" title="Synchroniser immédiatement avec la base Cloud">
           <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-teal-400"></i>
           <span class="hidden xl:inline">Sync Cloud</span>
         </button>
 
         <!-- Bouton Connexion / Déconnexion -->
-        <button id="btn-auth-toggle" onclick="toggleAuthModal()" class="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-slate-800 text-slate-300 hover:text-white transition border border-slate-800 flex items-center space-x-1.5" title="Se connecter ou se déconnecter">
+        <button id="btn-auth-toggle" onclick="toggleAuthModal()" class="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-slate-800 text-slate-300 hover:text-white transition border border-slate-800 flex items-center space-x-1 sm:space-x-1.5" title="Se connecter ou se déconnecter">
           <i data-lucide="log-in" class="w-3.5 h-3.5" id="auth-btn-icon"></i>
           <span id="auth-btn-text" class="hidden sm:inline">Connexion</span>
         </button>
@@ -140,7 +148,7 @@
   </header>
 
   <!-- ================= MAIN CONTAINER ================= -->
-  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+  <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-8">
 
     <!-- ================= 1. VUE JOUER ================= -->
     <div id="view-play" class="app-view space-y-6">
@@ -706,43 +714,45 @@
     <!-- ================= 4. VUE MA BANQUE ================= -->
     <div id="view-bank" class="app-view hidden space-y-5">
       
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-4 rounded-2xl">
-        <div class="flex flex-1 flex-wrap items-center gap-2">
-          <div class="relative flex-1 min-w-[180px]">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-3.5 sm:p-4 rounded-2xl">
+        <div class="flex flex-col sm:flex-row flex-1 flex-wrap items-stretch sm:items-center gap-2">
+          <div class="relative w-full sm:flex-1 sm:min-w-[180px]">
             <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
             <input type="text" id="bank-search-input" oninput="renderBank()" placeholder="Rechercher organe, lésion, critères OMS, #tag..." class="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
           </div>
           
-          <!-- Filtre Statut avec option Échues aujourd'hui & Fiches OMS -->
-          <select id="bank-filter-status" onchange="renderBank()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-teal-300 font-semibold focus:outline-none focus:border-teal-500">
-            <option value="all">Tous les statuts</option>
-            <option value="due">📅 À revoir aujourd'hui (Dues)</option>
-            <option value="active">⏳ En apprentissage (Actives)</option>
-            <option value="errors">🚩 À revoir / Erreurs</option>
-            <option value="mastered">🎓 Maîtrisées (Neutralisées)</option>
-            <option value="with_topo">📘 Avec Fiche OMS rédigée</option>
-            <option value="without_topo">📝 Sans Fiche OMS (À rédiger)</option>
-          </select>
+          <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
+            <!-- Filtre Statut avec option Échues aujourd'hui & Fiches OMS -->
+            <select id="bank-filter-status" onchange="renderBank()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-teal-300 font-semibold focus:outline-none focus:border-teal-500 truncate">
+              <option value="all">Tous les statuts</option>
+              <option value="due">📅 À revoir aujourd'hui (Dues)</option>
+              <option value="active">⏳ En apprentissage (Actives)</option>
+              <option value="errors">🚩 À revoir / Erreurs</option>
+              <option value="mastered">🎓 Maîtrisées (Neutralisées)</option>
+              <option value="with_topo">📘 Avec Fiche OMS rédigée</option>
+              <option value="without_topo">📝 Sans Fiche OMS (À rédiger)</option>
+            </select>
 
-          <select id="bank-filter-format" onchange="renderBank()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500">
-            <option value="all">Tous formats & types</option>
-            <option value="qcm">☑️ QCM (Choix Multiples)</option>
-            <option value="qcu">🔘 QCU (Choix Unique)</option>
-            <option value="piege">⚠️ Vrai/Faux</option>
-            <option value="ouverte">✍️ Question Ouverte (Diagnostic)</option>
-            <option value="dp">📋 Dossiers Progressifs (DP)</option>
-          </select>
+            <select id="bank-filter-format" onchange="renderBank()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500 truncate">
+              <option value="all">Tous formats & types</option>
+              <option value="qcm">☑️ QCM (Choix Multiples)</option>
+              <option value="qcu">🔘 QCU (Choix Unique)</option>
+              <option value="piege">⚠️ Vrai/Faux</option>
+              <option value="ouverte">✍️ Question Ouverte (Diagnostic)</option>
+              <option value="dp">📋 Dossiers Progressifs (DP)</option>
+            </select>
 
-          <select id="bank-filter-organ" onchange="onBankOrganSelectChange()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500">
-            <option value="all">Tous les organes</option>
-          </select>
+            <select id="bank-filter-organ" onchange="onBankOrganSelectChange()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500 truncate">
+              <option value="all">Tous les organes</option>
+            </select>
 
-          <select id="bank-filter-tag" onchange="renderBank()" class="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500">
-            <option value="all">Tous les tags (#)</option>
-          </select>
+            <select id="bank-filter-tag" onchange="renderBank()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500 truncate">
+              <option value="all">Tous les tags (#)</option>
+            </select>
+          </div>
         </div>
 
-        <div class="flex items-center space-x-2 self-end md:self-auto">
+        <div class="flex items-center space-x-2 self-end lg:self-auto shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-800/80 w-full lg:w-auto justify-end">
           <button onclick="exportCustomBankJSON()" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition border border-slate-700" title="Télécharger votre banque en JSON">
             <i data-lucide="download" class="w-3.5 h-3.5"></i>
             <span>Exporter</span>
@@ -1215,11 +1225,11 @@
             </div>
           </div>
 
-          <div class="flex items-center justify-end space-x-3 pt-4 border-t border-slate-800">
-            <button type="button" onclick="switchTab('bank')" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">
+          <div class="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:space-x-3 pt-4 border-t border-slate-800">
+            <button type="button" onclick="switchTab('bank')" class="w-full sm:w-auto justify-center px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition text-center">
               Annuler
             </button>
-            <button type="submit" id="btn-submit-save-question" class="px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 active:scale-95 text-white text-xs font-bold flex items-center space-x-1.5 transition-all shadow-lg shadow-teal-500/20">
+            <button type="submit" id="btn-submit-save-question" class="w-full sm:w-auto justify-center px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 active:scale-95 text-white text-xs font-bold flex items-center space-x-1.5 transition-all shadow-lg shadow-teal-500/20">
               <i data-lucide="save" class="w-3.5 h-3.5"></i>
               <span>Enregistrer la Question</span>
             </button>
@@ -1309,16 +1319,16 @@
             </div>
           </div>
 
-          <div class="flex items-center justify-between pt-4 border-t border-slate-800">
-            <button type="button" onclick="addStepToDP()" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-bold flex items-center space-x-1.5 transition">
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-slate-800">
+            <button type="button" onclick="addStepToDP()" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-bold flex items-center justify-center space-x-1.5 transition">
               <i data-lucide="plus" class="w-3.5 h-3.5"></i>
               <span>Ajouter une étape</span>
             </button>
-            <div class="flex items-center space-x-3">
-              <button type="button" onclick="switchTab('bank')" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">
+            <div class="flex flex-col-reverse sm:flex-row items-stretch sm:items-center gap-2 sm:space-x-3">
+              <button type="button" onclick="switchTab('bank')" class="w-full sm:w-auto justify-center px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition text-center">
                 Annuler
               </button>
-              <button type="submit" id="btn-submit-save-dp" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold flex items-center space-x-1.5 transition-all shadow-lg shadow-indigo-500/20">
+              <button type="submit" id="btn-submit-save-dp" class="w-full sm:w-auto justify-center px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold flex items-center space-x-1.5 transition-all shadow-lg shadow-indigo-500/20">
                 <i data-lucide="save" class="w-3.5 h-3.5"></i>
                 <span>Enregistrer le Dossier Progressif</span>
               </button>
@@ -1332,6 +1342,32 @@
     </div> <!-- Fin view-create -->
 
   </main>
+
+  <!-- ================= BARRE DE NAVIGATION MOBILE INFÉRIEURE (FIXÉE SUR SMARTPHONE / TABLETTE) ================= -->
+  <nav id="mobile-bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 px-3 py-1.5 flex items-center justify-around shadow-2xl safe-area-pb">
+    <button onclick="switchTab('play')" id="mob-nav-btn-play" class="mob-nav-link flex-1 py-1 px-2 flex flex-col items-center justify-center space-y-0.5 text-teal-400 font-bold transition">
+      <i data-lucide="play" class="w-5 h-5"></i>
+      <span class="text-[10px] tracking-tight">Jouer</span>
+    </button>
+    <button onclick="switchTab('bank')" id="mob-nav-btn-bank" class="mob-nav-link flex-1 py-1 px-2 flex flex-col items-center justify-center space-y-0.5 text-slate-400 hover:text-white transition relative">
+      <div class="relative">
+        <i data-lucide="database" class="w-5 h-5"></i>
+        <span id="mob-badge-bank-count" class="absolute -top-1.5 -right-3 text-[9px] px-1.5 py-0.2 rounded-full bg-slate-900 border border-teal-500/50 text-teal-300 font-bold">0</span>
+      </div>
+      <span class="text-[10px] tracking-tight">Banque</span>
+    </button>
+    <button onclick="switchTab('trophies')" id="mob-nav-btn-trophies" class="mob-nav-link flex-1 py-1 px-2 flex flex-col items-center justify-center space-y-0.5 text-slate-400 hover:text-white transition relative">
+      <div class="relative">
+        <i data-lucide="trophy" class="w-5 h-5"></i>
+        <span id="mob-badge-contested-count" class="hidden absolute -top-1.5 -right-2.5 text-[8px] px-1 py-0 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold">⚡</span>
+      </div>
+      <span class="text-[10px] tracking-tight">Trophées</span>
+    </button>
+    <button onclick="switchTab('create')" id="mob-nav-btn-create" class="mob-nav-link flex-1 py-1 px-2 flex flex-col items-center justify-center space-y-0.5 text-slate-400 hover:text-white transition">
+      <i data-lucide="plus-circle" class="w-5 h-5"></i>
+      <span class="text-[10px] tracking-tight">Créer</span>
+    </button>
+  </nav>
 
   <!-- ================= LIGHTBOX MODAL PLEIN ÉCRAN ================= -->
   <div id="lightbox-modal" class="fixed inset-0 z-50 bg-black/95 hidden items-center justify-center p-4 backdrop-blur-md" onclick="closeLightbox()">
@@ -1988,7 +2024,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="seed_data.js?v=20261026_2010"></script>
-  <script src="app.js?v=20261026_2010"></script>
+  <script src="seed_data.js?v=20261026_2050"></script>
+  <script src="app.js?v=20261026_2050"></script>
 </body>
 </html>

@@ -339,6 +339,58 @@ function isQuestionDue(q) {
 // --- MODULE SUPABASE CLOUD SYNC & STOCKAGE ---
 // =========================================================================
 let supabaseClient = null;
+let realtimeChannel = null;
+let pathosorusSyncChannel = null;
+
+// Canal BroadcastChannel pour synchronisation instantanée entre onglets du même appareil (0ms)
+try {
+  if (typeof BroadcastChannel !== 'undefined') {
+    pathosorusSyncChannel = new BroadcastChannel('pathosorus_sync_channel');
+    pathosorusSyncChannel.onmessage = (event) => {
+      if (event && event.data && event.data.type === 'DATA_UPDATED') {
+        console.log("📡 [BroadcastChannel] Mise à jour reçue d'un autre onglet local");
+        fetchSupabaseData(true);
+      }
+    };
+  }
+} catch(e) {}
+
+function broadcastLocalUpdate() {
+  if (pathosorusSyncChannel) {
+    try {
+      pathosorusSyncChannel.postMessage({ type: 'DATA_UPDATED', timestamp: Date.now() });
+    } catch(e) {}
+  }
+}
+
+function setupRealtimeSync() {
+  if (!supabaseClient || typeof supabaseClient.channel !== 'function') return;
+  try {
+    if (realtimeChannel) {
+      try { supabaseClient.removeChannel(realtimeChannel); } catch(e){}
+    }
+    realtimeChannel = supabaseClient
+      .channel('pathosorus_realtime_sync_' + Math.random().toString(36).substring(2, 9))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'questions' }, (payload) => {
+        console.log("⚡ [Realtime] Changement détecté questions:", payload.eventType);
+        fetchSupabaseData(true);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cases' }, (payload) => {
+        console.log("⚡ [Realtime] Changement détecté cas cliniques:", payload.eventType);
+        fetchSupabaseData(true);
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log("⚡ [Realtime] Connecté aux changements en direct multi-appareils");
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn("⚠️ [Realtime] Canal déconnecté (" + status + "), reconnexion automatique programmée...");
+          setTimeout(setupRealtimeSync, 4000);
+        }
+      });
+  } catch(rtErr) {
+    console.warn("Erreur souscription Supabase Realtime:", rtErr);
+  }
+}
 
 function getSupabaseCredentials() {
   const cfg = window.PATHOSORUS_CONFIG || {};
@@ -362,24 +414,11 @@ function initSupabase() {
       });
       updateSupabaseUI(true);
 
-      // Souscription Supabase Realtime pour synchroniser instantanément les 2 Macs
-      try {
-        if (typeof supabaseClient.channel === 'function') {
-          supabaseClient
-            .channel('pathosorus_realtime_sync')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'questions' }, (payload) => {
-              console.log("⚡ [Realtime] Synchro questions en direct:", payload.eventType);
-              fetchSupabaseData(true);
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'cases' }, (payload) => {
-              console.log("⚡ [Realtime] Synchro cas cliniques en direct:", payload.eventType);
-              fetchSupabaseData(true);
-            })
-            .subscribe();
-        }
-      } catch(rtErr) {
-        console.warn("Erreur souscription Supabase Realtime:", rtErr);
-      }
+      // Souscription Realtime multi-postes avec reconnexion automatique
+      setupRealtimeSync();
+
+      // Téléchargement immédiat et sans attente des questions et cas depuis Supabase (t=0)
+      fetchSupabaseData(true);
 
       initAuth();
       return true;
@@ -2252,8 +2291,17 @@ function handleEditFromDetailModal() {
 }
 window.handleEditFromDetailModal = handleEditFromDetailModal;
 
+let isFetchingSupabase = false;
+let pendingFetchRequest = false;
+
 async function fetchSupabaseData(silent = false) {
   if (!supabaseClient) return;
+  if (isFetchingSupabase) {
+    pendingFetchRequest = true;
+    return;
+  }
+  isFetchingSupabase = true;
+  const previousTotal = (state.questions ? state.questions.length : 0) + (state.cases ? state.cases.length : 0);
   try {
     const promises = [
       supabaseClient.from('questions').select('*').order('created_at', { ascending: false }),
@@ -2556,6 +2604,12 @@ async function fetchSupabaseData(silent = false) {
     checkAndUnlockBadges();
     renderTrophiesView();
 
+    const newTotal = (state.questions ? state.questions.length : 0) + (state.cases ? state.cases.length : 0);
+    if (newTotal !== previousTotal && previousTotal > 0) {
+      console.log(`⚡ Banque Cloud synchronisée : ${previousTotal} -> ${newTotal} éléments`);
+      showToast(`⚡ Banque Cloud synchronisée : ${newTotal} éléments (${state.questions.length} questions, ${state.cases.length} cas)`, "success");
+    }
+
     // Auto-push vers Supabase : si des questions ont des justifications locales mais vides sur Supabase
     if (state.currentUser && isCreator() && qRes.data) {
       const rawCloudMap = new Map(qRes.data.map(item => [item.id, item]));
@@ -2571,10 +2625,16 @@ async function fetchSupabaseData(silent = false) {
       }
     }
 
-    if (!silent) alert("Données synchronisées depuis le Cloud Supabase !");
+    if (!silent) alert(`Données synchronisées depuis le Cloud Supabase (${newTotal} éléments) !`);
   } catch (err) {
     console.error("Erreur fetch Supabase:", err);
     if (!silent) alert("Erreur lors de la récupération des données : " + err.message);
+  } finally {
+    isFetchingSupabase = false;
+    if (pendingFetchRequest) {
+      pendingFetchRequest = false;
+      setTimeout(() => fetchSupabaseData(true), 250);
+    }
   }
 }
 
@@ -3038,16 +3098,27 @@ function updateTopBar() {
   const totalCount = state.questions.length + state.cases.length;
   const bankBadge = document.getElementById('badge-bank-count');
   if (bankBadge) bankBadge.textContent = totalCount;
+  const mobBankBadge = document.getElementById('mob-badge-bank-count');
+  if (mobBankBadge) mobBankBadge.textContent = totalCount;
 
   // Pastille de badges contestés sur l'onglet Trophées
   const contestedCount = getContestedBadgesCount();
   const contestedBadge = document.getElementById('badge-contested-count');
+  const mobContestedBadge = document.getElementById('mob-badge-contested-count');
   if (contestedBadge) {
     if (contestedCount > 0) {
       contestedBadge.textContent = `⚡ ${contestedCount}`;
       contestedBadge.classList.remove('hidden');
     } else {
       contestedBadge.classList.add('hidden');
+    }
+  }
+  if (mobContestedBadge) {
+    if (contestedCount > 0) {
+      mobContestedBadge.textContent = `⚡`;
+      mobContestedBadge.classList.remove('hidden');
+    } else {
+      mobContestedBadge.classList.add('hidden');
     }
   }
 }
@@ -3064,6 +3135,17 @@ function switchTab(viewId) {
   if (activeBtn) {
     activeBtn.classList.remove('text-slate-300', 'hover:bg-slate-800');
     activeBtn.classList.add('bg-teal-600', 'text-white', 'shadow-sm', 'shadow-teal-500/20');
+  }
+
+  // Synchronisation de la barre mobile inférieure
+  document.querySelectorAll('.mob-nav-link').forEach(btn => {
+    btn.classList.remove('text-teal-400', 'font-bold');
+    btn.classList.add('text-slate-400');
+  });
+  const mobActiveBtn = document.getElementById('mob-nav-btn-' + viewId);
+  if (mobActiveBtn) {
+    mobActiveBtn.classList.remove('text-slate-400');
+    mobActiveBtn.classList.add('text-teal-400', 'font-bold');
   }
 
   const targetView = document.getElementById('view-' + viewId);
@@ -3090,6 +3172,12 @@ function switchTab(viewId) {
       if (contentEl) contentEl.classList.remove('hidden');
       setCreatorMode(state.creatorMode);
       renderStatementTemplates();
+    }
+  }
+
+  if (viewId === 'bank' || viewId === 'play') {
+    if (typeof checkForRemoteChanges === 'function') {
+      checkForRemoteChanges();
     }
   }
 
@@ -5247,13 +5335,13 @@ function renderHierarchySelector() {
   // Niveau 1
   html += `
     <div>
-      <div class="flex items-center justify-between mb-2">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
         <span class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
           <span class="w-5 h-5 rounded-full bg-teal-500/20 text-teal-400 flex items-center justify-center text-[10px] font-mono">1</span>
           <span>Choisissez l'Organe :</span>
         </span>
         ${state.playHierarchy.selectedOrgan ? `
-          <div class="flex items-center space-x-2">
+          <div class="flex flex-wrap items-center gap-1.5">
             ${isCreator() ? `
               <button type="button" onclick="createQuestionForOrgan('${escapeJsString(state.playHierarchy.selectedOrgan)}')" class="text-xs font-bold text-teal-400 hover:text-teal-300 flex items-center space-x-1 bg-teal-500/10 px-2.5 py-1 rounded-lg border border-teal-500/20 transition shadow-sm" title="Créer un QCM dans cet organe">
                 <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
@@ -5297,13 +5385,13 @@ function renderHierarchySelector() {
 
     html += `
       <div class="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3">
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <span class="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
             <span class="w-5 h-5 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-mono">2</span>
             <span>Sous-organe / Catégorie dans <em>${escapeHtml(state.playHierarchy.selectedOrgan)}</em> :</span>
           </span>
           ${state.playHierarchy.selectedCategory ? `
-            <div class="flex items-center space-x-2">
+            <div class="flex flex-wrap items-center gap-1.5">
               ${isCreator() ? `
                 <button type="button" onclick="createQuestionForCategory('${escapeJsString(state.playHierarchy.selectedOrgan)}', '${escapeJsString(state.playHierarchy.selectedCategory)}')" class="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center space-x-1 bg-sky-500/10 px-2.5 py-1 rounded-lg border border-sky-500/20 transition shadow-sm" title="Créer un QCM dans cette catégorie">
                   <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
@@ -10655,13 +10743,13 @@ function renderBank() {
     const totalCountAll = baseFilteredQ.length + baseFilteredCases.length;
     navHtml += `
       <div class="bg-slate-900 border border-slate-800 p-3 sm:p-4 rounded-2xl space-y-2.5 shadow-md">
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div class="flex items-center space-x-2">
             <span class="w-5 h-5 rounded-lg bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center text-[10px] font-mono font-bold">1</span>
             <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">Onglet Organe :</span>
           </div>
           ${state.bankSelectedOrgan !== 'all' ? `
-            <div class="flex items-center space-x-2">
+            <div class="flex flex-wrap items-center gap-1.5">
               ${isCreator() ? `
                 <button onclick="createQuestionForOrgan('${escapeJsString(state.bankSelectedOrgan)}')" class="px-2.5 py-1 rounded-xl bg-teal-600/20 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold transition flex items-center space-x-1 shadow-sm" title="Créer une nouvelle question dans cet organe">
                   <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-teal-400"></i>
@@ -10679,7 +10767,7 @@ function renderBank() {
             </div>
           ` : ''}
         </div>
-        <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+        <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin touch-scroll-x">
           <button onclick="selectBankOrgan('all')" class="px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 shrink-0 transition ${
             state.bankSelectedOrgan === 'all'
               ? 'bg-teal-600 text-white shadow-lg shadow-teal-500/30 border border-teal-400'
@@ -10748,7 +10836,7 @@ function renderBank() {
                 Sous-onglets Catégories <span class="text-slate-400 font-normal lowercase">dans ${escapeHtml(state.bankSelectedOrgan)}</span> :
               </span>
             </div>
-            <div class="flex items-center space-x-2 self-start sm:self-auto">
+            <div class="flex flex-wrap items-center gap-1.5 self-start sm:self-auto">
               ${curCat !== 'all' ? `
                 ${isCreator() ? `
                   <button onclick="createQuestionForCategory('${escapeJsString(state.bankSelectedOrgan)}', '${escapeJsString(curCat)}')" class="px-2.5 py-1.5 rounded-xl bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30 text-xs font-bold transition flex items-center space-x-1 shadow-sm shadow-sky-500/10" title="Créer une nouvelle question dans cette catégorie">
@@ -11056,7 +11144,7 @@ function renderBank() {
             ${(c.tags || []).map(t => `<span class="text-[10px] text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded font-mono">#${escapeHtml(t)}</span>`).join('')}
           </div>
         </div>
-        <div class="flex items-center space-x-2 shrink-0 self-end md:self-auto">
+        <div class="flex flex-wrap items-center gap-1.5 shrink-0 self-start sm:self-end md:self-auto mt-2 md:mt-0 w-full sm:w-auto justify-end">
           <button onclick="startDPSession('${escapeJsString(c.id)}')" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-1 transition shadow-sm shadow-indigo-500/20">
             <i data-lucide="play" class="w-3.5 h-3.5"></i>
             <span>Jouer</span>
@@ -11112,7 +11200,7 @@ function renderBank() {
             ${q.images && q.images.length > 0 ? `<span class="text-[10px] text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded flex items-center space-x-1"><i data-lucide="image" class="w-3 h-3"></i><span>${q.images.length} photo${q.images.length > 1 ? 's' : ''}</span></span>` : ''}
           </div>
         </div>
-        <div class="flex items-center space-x-2 shrink-0 self-end md:self-auto">
+        <div class="flex flex-wrap items-center gap-1.5 shrink-0 self-start sm:self-end md:self-auto mt-2 md:mt-0 w-full sm:w-auto justify-end">
           <button onclick="openQuestionDetail('${escapeJsString(q.id)}')" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center space-x-1 transition" title="Aperçu diagnostique et explications">
             <i data-lucide="eye" class="w-3.5 h-3.5"></i>
             <span>Aperçu</span>
@@ -11241,24 +11329,94 @@ function clearAllData() {
 window.addEventListener('DOMContentLoaded', initApp);
 
 // =========================================================================
-// --- SYNCHRONISATION MULTI-POSTES AUTOMATIQUE (Mac 1 ↔ Mac 2) ---
+// --- SYNCHRONISATION MULTI-POSTES AUTOMATIQUE (Mac Mini ↔ MacBook Air ↔ Mobile) ---
 // =========================================================================
-// 1. Re-synchronisation dès que l'utilisateur revient sur l'onglet ou clique sur la fenêtre
-window.addEventListener('focus', () => {
+
+let lastRemoteCheckTime = 0;
+
+async function checkForRemoteChanges() {
+  if (!supabaseClient) return;
+  const now = Date.now();
+  if (now - lastRemoteCheckTime < 2500) return;
+  lastRemoteCheckTime = now;
+
+  try {
+    const [qCountRes, cCountRes] = await Promise.all([
+      supabaseClient.from('questions').select('*', { count: 'exact', head: true }),
+      supabaseClient.from('cases').select('*', { count: 'exact', head: true })
+    ]);
+
+    const qCount = qCountRes ? qCountRes.count : null;
+    const cCount = cCountRes ? cCountRes.count : null;
+    const localQCount = (state.questions || []).length;
+    const localCCount = (state.cases || []).length;
+
+    let needSync = false;
+
+    if (typeof qCount === 'number' && qCount !== localQCount) {
+      console.log(`🔄 Différence questions détectée (Cloud: ${qCount}, Local: ${localQCount})`);
+      needSync = true;
+    }
+    if (typeof cCount === 'number' && cCount !== localCCount) {
+      console.log(`🔄 Différence cas DP détectée (Cloud: ${cCount}, Local: ${localCCount})`);
+      needSync = true;
+    }
+
+    if (!needSync) {
+      const { data: latestQ } = await supabaseClient
+        .from('questions')
+        .select('id, created_at')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (latestQ && latestQ.length > 0) {
+        const topId = latestQ[0].id;
+        const localHasIt = (state.questions || []).some(q => q.id === topId);
+        if (!localHasIt) {
+          console.log(`🔄 Nouvelle question détectée sur le Cloud (${topId}) absente en local`);
+          needSync = true;
+        }
+      }
+    }
+
+    if (needSync) {
+      await fetchSupabaseData(true);
+    }
+  } catch(e) {
+    console.warn("Avertissement checkForRemoteChanges:", e);
+  }
+}
+window.checkForRemoteChanges = checkForRemoteChanges;
+
+function triggerImmediateSync() {
   if (supabaseClient) {
+    checkForRemoteChanges();
     fetchSupabaseData(true);
   }
-});
+}
 
+// Réaction instantanée au focus, visibilité, retour en avant-plan et reconnexion Wi-Fi
+window.addEventListener('focus', triggerImmediateSync);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && supabaseClient) {
-    fetchSupabaseData(true);
-  }
+  if (document.visibilityState === 'visible') triggerImmediateSync();
+});
+window.addEventListener('pageshow', triggerImmediateSync);
+window.addEventListener('online', () => {
+  console.log("🌐 Connexion réseau rétablie, resynchronisation immédiate...");
+  triggerImmediateSync();
+  if (typeof setupRealtimeSync === 'function') setupRealtimeSync();
 });
 
-// 2. Heartbeat de synchronisation silencieuse toutes les 45 secondes
+// Heartbeat rapide toutes les 10 secondes (vérification par HEAD count ultra-légère 0 octet)
+setInterval(() => {
+  if (supabaseClient) {
+    checkForRemoteChanges();
+  }
+}, 10000);
+
+// Heartbeat complet toutes les 35 secondes si l'onglet est actif
 setInterval(() => {
   if (supabaseClient && document.visibilityState === 'visible') {
     fetchSupabaseData(true);
   }
-}, 45000);
+}, 35000);
