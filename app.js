@@ -2388,7 +2388,10 @@ async function fetchSupabaseData(silent = false) {
 
       // Synchroniser immédiatement les questions locales manquantes vers Supabase (méthode Zenipad)
       if (localOnlyQuestions.length > 0) {
-        autoSyncLocalQuestionsToCloud();
+        console.log(`🚀 ${localOnlyQuestions.length} question(s) locale(s) manquante(s) sur le Cloud. Synchronisation vers Supabase...`);
+        for (const lq of localOnlyQuestions) {
+          dbUpsertQuestion(lq).catch(e => console.warn("Erreur sync question locale vers Supabase:", e));
+        }
       }
 
       // Sauvegarder dans le cache local propre à cet utilisateur pour la répétition espacée
@@ -2772,7 +2775,6 @@ function initApp() {
 
   updateTopBar();
   renderHierarchySelector();
-  autoSyncLocalQuestionsToCloud();
   renderTagsCloud();
   renderDPCardsOnPlay();
   renderSpacedRepetitionDashboard();
@@ -2781,6 +2783,9 @@ function initApp() {
 
   // Initialisation du Cloud Supabase & Authentification
   initSupabase();
+
+  // Synchronisation des éventuelles questions locales vers Supabase
+  autoSyncLocalQuestionsToCloud();
 
   initClipboardPasteListener();
 
