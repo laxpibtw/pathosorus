@@ -379,6 +379,10 @@ function setupRealtimeSync() {
         console.log("⚡ [Realtime] Changement détecté cas cliniques:", payload.eventType);
         fetchSupabaseData(true);
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'custom_tags' }, (payload) => {
+        console.log("⚡ [Realtime] Changement détecté tags/progression/tombstones:", payload.eventType);
+        fetchSupabaseData(true);
+      })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           console.log("⚡ [Realtime] Connecté aux changements en direct multi-appareils");
@@ -2421,43 +2425,24 @@ async function fetchSupabaseData(silent = false) {
         let mastered = false;
         let flagged = false;
 
-        // 1. Préserver d'abord toute progression locale existante pour ne JAMAIS perdre les réponses du jour
-        if (localQ && localQ.stats && (localQ.stats.seen > 0 || localQ.stats.lastReviewed)) {
-          stats = { ...stats, ...localQ.stats };
-          if (typeof localQ.mastered !== 'undefined') mastered = Boolean(localQ.mastered);
-          if (typeof localQ.flagged !== 'undefined') flagged = Boolean(localQ.flagged);
+        // 1. Progression Cloud du compte connecté (référence multi-postes prioritaire)
+        if (cloudProg) {
+          stats = { ...stats, ...(cloudProg.stats || {}) };
+          if (typeof cloudProg.mastered !== 'undefined') mastered = Boolean(cloudProg.mastered);
+          if (typeof cloudProg.flagged !== 'undefined') flagged = Boolean(cloudProg.flagged);
         }
 
-        // 2. Progression depuis le stockage local de l'utilisateur
-        if (localProg && localProg.stats) {
-          const lpTime = localProg.stats.lastReviewed ? new Date(localProg.stats.lastReviewed).getTime() : 0;
-          const curTime = stats.lastReviewed ? new Date(stats.lastReviewed).getTime() : 0;
-          if (!stats.lastReviewed || lpTime >= curTime) {
-            stats = { ...stats, ...localProg.stats };
-            if (typeof localProg.mastered !== 'undefined') mastered = Boolean(localProg.mastered);
-            if (typeof localProg.flagged !== 'undefined') flagged = Boolean(localProg.flagged);
-          }
-        }
-
-        // 3. Progression directe depuis la table questions de Supabase (mise à jour par Mac 1 ou 2)
-        if (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed)) {
-          const qTime = q.stats.lastReviewed ? new Date(q.stats.lastReviewed).getTime() : 0;
-          const curTime = stats.lastReviewed ? new Date(stats.lastReviewed).getTime() : 0;
-          if (!stats.lastReviewed || qTime >= curTime || (q.stats.seen || 0) >= (stats.seen || 0)) {
-            stats = { ...stats, ...q.stats };
-            if (typeof q.mastered !== 'undefined') mastered = Boolean(q.mastered);
-            if (typeof q.flagged !== 'undefined') flagged = Boolean(q.flagged);
-          }
-        }
-
-        // 4. Progression spécifique utilisateur Cloud (UPROG ou user_progress)
-        if (cloudProg && cloudProg.stats) {
-          const cpTime = cloudProg.stats.lastReviewed ? new Date(cloudProg.stats.lastReviewed).getTime() : 0;
-          const curTime = stats.lastReviewed ? new Date(stats.lastReviewed).getTime() : 0;
-          if (!stats.lastReviewed || cpTime >= curTime) {
-            stats = { ...stats, ...cloudProg.stats };
-            if (typeof cloudProg.mastered !== 'undefined') mastered = Boolean(cloudProg.mastered);
-            if (typeof cloudProg.flagged !== 'undefined') flagged = Boolean(cloudProg.flagged);
+        // 2. Si une réponse locale hors-ligne sur cet appareil est strictement plus récente, la préserver
+        const lp = localProg || (localQ ? { stats: localQ.stats, mastered: localQ.mastered, flagged: localQ.flagged } : null);
+        if (lp && lp.stats) {
+          const lpTime = lp.stats.lastReviewed ? new Date(lp.stats.lastReviewed).getTime() : 0;
+          const cpTime = (cloudProg && cloudProg.stats && cloudProg.stats.lastReviewed) 
+            ? new Date(cloudProg.stats.lastReviewed).getTime() 
+            : 0;
+          if (lpTime > cpTime) {
+            stats = { ...stats, ...lp.stats };
+            if (typeof lp.mastered !== 'undefined') mastered = Boolean(lp.mastered);
+            if (typeof lp.flagged !== 'undefined') flagged = Boolean(lp.flagged);
           }
         }
 
@@ -2520,18 +2505,55 @@ async function fetchSupabaseData(silent = false) {
         };
       });
 
-      // Fusion intelligente : Ne JAMAIS écraser les questions créées localement qui ne sont pas encore sur Supabase
-      const cloudIds = new Set(cloudQuestions.map(q => q.id));
-      const localOnlyQuestions = (state.questions || []).filter(q => !cloudIds.has(q.id));
+      // Collecte des tombstones (questions et cas expressément supprimés)
+      const deletedQuestionIds = new Set();
+      const deletedCaseIds = new Set();
 
-      state.questions = [...cloudQuestions, ...localOnlyQuestions];
+      try {
+        const localDel = JSON.parse(localStorage.getItem('pathosorus_deleted_ids') || '[]');
+        if (Array.isArray(localDel)) localDel.forEach(id => deletedQuestionIds.add(id));
+      } catch (e) {}
+
+      if (tRes && tRes.data && Array.isArray(tRes.data)) {
+        tRes.data.forEach(t => {
+          if (t.name && t.name.startsWith('DEL_Q:')) {
+            deletedQuestionIds.add(t.name.substring(6));
+          } else if (t.name && t.name.startsWith('DEL_C:')) {
+            deletedCaseIds.add(t.name.substring(6));
+          }
+        });
+      }
+
+      // Nettoyer localement toute trace des questions supprimées et purger Supabase si nécessaire
+      deletedQuestionIds.forEach(delId => {
+        if (state.userProgress && state.userProgress[delId]) delete state.userProgress[delId];
+        if (rawCloudQuestionsMap.has(delId)) {
+          supabaseClient.from('questions').delete().eq('id', delId).catch(() => {});
+        }
+      });
+
+      // Le Cloud Supabase est la référence maîtresse (en filtrant les tombstones)
+      const validCloudQuestions = cloudQuestions.filter(q => !deletedQuestionIds.has(q.id));
+      const cloudIds = new Set(validCloudQuestions.map(q => q.id));
+
+      // Ne préserver que les questions expressément créées hors-ligne sur cet appareil (non encore envoyées au Cloud)
+      const unsyncedOfflineQuestions = (state.questions || []).filter(q => 
+        !cloudIds.has(q.id) && !deletedQuestionIds.has(q.id) && q._localUnsynced === true
+      );
+
+      state.questions = [...validCloudQuestions, ...unsyncedOfflineQuestions];
       localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
 
-      // Synchroniser immédiatement les questions locales manquantes vers Supabase (méthode Zenipad)
-      if (localOnlyQuestions.length > 0) {
-        console.log(`🚀 ${localOnlyQuestions.length} question(s) locale(s) manquante(s) sur le Cloud. Synchronisation vers Supabase...`);
-        for (const lq of localOnlyQuestions) {
-          dbUpsertQuestion(lq).catch(e => console.warn("Erreur sync question locale vers Supabase:", e));
+      // Si des questions ont été créées hors-ligne, les synchroniser vers Supabase
+      if (unsyncedOfflineQuestions.length > 0) {
+        console.log(`🚀 ${unsyncedOfflineQuestions.length} question(s) créée(s) hors-ligne. Synchronisation vers Supabase...`);
+        for (const lq of unsyncedOfflineQuestions) {
+          dbUpsertQuestion(lq).then(res => {
+            if (res && res.success) {
+              delete lq._localUnsynced;
+              saveQuestions();
+            }
+          }).catch(e => console.warn("Erreur sync question locale vers Supabase:", e));
         }
       }
 
@@ -2546,18 +2568,20 @@ async function fetchSupabaseData(silent = false) {
     }
 
     if (!cRes.error && cRes.data) {
-      state.cases = cRes.data.map(c => ({
-        ...c,
-        tags: c.tags || [],
-        steps: c.steps || []
-      }));
+      state.cases = cRes.data
+        .filter(c => !deletedCaseIds.has(c.id))
+        .map(c => ({
+          ...c,
+          tags: c.tags || [],
+          steps: c.steps || []
+        }));
       localStorage.setItem(STORAGE_KEY_CASES, JSON.stringify(state.cases));
     }
 
     if (!tRes.error && tRes.data && tRes.data.length > 0) {
       state.customTags = tRes.data
         .map(t => t.name)
-        .filter(n => n && !n.startsWith('ROLE_') && !n.startsWith('UPROG:') && !n.startsWith('USTATS:'));
+        .filter(n => n && !n.startsWith('ROLE_') && !n.startsWith('UPROG:') && !n.startsWith('USTATS:') && !n.startsWith('DEL_'));
       localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(state.customTags));
     }
 
@@ -2750,21 +2774,25 @@ async function dbUpsertQuestion(q) {
 async function autoSyncLocalQuestionsToCloud() {
   if (!supabaseClient) return;
   try {
-    const { data: cloudQuestions, error } = await supabaseClient.from('questions').select('id');
-    if (error) {
-      console.warn("autoSyncLocalQuestionsToCloud error:", error);
-      return;
-    }
-    if (cloudQuestions) {
-      const cloudIds = new Set(cloudQuestions.map(c => c.id));
-      const unsynced = (state.questions || []).filter(q => !cloudIds.has(q.id));
-      if (unsynced.length > 0) {
-        console.log(`🚀 Synchronisation de ${unsynced.length} question(s) locales vers Supabase (méthode Zenipad)...`);
-        for (const q of unsynced) {
-          await dbUpsertQuestion(q);
+    let deletedIds = new Set();
+    try {
+      const localDel = JSON.parse(localStorage.getItem('pathosorus_deleted_ids') || '[]');
+      if (Array.isArray(localDel)) localDel.forEach(id => deletedIds.add(id));
+    } catch (e) {}
+
+    const unsynced = (state.questions || []).filter(q => 
+      q && q.id && q._localUnsynced === true && !deletedIds.has(q.id)
+    );
+    if (unsynced.length > 0) {
+      console.log(`🚀 Synchronisation de ${unsynced.length} question(s) hors-ligne vers Supabase...`);
+      for (const q of unsynced) {
+        const res = await dbUpsertQuestion(q);
+        if (res && res.success) {
+          delete q._localUnsynced;
         }
-        console.log(`✅ ${unsynced.length} question(s) synchronisées avec succès !`);
       }
+      saveQuestions();
+      console.log(`✅ ${unsynced.length} question(s) hors-ligne synchronisées avec succès !`);
     }
   } catch (e) {
     console.warn("Erreur autoSyncLocalQuestionsToCloud:", e);
@@ -2774,7 +2802,11 @@ async function autoSyncLocalQuestionsToCloud() {
 async function dbDeleteQuestion(id) {
   if (!supabaseClient) return;
   try {
-    await supabaseClient.from('questions').delete().eq('id', id);
+    await Promise.allSettled([
+      supabaseClient.from('questions').delete().eq('id', id),
+      supabaseClient.from('user_progress').delete().eq('question_id', id),
+      supabaseClient.from('custom_tags').insert({ name: 'DEL_Q:' + id })
+    ]);
   } catch (e) {
     console.warn("Erreur delete question supabase:", e);
   }
@@ -2798,7 +2830,10 @@ async function dbUpsertCase(c) {
 async function dbDeleteCase(id) {
   if (!supabaseClient) return;
   try {
-    await supabaseClient.from('cases').delete().eq('id', id);
+    await Promise.allSettled([
+      supabaseClient.from('cases').delete().eq('id', id),
+      supabaseClient.from('custom_tags').insert({ name: 'DEL_C:' + id })
+    ]);
   } catch (e) {
     console.warn("Erreur delete case supabase:", e);
   }
@@ -5105,15 +5140,34 @@ function renderSpacedRepetitionDashboard() {
       : `Réviser l'IHC (0)`;
   }
 
-  const btnStartDue = document.getElementById('btn-play-due-today');
-  if (btnStartDue) {
-    btnStartDue.disabled = false; // Ne jamais bloquer le bouton Jouer
-    const label = document.getElementById('label-due-today');
-    if (label) {
-      label.textContent = dueQuestions.length > 0 
-        ? `Lancer la session du jour (${dueQuestions.length} à revoir)` 
-        : `Révision libre (${activeQuestions.length} questions)`;
+  const dueStatus = document.getElementById('stat-due-today-status');
+  if (dueStatus) {
+    if (dueQuestions.length > 0) {
+      dueStatus.innerHTML = `<span class="text-xs text-amber-400 font-bold">${dueQuestions.length} carte(s) à réviser aujourd'hui</span>`;
+    } else {
+      dueStatus.innerHTML = `<span class="text-xs text-emerald-400 font-semibold flex items-center space-x-1"><i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i><span>À jour pour aujourd'hui ! (0 échue)</span></span>`;
     }
+  }
+
+  const btnStartDue = document.getElementById('btn-play-due-today');
+  const labelDue = document.getElementById('label-due-today');
+  const iconDue = document.getElementById('icon-play-due-today');
+  if (btnStartDue && labelDue) {
+    btnStartDue.disabled = false;
+    if (dueQuestions.length > 0) {
+      btnStartDue.className = "w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-teal-500/25";
+      labelDue.textContent = `Lancer la session du jour (${dueQuestions.length} à revoir)`;
+      if (iconDue) iconDue.setAttribute('data-lucide', 'play');
+    } else {
+      btnStartDue.className = "w-full py-2.5 px-4 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-bold text-xs flex items-center justify-center space-x-2 transition";
+      labelDue.textContent = `✅ Révisions du jour terminées ! (0 carte)`;
+      if (iconDue) iconDue.setAttribute('data-lucide', 'check-check');
+    }
+  }
+
+  const labelFree = document.getElementById('label-free-session');
+  if (labelFree) {
+    labelFree.textContent = `Entraînement libre hors planning (${activeQuestions.length} Q)`;
   }
 
   const btnMastered = document.getElementById('btn-play-mastered');
@@ -5127,16 +5181,25 @@ function renderSpacedRepetitionDashboard() {
 function startSpacedRepetitionDueSession() {
   const activeQuestions = state.questions.filter(q => !q.mastered);
   const due = activeQuestions.filter(q => isQuestionDue(q));
-  const pool = due.length > 0 ? due : (activeQuestions.length > 0 ? activeQuestions : state.questions);
+  if (due.length === 0) {
+    showToast("🎉 Vos révisions du jour sont déjà toutes terminées ! Pour continuer à vous exercer sans contrainte de planning, lancez 'Entraînement libre' ci-dessous.", "success");
+    return;
+  }
+  state.sessionReturnView = 'play';
+  launchQuizSession(due, `Session du Jour (${due.length} cartes dues) 🔁`);
+}
+
+function startFreeReviewSession() {
+  const activeQuestions = state.questions.filter(q => !q.mastered);
+  const pool = activeQuestions.length > 0 ? activeQuestions : state.questions;
   if (pool.length === 0) {
     showToast("Aucune question disponible dans la banque.", "info");
     return;
   }
-  const title = due.length > 0 
-    ? `Session du Jour (${due.length} cartes dues) 🔁` 
-    : `Révision Libre (${pool.length} cartes) 🚀`;
-  launchQuizSession(pool, title);
+  state.sessionReturnView = 'play';
+  launchQuizSession(pool, `Entraînement Libre (${pool.length} cartes) 🚀`);
 }
+window.startFreeReviewSession = startFreeReviewSession;
 
 function startMasteredReviewSession() {
   const pool = state.questions.filter(q => q.mastered);
@@ -7631,15 +7694,26 @@ async function handleSaveQuestionForm(e) {
     if (supabaseClient && savedQuestion) {
       dbUpsertQuestionWithTimeout(savedQuestion, 5000).then(res => {
         if (res && res.error && !res.localOnly) {
+          savedQuestion._localUnsynced = true;
+          saveQuestions();
           updateSaveModalCloudStatus("error", res.error.message || "Erreur Supabase");
         } else if (res && res.localOnly) {
+          savedQuestion._localUnsynced = true;
+          saveQuestions();
           updateSaveModalCloudStatus("localOnly");
         } else {
+          delete savedQuestion._localUnsynced;
+          saveQuestions();
           updateSaveModalCloudStatus("synced");
         }
       }).catch(err => {
+        savedQuestion._localUnsynced = true;
+        saveQuestions();
         updateSaveModalCloudStatus("error", err.message || "Erreur réseau");
       });
+    } else if (savedQuestion) {
+      savedQuestion._localUnsynced = true;
+      saveQuestions();
     }
 
   } catch (err) {
@@ -8445,15 +8519,37 @@ function editQuestion(id) {
   }
 }
 
-function deleteQuestion(id) {
+async function deleteQuestion(id) {
   if (!isCreator()) {
     alert("Action réservée aux comptes Créateurs.");
     return;
   }
   if (!confirm("Voulez-vous supprimer cette question ?")) return;
+
+  // 1. Enregistrer dans la liste locale des tombstones supprimés
+  try {
+    const del = JSON.parse(localStorage.getItem('pathosorus_deleted_ids') || '[]');
+    if (!del.includes(id)) {
+      del.push(id);
+      localStorage.setItem('pathosorus_deleted_ids', JSON.stringify(del));
+    }
+  } catch(e) {}
+
+  // 2. Retirer de la mémoire locale immédiatement
   state.questions = state.questions.filter(q => q.id !== id);
+  if (state.userProgress && state.userProgress[id]) {
+    delete state.userProgress[id];
+  }
   saveQuestions();
-  dbDeleteQuestion(id);
+  broadcastLocalUpdate();
+
+  // 3. Supprimer sur Supabase (questions + user_progress + tombstone DEL_Q:id)
+  await dbDeleteQuestion(id);
+
+  // 4. Mettre à jour UPROG sans la question supprimée
+  debouncedSyncUserProgressTagToCloud();
+
+  showToast("Question supprimée avec succès.", "info");
 }
 
 // =========================================================================
@@ -9082,15 +9178,26 @@ function editDP(id) {
   renderDPStepsBuilder();
 }
 
-function deleteDP(id) {
+async function deleteDP(id) {
   if (!isCreator()) {
     alert("Action réservée aux comptes Créateurs.");
     return;
   }
   if (!confirm("Voulez-vous supprimer ce Dossier Progressif ?")) return;
+
+  try {
+    const del = JSON.parse(localStorage.getItem('pathosorus_deleted_ids') || '[]');
+    if (!del.includes(id)) {
+      del.push(id);
+      localStorage.setItem('pathosorus_deleted_ids', JSON.stringify(del));
+    }
+  } catch(e) {}
+
   state.cases = state.cases.filter(c => c.id !== id);
   saveCases();
-  dbDeleteCase(id);
+  broadcastLocalUpdate();
+  await dbDeleteCase(id);
+  showToast("Dossier progressif supprimé avec succès.", "info");
 }
 
 // =========================================================================
@@ -11375,6 +11482,24 @@ async function checkForRemoteChanges() {
         if (!localHasIt) {
           console.log(`🔄 Nouvelle question détectée sur le Cloud (${topId}) absente en local`);
           needSync = true;
+        }
+      }
+    }
+
+    if (!needSync) {
+      const curEmail = getCurrentUserEmail();
+      if (curEmail) {
+        const { data: progTag } = await supabaseClient
+          .from('custom_tags')
+          .select('name')
+          .like('name', `UPROG:${curEmail}:%`)
+          .limit(1);
+        if (progTag && progTag.length > 0) {
+          const lastTag = localStorage.getItem('pathosorus_last_synced_uprog_tag');
+          if (lastTag && lastTag !== progTag[0].name) {
+            console.log("🔄 Changement de progression utilisateur Cloud détecté");
+            needSync = true;
+          }
         }
       }
     }

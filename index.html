@@ -32,7 +32,7 @@
   <!-- Supabase JS SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Config Cloud Supabase -->
-  <script src="config.js?v=20261026_2050"></script>
+  <script src="config.js?v=20261026_2115"></script>
 
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -281,7 +281,8 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
           <!-- Carte 1 : Session du Jour (Cartes échues) -->
-          <div class="bg-slate-900 border border-teal-500/30 hover:border-teal-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg">
+          <div class="bg-slate-900 border border-teal-500/30 hover:border-teal-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg relative overflow-hidden group">
+            <div class="absolute -top-10 -right-10 w-24 h-24 bg-teal-500/10 rounded-full blur-xl pointer-events-none"></div>
             <div>
               <div class="flex items-center space-x-3 mb-3">
                 <div class="w-10 h-10 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center shrink-0">
@@ -289,19 +290,25 @@
                 </div>
                 <div>
                   <h3 class="font-bold text-white text-base">Répétition du Jour</h3>
-                  <p class="text-xs text-teal-400 font-medium">
+                  <div id="stat-due-today-status" class="text-xs text-teal-400 font-medium">
                     <span id="stat-due-today-count">0</span> carte(s) échue(s)
-                  </p>
+                  </div>
                 </div>
               </div>
               <p class="text-xs text-slate-400 leading-relaxed">
                 Vos cartes échues selon vos délais personnalisés et les questions marquées en révision.
               </p>
             </div>
-            <button onclick="startSpacedRepetitionDueSession()" id="btn-play-due-today" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-teal-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
-              <i data-lucide="play" class="w-3.5 h-3.5"></i>
-              <span id="label-due-today">Lancer la session du jour (0)</span>
-            </button>
+            <div class="mt-4 space-y-2">
+              <button onclick="startSpacedRepetitionDueSession()" id="btn-play-due-today" class="w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-teal-500/25">
+                <i data-lucide="play" id="icon-play-due-today" class="w-3.5 h-3.5"></i>
+                <span id="label-due-today">Lancer la session du jour (0)</span>
+              </button>
+              <button onclick="startFreeReviewSession()" id="btn-play-free-session" class="w-full py-2 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/60 text-[11px] font-semibold flex items-center justify-center space-x-1.5 transition">
+                <i data-lucide="shuffle" class="w-3 h-3 text-slate-400"></i>
+                <span id="label-free-session">Entraînement libre hors planning</span>
+              </button>
+            </div>
           </div>
 
           <!-- Carte 2 : Réviser des Lames Microscopiques (Images) -->
@@ -2024,7 +2031,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="seed_data.js?v=20261026_2050"></script>
-  <script src="app.js?v=20261026_2050"></script>
+  <script src="seed_data.js?v=20261026_2115"></script>
+  <script src="app.js?v=20261026_2115"></script>
 </body>
 </html>
