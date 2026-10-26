@@ -771,7 +771,9 @@ async function pushAllLocalDataToAccountCloud() {
       const { data: cloudQs } = await supabaseClient.from('questions').select('id, optionexplanations');
       const cloudMap = new Map((cloudQs || []).map(q => [q.id, q]));
 
+      const deletedIds = new Set(JSON.parse(localStorage.getItem('pathosorus_deleted_ids') || '[]'));
       const toPush = (state.questions || []).filter(localQ => {
+        if (!localQ || !localQ.id || deletedIds.has(localQ.id)) return false;
         const cloudQ = cloudMap.get(localQ.id);
         const hasLocalNotes = Array.isArray(localQ.optionExplanations) && localQ.optionExplanations.some(e => e && e.trim());
         const cloudMissing = !cloudQ || !cloudQ.optionexplanations || cloudQ.optionexplanations.length === 0 || cloudQ.optionexplanations.every(e => !e || !e.trim());
