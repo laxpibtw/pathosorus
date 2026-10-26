@@ -2,8 +2,18 @@
 <html lang="fr" class="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>PathoSorus 🦖 | Entraînement Actif en Anatomopathologie</title>
+  
+  <!-- Métadonnées Progressive Web App (PWA) & Application Apple Standalone -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PathoSorus">
+  <meta name="application-name" content="PathoSorus">
+  <meta name="theme-color" content="#020617">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -129,6 +139,12 @@
         <button id="btn-accounts-modal" onclick="openAccountsModal()" class="hidden items-center space-x-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-indigo-500/15 text-indigo-300 hover:text-white border border-slate-800 hover:border-indigo-500/40 transition shadow-sm" title="Gérer les comptes collègues">
           <i data-lucide="users" class="w-3.5 h-3.5"></i>
           <span class="hidden xl:inline">Comptes</span>
+        </button>
+
+        <!-- Bouton Application Apple / PWA -->
+        <button id="btn-apple-app" onclick="openAppleAppModal()" class="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-teal-500/15 via-indigo-500/15 to-purple-500/15 hover:from-teal-500/30 hover:to-indigo-500/30 text-teal-300 hover:text-white transition border border-teal-500/30 flex items-center space-x-1 sm:space-x-1.5 shadow-sm" title="Installer l'application sur iPhone ou Mac">
+          <i data-lucide="smartphone" class="w-3.5 h-3.5 text-teal-400"></i>
+          <span class="hidden sm:inline">App Apple</span>
         </button>
 
         <!-- Bouton Synchronisation Instantanée Cloud -->
@@ -1450,6 +1466,67 @@
     </div>
   </div>
 
+  <!-- ================= MODAL INSTALLATION APPLICATION APPLE ================= -->
+  <div id="modal-apple-app" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4" onclick="closeAppleAppModal()">
+    <div class="bg-slate-900 border border-teal-500/30 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl space-y-5 relative" onclick="event.stopPropagation()">
+      <button onclick="closeAppleAppModal()" class="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-xl hover:bg-slate-800 transition">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+
+      <div class="flex items-center space-x-3.5">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-teal-500 via-sky-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-teal-500/20 shrink-0">
+          <img src="apple-touch-icon.png" alt="PathoSorus" class="w-12 h-12 rounded-2xl" onerror="this.style.display='none'">
+        </div>
+        <div>
+          <h3 class="font-black text-lg text-white flex items-center space-x-2">
+            <span>PathoSorus sur votre iPhone</span>
+            <span class="text-sm">🦖</span>
+          </h3>
+          <p class="text-xs text-teal-300 font-medium">Application autonome en plein écran</p>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-300 leading-relaxed">
+        Vous pouvez installer PathoSorus directement sur l'écran d'accueil de votre iPhone (ou dans le Dock de votre Mac) pour l'ouvrir en vraie application native, sans barre d'adresse ni boutons Safari.
+      </p>
+
+      <div class="space-y-3">
+        <!-- Étape iPhone -->
+        <div class="p-4 rounded-2xl bg-slate-950/70 border border-teal-500/20 space-y-2">
+          <div class="flex items-center space-x-2 text-xs font-bold text-teal-300">
+            <i data-lucide="smartphone" class="w-4 h-4 text-teal-400"></i>
+            <span>Sur iPhone & iPad (Safari) :</span>
+          </div>
+          <ol class="text-xs text-slate-300 space-y-2 pl-6 list-decimal leading-relaxed">
+            <li>Touchez l'icône <strong class="text-white bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">Partager</strong> (le carré avec flèche vers le haut <span class="text-teal-400 font-bold">⎋</span>) en bas de Safari.</li>
+            <li>Faites défiler le menu vers le bas et choisissez <strong class="text-white bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">« Sur l'écran d'accueil »</strong> (icône <span class="text-teal-400 font-bold">➕</span>).</li>
+            <li>Touchez <strong class="text-teal-300">Ajouter</strong> en haut à droite.</li>
+          </ol>
+          <p class="text-[11px] text-teal-400/90 italic pt-1">✨ L'icône PathoSorus 🦖 apparaît sur votre écran d'accueil et s'ouvre désormais en application plein écran !</p>
+        </div>
+
+        <!-- Étape Mac -->
+        <div class="p-4 rounded-2xl bg-slate-950/70 border border-indigo-500/20 space-y-2">
+          <div class="flex items-center space-x-2 text-xs font-bold text-indigo-300">
+            <i data-lucide="monitor" class="w-4 h-4 text-indigo-400"></i>
+            <span>Sur Mac (Safari) :</span>
+          </div>
+          <ol class="text-xs text-slate-300 space-y-1.5 pl-6 list-decimal leading-relaxed">
+            <li>Dans le menu supérieur de Safari, cliquez sur <strong class="text-white">Fichier</strong>.</li>
+            <li>Cliquez sur <strong class="text-white bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">« Ajouter au Dock... »</strong> puis validez.</li>
+          </ol>
+          <p class="text-[11px] text-indigo-300/90 italic pt-1">✨ L'application s'ajoute directement à votre Dock macOS comme n'importe quelle app Mac.</p>
+        </div>
+      </div>
+
+      <div class="pt-2 flex justify-end">
+        <button onclick="closeAppleAppModal()" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs transition shadow-lg shadow-teal-500/20">
+          J'ai compris !
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- ================= MODAL AUTHENTIFICATION (CONNEXION) ================= -->
   <div id="modal-auth" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
     <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-5">
@@ -2047,7 +2124,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="seed_data.js?v=20261026_2150"></script>
-  <script src="app.js?v=20261026_2150"></script>
+  <script src="seed_data.js?v=20261026_2200"></script>
+  <script src="app.js?v=20261026_2200"></script>
 </body>
 </html>

@@ -1532,6 +1532,28 @@ async function handleMasterAdminSignUp() {
   }
 }
 
+// --- APPLICATION APPLE / PWA MODAL ---
+function openAppleAppModal() {
+  const modal = document.getElementById('modal-apple-app');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+      window.lucide.createIcons();
+    }
+  }
+}
+window.openAppleAppModal = openAppleAppModal;
+
+function closeAppleAppModal() {
+  const modal = document.getElementById('modal-apple-app');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+window.closeAppleAppModal = closeAppleAppModal;
+
 // --- GESTION DES COMPTES COLLÈGUES ---
 
 function openAccountsModal() {
