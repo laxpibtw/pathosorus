@@ -311,7 +311,7 @@
             </div>
           </div>
 
-          <!-- Carte 2 : Réviser des Lames Microscopiques (Images) -->
+          <!-- Carte 2 : Réviser des Lames Microscopiques (Images & Délais) -->
           <div class="bg-slate-900 border border-indigo-500/30 hover:border-indigo-500/60 rounded-2xl p-5 flex flex-col justify-between transition shadow-lg relative overflow-hidden group">
             <div class="absolute -top-10 -right-10 w-24 h-24 bg-indigo-500/10 rounded-full blur-xl pointer-events-none"></div>
             <div>
@@ -324,19 +324,25 @@
                     <span>Réviser des Lames</span>
                     <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">🔬 Lames</span>
                   </h3>
-                  <p class="text-xs text-indigo-400 font-medium">
+                  <div id="stat-slides-due-status" class="text-xs text-indigo-400 font-medium">
                     <span id="stat-slides-count">0</span> question(s) avec lame(s)
-                  </p>
+                  </div>
                 </div>
               </div>
               <p class="text-xs text-slate-400 leading-relaxed">
-                Révisez spécifiquement les questions d'histopathologie avec photographies de coupes microscopiques (tag #Lame).
+                Révisez spécifiquement les questions d'histopathologie avec photographies de coupes microscopiques (tag #Lame) selon vos délais ou à votre guise.
               </p>
             </div>
-            <button onclick="startSlideQuestionsSession()" id="btn-play-slides" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-indigo-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
-              <i data-lucide="play" id="icon-play-slides" class="w-3.5 h-3.5"></i>
-              <span id="label-slides-count">Réviser les lames (0)</span>
-            </button>
+            <div class="mt-4 space-y-2">
+              <button onclick="startDueSlideQuestionsSession()" id="btn-play-slides" class="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-indigo-500/25">
+                <i data-lucide="play" id="icon-play-slides" class="w-3.5 h-3.5"></i>
+                <span id="label-slides-count">Lancer les lames du jour (0)</span>
+              </button>
+              <button onclick="startFreeSlideReviewSession()" id="btn-play-free-slides" class="w-full py-2 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/60 text-[11px] font-semibold flex items-center justify-center space-x-1.5 transition">
+                <i data-lucide="shuffle" class="w-3 h-3 text-slate-400"></i>
+                <span id="label-free-slides">Entraînement libre des lames</span>
+              </button>
+            </div>
           </div>
 
           <!-- Carte 3 : Révision IHC (Immunohistochimie / Profils d'anticorps) -->
@@ -352,19 +358,25 @@
                     <span>Révision IHC</span>
                     <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 border border-violet-500/30">🧪 #IHC</span>
                   </h3>
-                  <p class="text-xs text-violet-400 font-medium">
+                  <div id="stat-ihc-due-status" class="text-xs text-violet-400 font-medium">
                     <span id="stat-ihc-count">0</span> question(s) IHC
-                  </p>
+                  </div>
                 </div>
               </div>
               <p class="text-xs text-slate-400 leading-relaxed">
-                Révisez spécifiquement les questions d'immunohistochimie (profils d'anticorps, pièges diagnostiques, tag #IHC).
+                Révisez spécifiquement les questions d'immunohistochimie (profils d'anticorps, pièges diagnostiques, tag #IHC) selon vos délais ou à votre guise.
               </p>
             </div>
-            <button onclick="startIHCQuestionsSession()" id="btn-play-ihc" class="mt-4 w-full py-2.5 px-4 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-violet-500/25 disabled:opacity-40 disabled:cursor-not-allowed">
-              <i data-lucide="play" id="icon-play-ihc" class="w-3.5 h-3.5"></i>
-              <span id="label-ihc-count">Réviser l'IHC (0)</span>
-            </button>
+            <div class="mt-4 space-y-2">
+              <button onclick="startDueIHCQuestionsSession()" id="btn-play-ihc" class="w-full py-2.5 px-4 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-violet-500/25">
+                <i data-lucide="play" id="icon-play-ihc" class="w-3.5 h-3.5"></i>
+                <span id="label-ihc-count">Lancer l'IHC du jour (0)</span>
+              </button>
+              <button onclick="startFreeIHCReviewSession()" id="btn-play-free-ihc" class="w-full py-2 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/60 text-[11px] font-semibold flex items-center justify-center space-x-1.5 transition">
+                <i data-lucide="shuffle" class="w-3 h-3 text-slate-400"></i>
+                <span id="label-free-ihc">Entraînement libre IHC</span>
+              </button>
+            </div>
           </div>
 
           <!-- Carte 4 : Questions Neutralisées / Maîtrisées -->
@@ -2035,7 +2047,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="seed_data.js?v=20261026_2130"></script>
-  <script src="app.js?v=20261026_2130"></script>
+  <script src="seed_data.js?v=20261026_2140"></script>
+  <script src="app.js?v=20261026_2140"></script>
 </body>
 </html>

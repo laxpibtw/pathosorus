@@ -5023,20 +5023,38 @@ function getSlideQuestions(activeOnly = true, toReviewTodayOnly = false) {
 }
 window.getSlideQuestions = getSlideQuestions;
 
-function startSlideQuestionsSession() {
-  const allSlides = getSlideQuestions(false, false);
-  if (allSlides.length === 0) {
+function startDueSlideQuestionsSession() {
+  const activeSlides = getSlideQuestions(true, false);
+  const dueSlides = activeSlides.filter(q => isQuestionDue(q));
+  if (dueSlides.length === 0) {
+    showToast("🎉 Vos lames du jour selon vos délais sont toutes à jour (0 échue) ! Pour continuer à vous exercer à votre guise, lancez 'Entraînement libre des lames' ci-dessous.", "success");
+    return;
+  }
+  state.sessionReturnView = 'play';
+  launchQuizSession(dueSlides, `Session Lames du Jour (${dueSlides.length} lames dues) 🔬`);
+}
+window.startDueSlideQuestionsSession = startDueSlideQuestionsSession;
+
+function startFreeSlideReviewSession() {
+  const activeSlides = getSlideQuestions(true, false);
+  const pool = activeSlides.length > 0 ? activeSlides : getSlideQuestions(false, false);
+  if (pool.length === 0) {
     showToast("Aucune question avec lame ou image microscopique dans la banque pour l'instant.", "info");
     return;
   }
-
-  // Priorité aux lames échues (dues), sinon révision intégrale des lames sans blocage
-  const dueSlides = allSlides.filter(q => !q.mastered && isQuestionDue(q));
-  const activeSlides = allSlides.filter(q => !q.mastered);
-  const pool = dueSlides.length > 0 ? dueSlides : (activeSlides.length > 0 ? activeSlides : allSlides);
-
   state.sessionReturnView = 'play';
-  launchQuizSession(pool, `Révision des Lames Microscopiques • ${pool.length} Q 🔬`);
+  launchQuizSession(pool, `Entraînement Libre Lames Microscopiques (${pool.length} Q à ma guise) 🔬`);
+}
+window.startFreeSlideReviewSession = startFreeSlideReviewSession;
+
+function startSlideQuestionsSession(forceDueOnly = false) {
+  const activeSlides = getSlideQuestions(true, false);
+  const dueSlides = activeSlides.filter(q => isQuestionDue(q));
+  if (forceDueOnly || dueSlides.length > 0) {
+    startDueSlideQuestionsSession();
+  } else {
+    startFreeSlideReviewSession();
+  }
 }
 window.startSlideQuestionsSession = startSlideQuestionsSession;
 window.startColleaguesQuestionsSession = startSlideQuestionsSession; // Rétrocompatibilité
@@ -5075,20 +5093,38 @@ function getIHCQuestions(activeOnly = true, toReviewTodayOnly = false) {
 }
 window.getIHCQuestions = getIHCQuestions;
 
-function startIHCQuestionsSession() {
-  const allIHC = getIHCQuestions(false, false);
-  if (allIHC.length === 0) {
+function startDueIHCQuestionsSession() {
+  const activeIHC = getIHCQuestions(true, false);
+  const dueIHC = activeIHC.filter(q => isQuestionDue(q));
+  if (dueIHC.length === 0) {
+    showToast("🎉 Vos questions IHC du jour selon vos délais sont toutes à jour (0 échue) ! Pour continuer à vous exercer à votre guise, lancez 'Entraînement libre IHC' ci-dessous.", "success");
+    return;
+  }
+  state.sessionReturnView = 'play';
+  launchQuizSession(dueIHC, `Session IHC du Jour (${dueIHC.length} Q dues) 🧪`);
+}
+window.startDueIHCQuestionsSession = startDueIHCQuestionsSession;
+
+function startFreeIHCReviewSession() {
+  const activeIHC = getIHCQuestions(true, false);
+  const pool = activeIHC.length > 0 ? activeIHC : getIHCQuestions(false, false);
+  if (pool.length === 0) {
     showToast("Aucune question d'immunohistochimie (#IHC) dans la banque pour l'instant.", "info");
     return;
   }
-
-  // Priorité aux questions IHC échues (dues), sinon révision libre sans blocage
-  const dueIHC = allIHC.filter(q => !q.mastered && isQuestionDue(q));
-  const activeIHC = allIHC.filter(q => !q.mastered);
-  const pool = dueIHC.length > 0 ? dueIHC : (activeIHC.length > 0 ? activeIHC : allIHC);
-
   state.sessionReturnView = 'play';
-  launchQuizSession(pool, `Révision Immunohistochimie (IHC) • ${pool.length} Q 🧪`);
+  launchQuizSession(pool, `Entraînement Libre IHC (${pool.length} Q à ma guise) 🧪`);
+}
+window.startFreeIHCReviewSession = startFreeIHCReviewSession;
+
+function startIHCQuestionsSession(forceDueOnly = false) {
+  const activeIHC = getIHCQuestions(true, false);
+  const dueIHC = activeIHC.filter(q => isQuestionDue(q));
+  if (forceDueOnly || dueIHC.length > 0) {
+    startDueIHCQuestionsSession();
+  } else {
+    startFreeIHCReviewSession();
+  }
 }
 window.startIHCQuestionsSession = startIHCQuestionsSession;
 
@@ -5104,100 +5140,9 @@ function renderSpacedRepetitionDashboard() {
   const allIHC = activeQuestions.filter(q => isIHCQuestion(q));
   const dueIHC = allIHC.filter(q => isQuestionDue(q));
 
+  // 1. Module Répétition du Jour
   const dueBadge = document.getElementById('stat-due-today-count');
   if (dueBadge) dueBadge.textContent = dueQuestions.length;
-
-  const activeBadge = document.getElementById('stat-active-count');
-  if (activeBadge) activeBadge.textContent = activeQuestions.length;
-
-  const masteredBadge = document.getElementById('stat-mastered-count');
-  if (masteredBadge) masteredBadge.textContent = masteredCount;
-
-  // 2. Module Réviser des Lames (ex-Questions des Collègues)
-  const slidesBadge = document.getElementById('stat-slides-count') || document.getElementById('stat-colleagues-count');
-  if (slidesBadge) slidesBadge.textContent = allSlides.length;
-
-  const btnSlides = document.getElementById('btn-play-slides') || document.getElementById('btn-play-colleagues');
-  const iconSlides = document.getElementById('icon-play-slides') || document.getElementById('icon-play-colleagues');
-  if (btnSlides) {
-    const isDone = (allSlides.length === 0);
-    btnSlides.disabled = isDone;
-    if (iconSlides) {
-      if (isDone) iconSlides.classList.add('hidden');
-      else iconSlides.classList.remove('hidden');
-    }
-    const labelS = document.getElementById('label-slides-count') || document.getElementById('label-colleagues-count');
-    if (labelS) {
-      if (allSlides.length === 0) {
-        labelS.textContent = `Aucune lame disponible`;
-      } else if (dueSlides.length > 0) {
-        labelS.textContent = `Réviser les lames (${dueSlides.length} à revoir)`;
-      } else {
-        labelS.textContent = `Tester toutes les lames (${allSlides.length})`;
-      }
-    }
-  }
-
-  const btnShortcut = document.getElementById('btn-play-slides-shortcut') || document.getElementById('btn-play-colleagues-shortcut');
-  if (btnShortcut) {
-    const isDone = (allSlides.length === 0);
-    btnShortcut.disabled = isDone;
-    if (isDone) {
-      btnShortcut.classList.add('opacity-40', 'cursor-not-allowed');
-    } else {
-      btnShortcut.classList.remove('opacity-40', 'cursor-not-allowed');
-    }
-  }
-
-  const labelShortcut = document.getElementById('label-slides-shortcut') || document.getElementById('label-colleagues-shortcut');
-  if (labelShortcut) {
-    labelShortcut.textContent = allSlides.length > 0 
-      ? `Réviser les Lames (${allSlides.length})` 
-      : `Réviser les Lames (0)`;
-  }
-
-  // 3. Module Révision IHC
-  const ihcBadge = document.getElementById('stat-ihc-count');
-  if (ihcBadge) ihcBadge.textContent = allIHC.length;
-
-  const btnIHC = document.getElementById('btn-play-ihc');
-  const iconIHC = document.getElementById('icon-play-ihc');
-  if (btnIHC) {
-    const isDone = (allIHC.length === 0);
-    btnIHC.disabled = isDone;
-    if (iconIHC) {
-      if (isDone) iconIHC.classList.add('hidden');
-      else iconIHC.classList.remove('hidden');
-    }
-    const labelIHC = document.getElementById('label-ihc-count');
-    if (labelIHC) {
-      if (allIHC.length === 0) {
-        labelIHC.textContent = `Aucune question IHC`;
-      } else if (dueIHC.length > 0) {
-        labelIHC.textContent = `Réviser l'IHC (${dueIHC.length} à revoir)`;
-      } else {
-        labelIHC.textContent = `Tester tout l'IHC (${allIHC.length})`;
-      }
-    }
-  }
-
-  const btnIHCShortcut = document.getElementById('btn-play-ihc-shortcut');
-  if (btnIHCShortcut) {
-    const isDone = (allIHC.length === 0);
-    btnIHCShortcut.disabled = isDone;
-    if (isDone) {
-      btnIHCShortcut.classList.add('opacity-40', 'cursor-not-allowed');
-    } else {
-      btnIHCShortcut.classList.remove('opacity-40', 'cursor-not-allowed');
-    }
-  }
-
-  const labelIHCShortcut = document.getElementById('label-ihc-shortcut');
-  if (labelIHCShortcut) {
-    labelIHCShortcut.textContent = allIHC.length > 0 
-      ? `Réviser l'IHC (${allIHC.length})` 
-      : `Réviser l'IHC (0)`;
-  }
 
   const dueStatus = document.getElementById('stat-due-today-status');
   if (dueStatus) {
@@ -5229,11 +5174,156 @@ function renderSpacedRepetitionDashboard() {
     labelFree.textContent = `Entraînement libre hors planning (${activeQuestions.length} Q)`;
   }
 
+  // 2. Module Réviser des Lames (Délais & À ma guise)
+  const slidesDueStatus = document.getElementById('stat-slides-due-status');
+  if (slidesDueStatus) {
+    if (allSlides.length === 0) {
+      slidesDueStatus.innerHTML = `<span class="text-xs text-slate-400">Aucune lame disponible</span>`;
+    } else if (dueSlides.length > 0) {
+      slidesDueStatus.innerHTML = `<span class="text-xs text-amber-400 font-bold">${dueSlides.length} lame(s) à réviser aujourd'hui</span>`;
+    } else {
+      slidesDueStatus.innerHTML = `<span class="text-xs text-emerald-400 font-semibold flex items-center space-x-1"><i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i><span>À jour pour aujourd'hui ! (0 échue)</span></span>`;
+    }
+  }
+
+  const slidesBadge = document.getElementById('stat-slides-count') || document.getElementById('stat-colleagues-count');
+  if (slidesBadge) slidesBadge.textContent = allSlides.length;
+
+  const btnSlides = document.getElementById('btn-play-slides') || document.getElementById('btn-play-colleagues');
+  const iconSlides = document.getElementById('icon-play-slides') || document.getElementById('icon-play-colleagues');
+  const labelS = document.getElementById('label-slides-count') || document.getElementById('label-colleagues-count');
+  if (btnSlides && labelS) {
+    btnSlides.disabled = false;
+    if (allSlides.length === 0) {
+      btnSlides.disabled = true;
+      btnSlides.className = "w-full py-2.5 px-4 rounded-xl bg-slate-800 text-slate-500 font-bold text-xs flex items-center justify-center space-x-2 cursor-not-allowed";
+      labelS.textContent = `Aucune lame disponible`;
+      if (iconSlides) iconSlides.setAttribute('data-lucide', 'play');
+    } else if (dueSlides.length > 0) {
+      btnSlides.className = "w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-indigo-500/25";
+      labelS.textContent = `Lancer les lames du jour (${dueSlides.length} à revoir)`;
+      if (iconSlides) iconSlides.setAttribute('data-lucide', 'play');
+    } else {
+      btnSlides.className = "w-full py-2.5 px-4 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-bold text-xs flex items-center justify-center space-x-2 transition";
+      labelS.textContent = `✅ Lames du jour terminées ! (0 lame)`;
+      if (iconSlides) iconSlides.setAttribute('data-lucide', 'check-check');
+    }
+  }
+
+  const btnFreeSlides = document.getElementById('btn-play-free-slides');
+  const labelFreeSlides = document.getElementById('label-free-slides');
+  if (btnFreeSlides) {
+    btnFreeSlides.disabled = (allSlides.length === 0);
+  }
+  if (labelFreeSlides) {
+    labelFreeSlides.textContent = `Entraînement libre des lames (${allSlides.length} Q)`;
+  }
+
+  const btnShortcut = document.getElementById('btn-play-slides-shortcut') || document.getElementById('btn-play-colleagues-shortcut');
+  if (btnShortcut) {
+    const isDone = (allSlides.length === 0);
+    btnShortcut.disabled = isDone;
+    if (isDone) {
+      btnShortcut.classList.add('opacity-40', 'cursor-not-allowed');
+    } else {
+      btnShortcut.classList.remove('opacity-40', 'cursor-not-allowed');
+    }
+  }
+
+  const labelShortcut = document.getElementById('label-slides-shortcut') || document.getElementById('label-colleagues-shortcut');
+  if (labelShortcut) {
+    if (allSlides.length === 0) {
+      labelShortcut.textContent = `Réviser les Lames (0)`;
+    } else if (dueSlides.length > 0) {
+      labelShortcut.textContent = `Lames du Jour (${dueSlides.length} dues)`;
+    } else {
+      labelShortcut.textContent = `Lames à ma guise (${allSlides.length} Q)`;
+    }
+  }
+
+  // 3. Module Révision IHC (Délais & À ma guise)
+  const ihcDueStatus = document.getElementById('stat-ihc-due-status');
+  if (ihcDueStatus) {
+    if (allIHC.length === 0) {
+      ihcDueStatus.innerHTML = `<span class="text-xs text-slate-400">Aucune question IHC</span>`;
+    } else if (dueIHC.length > 0) {
+      ihcDueStatus.innerHTML = `<span class="text-xs text-amber-400 font-bold">${dueIHC.length} question(s) IHC à réviser aujourd'hui</span>`;
+    } else {
+      ihcDueStatus.innerHTML = `<span class="text-xs text-emerald-400 font-semibold flex items-center space-x-1"><i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i><span>À jour pour aujourd'hui ! (0 échue)</span></span>`;
+    }
+  }
+
+  const ihcBadge = document.getElementById('stat-ihc-count');
+  if (ihcBadge) ihcBadge.textContent = allIHC.length;
+
+  const btnIHC = document.getElementById('btn-play-ihc');
+  const iconIHC = document.getElementById('icon-play-ihc');
+  const labelIHC = document.getElementById('label-ihc-count');
+  if (btnIHC && labelIHC) {
+    btnIHC.disabled = false;
+    if (allIHC.length === 0) {
+      btnIHC.disabled = true;
+      btnIHC.className = "w-full py-2.5 px-4 rounded-xl bg-slate-800 text-slate-500 font-bold text-xs flex items-center justify-center space-x-2 cursor-not-allowed";
+      labelIHC.textContent = `Aucune question IHC`;
+      if (iconIHC) iconIHC.setAttribute('data-lucide', 'play');
+    } else if (dueIHC.length > 0) {
+      btnIHC.className = "w-full py-2.5 px-4 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-violet-500/25";
+      labelIHC.textContent = `Lancer l'IHC du jour (${dueIHC.length} à revoir)`;
+      if (iconIHC) iconIHC.setAttribute('data-lucide', 'play');
+    } else {
+      btnIHC.className = "w-full py-2.5 px-4 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-bold text-xs flex items-center justify-center space-x-2 transition";
+      labelIHC.textContent = `✅ IHC du jour terminé ! (0 question)`;
+      if (iconIHC) iconIHC.setAttribute('data-lucide', 'check-check');
+    }
+  }
+
+  const btnFreeIHC = document.getElementById('btn-play-free-ihc');
+  const labelFreeIHC = document.getElementById('label-free-ihc');
+  if (btnFreeIHC) {
+    btnFreeIHC.disabled = (allIHC.length === 0);
+  }
+  if (labelFreeIHC) {
+    labelFreeIHC.textContent = `Entraînement libre IHC (${allIHC.length} Q)`;
+  }
+
+  const btnIHCShortcut = document.getElementById('btn-play-ihc-shortcut');
+  if (btnIHCShortcut) {
+    const isDone = (allIHC.length === 0);
+    btnIHCShortcut.disabled = isDone;
+    if (isDone) {
+      btnIHCShortcut.classList.add('opacity-40', 'cursor-not-allowed');
+    } else {
+      btnIHCShortcut.classList.remove('opacity-40', 'cursor-not-allowed');
+    }
+  }
+
+  const labelIHCShortcut = document.getElementById('label-ihc-shortcut');
+  if (labelIHCShortcut) {
+    if (allIHC.length === 0) {
+      labelIHCShortcut.textContent = `Réviser l'IHC (0)`;
+    } else if (dueIHC.length > 0) {
+      labelIHCShortcut.textContent = `IHC du Jour (${dueIHC.length} dues)`;
+    } else {
+      labelIHCShortcut.textContent = `IHC à ma guise (${allIHC.length} Q)`;
+    }
+  }
+
+  // 4. Module Questions Maîtrisées
+  const activeBadge = document.getElementById('stat-active-count');
+  if (activeBadge) activeBadge.textContent = activeQuestions.length;
+
+  const masteredBadge = document.getElementById('stat-mastered-count');
+  if (masteredBadge) masteredBadge.textContent = masteredCount;
+
   const btnMastered = document.getElementById('btn-play-mastered');
   if (btnMastered) {
     btnMastered.disabled = masteredCount === 0;
     const labelM = document.getElementById('label-mastered-count');
     if (labelM) labelM.textContent = `Tester mes maîtrisées (${masteredCount})`;
+  }
+
+  if (window.lucide && typeof window.lucide.createIcons === 'function') {
+    window.lucide.createIcons();
   }
 }
 
