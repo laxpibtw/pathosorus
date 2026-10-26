@@ -588,11 +588,10 @@ async function initAuth() {
     }
     updateUserRoleUI();
 
-    // Charger les questions et synchroniser la progression liée au compte
+    // Charger les questions et synchroniser la progression liée au compte depuis le Cloud (Cloud-Authoritative)
     await fetchSupabaseData(true);
     if (state.currentUser) {
       checkDailyStreak();
-      await syncLocalProgressToCloud();
     }
 
     supabaseClient.auth.onAuthStateChange(async (event, session) => {
@@ -606,7 +605,6 @@ async function initAuth() {
         checkDailyStreak();
         await fetchSupabaseData(true);
         checkDailyStreak();
-        await syncLocalProgressToCloud();
       } else if (event === 'SIGNED_OUT') {
         const explicitLogout = localStorage.getItem('pathosorus_explicit_logout') === 'true';
         if (explicitLogout) {
@@ -2441,25 +2439,15 @@ async function fetchSupabaseData(silent = false) {
         let mastered = false;
         let flagged = false;
 
-        // 1. Progression Cloud du compte connecté (référence multi-postes prioritaire)
+        // Progression Cloud du compte connecté (Supabase est l'UNIQUE source de vérité pour tous les appareils)
         if (cloudProg) {
           stats = { ...stats, ...(cloudProg.stats || {}) };
           if (typeof cloudProg.mastered !== 'undefined') mastered = Boolean(cloudProg.mastered);
           if (typeof cloudProg.flagged !== 'undefined') flagged = Boolean(cloudProg.flagged);
-        }
-
-        // 2. Si une réponse locale hors-ligne sur cet appareil est strictement plus récente, la préserver
-        const lp = localProg || (localQ ? { stats: localQ.stats, mastered: localQ.mastered, flagged: localQ.flagged } : null);
-        if (lp && lp.stats) {
-          const lpTime = lp.stats.lastReviewed ? new Date(lp.stats.lastReviewed).getTime() : 0;
-          const cpTime = (cloudProg && cloudProg.stats && cloudProg.stats.lastReviewed) 
-            ? new Date(cloudProg.stats.lastReviewed).getTime() 
-            : 0;
-          if (lpTime > cpTime) {
-            stats = { ...stats, ...lp.stats };
-            if (typeof lp.mastered !== 'undefined') mastered = Boolean(lp.mastered);
-            if (typeof lp.flagged !== 'undefined') flagged = Boolean(lp.flagged);
-          }
+        } else if (q.stats) {
+          stats = { ...stats, ...(q.stats || {}) };
+          if (typeof q.mastered !== 'undefined') mastered = Boolean(q.mastered);
+          if (typeof q.flagged !== 'undefined') flagged = Boolean(q.flagged);
         }
 
         // Récupérer optionExplanations depuis la colonne Supabase (optionexplanations ou optionExplanations)
