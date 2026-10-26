@@ -711,6 +711,22 @@ async function forceFullCloudSync() {
 window.forceFullCloudSync = forceFullCloudSync;
 window.pushAllLocalDataToAccountCloud = pushAllLocalDataToAccountCloud;
 
+async function syncCloudNow() {
+  const btn = document.getElementById('btn-quick-sync');
+  if (btn) btn.classList.add('opacity-50', 'pointer-events-none');
+  try {
+    if (!supabaseClient) initSupabase();
+    await fetchSupabaseData(false);
+    showRewardToast("Banque Cloud synchronisée (54 éléments) !", "sparkles");
+  } catch (e) {
+    console.warn("Erreur syncCloudNow:", e);
+    alert("Erreur lors de la synchronisation : " + (e.message || e));
+  } finally {
+    if (btn) btn.classList.remove('opacity-50', 'pointer-events-none');
+  }
+}
+window.syncCloudNow = syncCloudNow;
+
 async function syncStatsToCloud() {
   if (!supabaseClient || !state.currentUser) return;
   try {
