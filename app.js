@@ -2753,10 +2753,111 @@ async function dbUpsertTag(name) {
   }
 }
 
+function compressImageToDataUrl(fileOrDataUrl, maxWidth = 1280, quality = 0.82) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+      if (width > maxWidth || height > maxWidth) {
+        if (width > height) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        } else {
+          width = Math.round((width * maxWidth) / height);
+          height = maxWidth;
+        }
+      }
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressed);
+      } catch (err) {
+        resolve(typeof fileOrDataUrl === 'string' ? fileOrDataUrl : "");
+      }
+    };
+    img.onerror = () => {
+      resolve(typeof fileOrDataUrl === 'string' ? fileOrDataUrl : "");
+    };
+    if (typeof fileOrDataUrl === 'string') {
+      img.src = fileOrDataUrl;
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => { img.src = e.target.result; };
+      reader.onerror = () => resolve("");
+      reader.readAsDataURL(fileOrDataUrl);
+    }
+  });
+}
+
+async function dbUpsertQuestionWithTimeout(q, timeoutMs = 4500) {
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        console.warn("⚠️ Timeout Supabase upsert (sauvegarde locale maintenue)");
+        resolve({ error: { message: "Délai réseau dépassé" }, localOnly: true });
+      }
+    }, timeoutMs);
+
+    dbUpsertQuestion(q).then(res => {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        resolve(res);
+      }
+    }).catch(err => {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        resolve({ error: err });
+      }
+    });
+  });
+}
+
+async function dbUpsertCaseWithTimeout(c, timeoutMs = 4500) {
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        console.warn("⚠️ Timeout Supabase case upsert (sauvegarde locale maintenue)");
+        resolve({ error: { message: "Délai réseau dépassé" }, localOnly: true });
+      }
+    }, timeoutMs);
+
+    dbUpsertCase(c).then(res => {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        resolve(res);
+      }
+    }).catch(err => {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        resolve({ error: err });
+      }
+    });
+  });
+}
+
 async function uploadImageFile(file) {
+  // Compression systématique pour un upload ultra-rapide (<100ms) sans saturer le réseau ni le stockage local
+  let compressedDataUrl = "";
+  try {
+    compressedDataUrl = await compressImageToDataUrl(file, 1280, 0.82);
+  } catch(e) {}
+
   if (supabaseClient) {
     try {
-      const ext = (file.name || 'image.png').split('.').pop() || 'png';
+      const ext = 'jpg';
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`;
       const { data, error } = await supabaseClient.storage
         .from('pathosorus_images')
@@ -2769,9 +2870,11 @@ async function uploadImageFile(file) {
         return publicData.publicUrl;
       }
     } catch (err) {
-      console.warn("Erreur upload Supabase Storage, fallback base64", err);
+      console.warn("Upload Supabase Storage non disponible, fallback image compressée", err);
     }
   }
+
+  if (compressedDataUrl) return compressedDataUrl;
 
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -6543,8 +6646,10 @@ async function attachFilesToEditor(files) {
   for (const file of validFiles) {
     let localPreviewUrl = "";
     try {
-      localPreviewUrl = await readFileAsDataUrl(file);
-    } catch(e) {}
+      localPreviewUrl = await compressImageToDataUrl(file);
+    } catch(e) {
+      try { localPreviewUrl = await readFileAsDataUrl(file); } catch(err) {}
+    }
 
     const count = state.editorUploadedImages.length + 1;
     const defaultCaption = (file.name && file.name !== 'image.png' && file.name !== 'blob' && !file.name.startsWith('lame_'))
@@ -6628,8 +6733,10 @@ async function attachExplanationFilesToEditor(files) {
   for (const file of validFiles) {
     let localPreviewUrl = "";
     try {
-      localPreviewUrl = await readFileAsDataUrl(file);
-    } catch(e) {}
+      localPreviewUrl = await compressImageToDataUrl(file);
+    } catch(e) {
+      try { localPreviewUrl = await readFileAsDataUrl(file); } catch(err) {}
+    }
 
     const count = state.editorUploadedExplanationImages.length + 1;
     const defaultCaption = (file.name && file.name !== 'image.png' && file.name !== 'blob' && !file.name.startsWith('schema_'))
@@ -6990,6 +7097,68 @@ let saveSuccessModalTimer = null;
 let saveSuccessModalCountdownSec = 3;
 let pendingHighlightedItem = null; // { id, organ, category, entity, isCase }
 
+function updateSaveModalCloudStatus(status, errorMsg = '') {
+  const cloudCard = document.getElementById('save-success-cloud-card');
+  const cloudIconBox = document.getElementById('save-success-cloud-icon-box');
+  const cloudIcon = document.getElementById('save-success-cloud-icon');
+  const cloudPill = document.getElementById('save-success-cloud-pill');
+  const cloudDesc = document.getElementById('save-success-cloud-desc');
+
+  if (status === 'synced') {
+    if (cloudCard) cloudCard.className = "flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-teal-500/30";
+    if (cloudIconBox) cloudIconBox.className = "w-8 h-8 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center shrink-0";
+    if (cloudIcon) {
+      cloudIcon.setAttribute('data-lucide', 'cloud');
+      cloudIcon.className = "w-4 h-4 text-teal-400";
+    }
+    if (cloudPill) {
+      cloudPill.className = "text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300 border border-teal-500/30";
+      cloudPill.textContent = "✓ EN LIGNE";
+    }
+    if (cloudDesc) cloudDesc.textContent = "Synchronisé avec le serveur Supabase. Immédiatement accessible sur tous vos appareils.";
+  } else if (status === 'syncing') {
+    if (cloudCard) cloudCard.className = "flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-amber-500/30";
+    if (cloudIconBox) cloudIconBox.className = "w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0";
+    if (cloudIcon) {
+      cloudIcon.setAttribute('data-lucide', 'loader-2');
+      cloudIcon.className = "w-4 h-4 text-amber-400 animate-spin";
+    }
+    if (cloudPill) {
+      cloudPill.className = "text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30";
+      cloudPill.textContent = "ENVOI CLOUD...";
+    }
+    if (cloudDesc) cloudDesc.textContent = "Publication en cours dans la base collective Supabase...";
+  } else if (status === 'error') {
+    if (cloudCard) cloudCard.className = "flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-rose-500/30";
+    if (cloudIconBox) cloudIconBox.className = "w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-center shrink-0";
+    if (cloudIcon) {
+      cloudIcon.setAttribute('data-lucide', 'alert-triangle');
+      cloudIcon.className = "w-4 h-4 text-rose-400";
+    }
+    if (cloudPill) {
+      cloudPill.className = "text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30";
+      cloudPill.textContent = "⚠️ SYNCHRO ATTENTE";
+    }
+    if (cloudDesc) cloudDesc.textContent = errorMsg || "Enregistré en local sur cet appareil. Synchronisation Cloud en attente.";
+  } else {
+    // localOnly
+    if (cloudCard) cloudCard.className = "flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-slate-800";
+    if (cloudIconBox) cloudIconBox.className = "w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0";
+    if (cloudIcon) {
+      cloudIcon.setAttribute('data-lucide', 'cloud');
+      cloudIcon.className = "w-4 h-4 text-slate-400";
+    }
+    if (cloudPill) {
+      cloudPill.className = "text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700";
+      cloudPill.textContent = "STOCKAGE LOCAL";
+    }
+    if (cloudDesc) cloudDesc.textContent = "Enregistré sur cet appareil dans votre banque personnelle.";
+  }
+
+  if (window.lucide) lucide.createIcons();
+}
+window.updateSaveModalCloudStatus = updateSaveModalCloudStatus;
+
 function openSaveSuccessModal({ id, organ, category, entity, question, format, imagesCount, isEdit, isCase, cloudStatus, cloudErrorMsg }) {
   pendingHighlightedItem = { id, organ, category, entity, isCase: Boolean(isCase) };
 
@@ -7046,51 +7215,7 @@ function openSaveSuccessModal({ id, organ, category, entity, question, format, i
     }
   }
 
-  // Configuration du Statut Cloud
-  const cloudCard = document.getElementById('save-success-cloud-card');
-  const cloudIconBox = document.getElementById('save-success-cloud-icon-box');
-  const cloudIcon = document.getElementById('save-success-cloud-icon');
-  const cloudPill = document.getElementById('save-success-cloud-pill');
-  const cloudDesc = document.getElementById('save-success-cloud-desc');
-
-  if (cloudStatus === 'synced') {
-    if (cloudCard) cloudCard.className = "flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-teal-500/30";
-    if (cloudIconBox) cloudIconBox.className = "w-8 h-8 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center shrink-0";
-    if (cloudIcon) {
-      cloudIcon.setAttribute('data-lucide', 'cloud');
-      cloudIcon.className = "w-4 h-4 text-teal-400";
-    }
-    if (cloudPill) {
-      cloudPill.className = "text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300 border border-teal-500/30";
-      cloudPill.textContent = "✓ EN LIGNE";
-    }
-    if (cloudDesc) cloudDesc.textContent = "Synchronisé avec le serveur Supabase. Accessible sur tous vos appareils et par vos collègues.";
-  } else if (cloudStatus === 'error') {
-    if (cloudCard) cloudCard.className = "flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-rose-500/30";
-    if (cloudIconBox) cloudIconBox.className = "w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-center shrink-0";
-    if (cloudIcon) {
-      cloudIcon.setAttribute('data-lucide', 'alert-triangle');
-      cloudIcon.className = "w-4 h-4 text-rose-400";
-    }
-    if (cloudPill) {
-      cloudPill.className = "text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30";
-      cloudPill.textContent = "⚠️ SYNCHRO ATTENTE";
-    }
-    if (cloudDesc) cloudDesc.textContent = cloudErrorMsg || "Non synchronisé en ligne. Sauvegardé en local.";
-  } else {
-    // localOnly
-    if (cloudCard) cloudCard.className = "flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-slate-800";
-    if (cloudIconBox) cloudIconBox.className = "w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0";
-    if (cloudIcon) {
-      cloudIcon.setAttribute('data-lucide', 'cloud');
-      cloudIcon.className = "w-4 h-4 text-slate-400";
-    }
-    if (cloudPill) {
-      cloudPill.className = "text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700";
-      cloudPill.textContent = "NON CONNECTÉ";
-    }
-    if (cloudDesc) cloudDesc.textContent = "Enregistré uniquement sur ce navigateur. Connectez-vous pour synchroniser avec la banque cloud.";
-  }
+  updateSaveModalCloudStatus(cloudStatus || 'syncing', cloudErrorMsg || '');
 
   modal.classList.remove('hidden');
   modal.classList.add('flex');
@@ -7392,43 +7517,14 @@ async function handleSaveQuestionForm(e) {
       savedQuestion = newQ;
     }
 
-    // 1. Sauvegarde locale immédiate (filet de sécurité)
+    // 1. Sauvegarde locale immédiate (instantanée, 0ms)
     saveQuestions();
 
-    // 2. Synchronisation Supabase directe dans la base de données (méthode Zenipad)
-    let cloudStatus = "synced";
-    let cloudErrorMsg = "";
-    if (supabaseClient && savedQuestion) {
-      try {
-        const res = await dbUpsertQuestion(savedQuestion);
-        if (res && res.error) {
-          cloudStatus = "error";
-          cloudErrorMsg = res.error.message || "Erreur Supabase";
-        } else if (res && res.localOnly) {
-          cloudStatus = "localOnly";
-        } else {
-          cloudStatus = "synced";
-        }
-      } catch(err) {
-        console.warn("Supabase direct sync error:", err);
-        cloudStatus = "error";
-        cloudErrorMsg = err.message || "Erreur réseau";
-      }
-    } else {
-      cloudStatus = "localOnly";
-    }
-
-    // 3. Notification visuelle discrète
-    if (cloudStatus === 'synced') {
-      showToast("✅ Question enregistrée avec succès !", "success");
-    } else {
-      showToast("✓ Question sauvegardée en local sur cet appareil", "info");
-    }
-
-    // 4. Réinitialiser le formulaire
+    // 2. Réinitialiser immédiatement le formulaire et débloquer le bouton
     resetQuestionForm();
+    restoreSubmitBtn();
 
-    // 5. Modale fluide avec compte à rebours et redirection Ma Banque
+    // 3. Modale fluide immédiate avec compte à rebours et redirection
     openSaveSuccessModal({
       id: savedQuestion.id,
       organ: savedQuestion.organ,
@@ -7439,14 +7535,28 @@ async function handleSaveQuestionForm(e) {
       imagesCount: (savedQuestion.images ? savedQuestion.images.length : 0) + (savedQuestion.explanationImages ? savedQuestion.explanationImages.length : 0),
       isEdit,
       isCase: false,
-      cloudStatus,
-      cloudErrorMsg
+      cloudStatus: supabaseClient ? "syncing" : "localOnly",
+      cloudErrorMsg: ""
     });
+
+    // 4. Synchronisation Supabase en arrière-plan sans JAMAIS figer l'écran
+    if (supabaseClient && savedQuestion) {
+      dbUpsertQuestionWithTimeout(savedQuestion, 5000).then(res => {
+        if (res && res.error && !res.localOnly) {
+          updateSaveModalCloudStatus("error", res.error.message || "Erreur Supabase");
+        } else if (res && res.localOnly) {
+          updateSaveModalCloudStatus("localOnly");
+        } else {
+          updateSaveModalCloudStatus("synced");
+        }
+      }).catch(err => {
+        updateSaveModalCloudStatus("error", err.message || "Erreur réseau");
+      });
+    }
 
   } catch (err) {
     console.error("Erreur enregistrement question:", err);
     showToast("Erreur lors de l'enregistrement de la question.", "error");
-  } finally {
     restoreSubmitBtn();
   }
 }
@@ -8809,35 +8919,9 @@ async function handleSaveDPForm(e) {
 
     saveCases();
 
-    let cloudStatus = "synced";
-    let cloudErrorMsg = "";
-    if (supabaseClient && savedCase) {
-      try {
-        const res = await dbUpsertCase(savedCase);
-        if (res && res.error) {
-          cloudStatus = "error";
-          cloudErrorMsg = res.error.message || "Erreur Supabase";
-        } else if (res && res.localOnly) {
-          cloudStatus = "localOnly";
-        } else {
-          cloudStatus = "synced";
-        }
-      } catch(e) {
-        console.warn("Supabase DP upsert error:", e);
-        cloudStatus = "error";
-        cloudErrorMsg = e.message || "Erreur réseau";
-      }
-    } else {
-      cloudStatus = "localOnly";
-    }
-
-    if (cloudStatus === 'synced') {
-      showToast("✅ Dossier Progressif enregistré avec succès !", "success");
-    } else {
-      showToast("✓ Dossier sauvegardé en local sur cet appareil", "info");
-    }
-
+    // Réinitialiser immédiatement le formulaire et débloquer le bouton
     resetDPForm();
+    restoreSubmitBtn();
 
     openSaveSuccessModal({
       id: savedCase.id,
@@ -8849,14 +8933,28 @@ async function handleSaveDPForm(e) {
       imagesCount: 0,
       isEdit,
       isCase: true,
-      cloudStatus,
-      cloudErrorMsg
+      cloudStatus: supabaseClient ? "syncing" : "localOnly",
+      cloudErrorMsg: ""
     });
+
+    // Synchronisation en tâche de fond non bloquante
+    if (supabaseClient && savedCase) {
+      dbUpsertCaseWithTimeout(savedCase, 5000).then(res => {
+        if (res && res.error && !res.localOnly) {
+          updateSaveModalCloudStatus("error", res.error.message || "Erreur Supabase");
+        } else if (res && res.localOnly) {
+          updateSaveModalCloudStatus("localOnly");
+        } else {
+          updateSaveModalCloudStatus("synced");
+        }
+      }).catch(e => {
+        updateSaveModalCloudStatus("error", e.message || "Erreur réseau");
+      });
+    }
 
   } catch (err) {
     console.error("Erreur enregistrement DP:", err);
     showToast("Erreur lors de l'enregistrement du dossier clinique.", "error");
-  } finally {
     restoreSubmitBtn();
   }
 }
