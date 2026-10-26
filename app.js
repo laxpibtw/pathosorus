@@ -9,6 +9,49 @@ const STORAGE_KEY_STATS = "pathotrainer_custom_stats_v3";
 const STORAGE_KEY_LESION_NOTES = "pathotrainer_custom_lesion_notes_v1";
 const STORAGE_KEY_STATEMENT_TEMPLATES = "pathotrainer_statement_templates_v2";
 const STORAGE_KEY_ORGAN_STATEMENT_TEMPLATES = "pathosorus_organ_statement_templates_v1";
+const STORAGE_KEY_LESION_STATEMENT_TEMPLATES = "pathosorus_lesion_statement_templates_v1";
+
+const DEFAULT_LESION_STATEMENT_TEMPLATES = {
+  "Tumeurs borderlines mucineuses": [
+    "Quel est l'aspect architectural prédominant dans cette tumeur borderline mucineuse :",
+    "Quel est le profil immunohistochimique attendu (CK7, CK20, CDX2) devant ce contingent mucineux :",
+    "Quel critère histologique permet d'exclure formellement un carcinome mucineux invasif :",
+    "Quels sont les facteurs pronostiques et les risques d'association à un pseudomyxome péritonéal :"
+  ],
+  "Carcinomes mucineux de l'ovaire": [
+    "Devant cette lésion mucineuse ovarienne, quel argument morphologique ou IHC oriente vers une métastase digestive (Krukenberg) :",
+    "Quel est le mode d'invasion tumoral prédominant (confluent expansif vs infiltratif destructif) :",
+    "Quel est le bilan d'extension et la stratégie d'exploration complémentaire recommandée :"
+  ],
+  "Carcinome séreux de haut grade": [
+    "Quel est le profil immunohistochimique caractéristique (WT1, p16, p53 mutationnelle) :",
+    "Quel est le statut de l'expression de la p53 (mutation nulle vs surexpression diffuse) :",
+    "Quelles altérations moléculaires (BRCA1/2, statut HRD) devez-vous rechercher systématiquement :"
+  ],
+  "Carcinome lobulaire": [
+    "Quel est le profil immunohistochimique caractéristique (E-cadhérine membranaire négative, p120 cytoplasmique) :",
+    "Quel diagnostic différentiel devez-vous éliminer devant cette prolifération en file indienne :",
+    "Quel est le sous-type histologique (classique, pléomorphe, alvéolaire, solide) :"
+  ],
+  "Carcinome canalaire infiltrant": [
+    "Quels sont les critères du score histopronostique de Scarff-Bloom-Richardson (SBR / Elston-Ellis) :",
+    "Quel est le bilan immunohistochimique théranostique indispensable (RO, RP, HER2, Ki-67) :"
+  ],
+  "CIN-3": [
+    "Quelle est l'interprétation du couple p16 et Ki-67 dans cette biopsie cervicale confirmant le haut grade (HSIL) :",
+    "Selon la terminologie LAST / OMS, quel est le diagnostic et la conduite à tenir devant :"
+  ],
+  "Carcinome à cellules claires": [
+    "Quel profil immunohistochimique (Napsin A, HNF1-bêta, WT1 négatif) confirme le diagnostic :",
+    "Devant cette prolifération tubulo-kystique à cellules en clou de tapissier, quel diagnostic différentiel éliminez-vous :"
+  ],
+  "Chorioamniotite aiguë": [
+    "Dans la classification d'Amsterdam, quel stade et quel grade attribuez-vous à la réponse inflammatoire maternelle et fœtale :"
+  ],
+  "Malperfusion vasculaire maternelle": [
+    "Dans la classification d'Amsterdam, quelles lésions élémentaires définissent une malperfusion vasculaire maternelle (MVM) :"
+  ]
+};
 
 const DEFAULT_ORGAN_STATEMENT_TEMPLATES = {
   "Sein": [
@@ -93,6 +136,9 @@ let state = {
   editorOpenAnswers: [''],
   lastActiveImageZone: 'statement',
   dpSteps: [],
+  statementTemplates: [],
+  organStatementTemplates: {},
+  lesionStatementTemplates: {},
   bankSelectedOrgan: 'all',
   bankSelectedCategory: 'all',
   bankCollapsedOrgans: new Set(),
@@ -1097,7 +1143,7 @@ function updateUserRoleUI() {
     if (authBtnText) authBtnText.textContent = "Déconnexion";
     if (btnAuthToggle) {
       btnAuthToggle.title = `Déconnecter ${email}`;
-      btnAuthToggle.className = "px-2.5 py-1 rounded-xl text-xs font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-white transition border border-rose-500/30 flex items-center space-x-1";
+      btnAuthToggle.className = "px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 transition border border-slate-800 hover:border-rose-500/40 flex items-center space-x-1.5 shadow-sm";
     }
 
     if (isCreator()) {
@@ -1122,7 +1168,7 @@ function updateUserRoleUI() {
     if (authBtnText) authBtnText.textContent = "Connexion";
     if (btnAuthToggle) {
       btnAuthToggle.title = "Se connecter";
-      btnAuthToggle.className = "px-2.5 py-1 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition border border-slate-700 flex items-center space-x-1";
+      btnAuthToggle.className = "px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-slate-800 text-slate-300 hover:text-white transition border border-slate-800 flex items-center space-x-1.5 shadow-sm";
     }
     if (roleBadge) roleBadge.className = "flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-800 border border-slate-700 text-slate-400";
     if (roleDot) roleDot.className = "w-2 h-2 rounded-full bg-slate-500";
@@ -2787,6 +2833,8 @@ function initApp() {
   saveStatementTemplates();
   state.organStatementTemplates = getSavedOrganStatementTemplates();
   saveOrganStatementTemplates();
+  state.lesionStatementTemplates = getSavedLesionStatementTemplates();
+  saveLesionStatementTemplates();
   renderStatementTemplates();
 
   updateTopBar();
@@ -6426,22 +6474,58 @@ function handleEditorOptionCorrectChange(idx, isChecked) {
   }
 }
 
+function isImageFile(f) {
+  if (!f) return false;
+  if (f.type && f.type.startsWith('image/')) return true;
+  const ext = (f.name || '').split('.').pop().toLowerCase();
+  return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tiff', 'heic'].includes(ext);
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target ? e.target.result : "");
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
+}
+
 async function attachFilesToEditor(files) {
   if (!files || files.length === 0) return;
-  const validFiles = Array.from(files).filter(f => f.type && f.type.startsWith('image/'));
+  const validFiles = Array.from(files).filter(isImageFile);
   if (validFiles.length === 0) return;
 
   for (const file of validFiles) {
-    const url = await uploadImageFile(file);
+    let localPreviewUrl = "";
+    try {
+      localPreviewUrl = await readFileAsDataUrl(file);
+    } catch(e) {}
+
     const count = state.editorUploadedImages.length + 1;
-    const defaultCaption = (file.name && file.name !== 'image.png' && file.name !== 'blob')
+    const defaultCaption = (file.name && file.name !== 'image.png' && file.name !== 'blob' && !file.name.startsWith('lame_'))
       ? file.name.replace(/\.[^/.]+$/, "")
       : `Lame microscopique ${count}`;
-    state.editorUploadedImages.push({
-      url: url,
-      caption: defaultCaption
+
+    const imgObj = {
+      url: localPreviewUrl || "",
+      caption: defaultCaption,
+      uploading: true
+    };
+    state.editorUploadedImages.push(imgObj);
+
+    // Upload vers Supabase Storage en tâche de fond sans bloquer l'aperçu local instantané
+    uploadImageFile(file).then(cloudUrl => {
+      if (cloudUrl) {
+        imgObj.url = cloudUrl;
+      }
+      imgObj.uploading = false;
+      renderEditorUploadedImages();
+    }).catch(err => {
+      console.warn("Upload lame background err:", err);
+      imgObj.uploading = false;
     });
   }
+
   if (!state.editorSelectedTags.has('Lame')) {
     state.editorSelectedTags.add('Lame');
     renderEditorTagsSelector();
@@ -6491,20 +6575,38 @@ async function handleEditorDrop(e) {
 
 async function attachExplanationFilesToEditor(files) {
   if (!files || files.length === 0) return;
-  const validFiles = Array.from(files).filter(f => f.type && f.type.startsWith('image/'));
+  const validFiles = Array.from(files).filter(isImageFile);
   if (validFiles.length === 0) return;
 
   if (!state.editorUploadedExplanationImages) state.editorUploadedExplanationImages = [];
 
   for (const file of validFiles) {
-    const url = await uploadImageFile(file);
+    let localPreviewUrl = "";
+    try {
+      localPreviewUrl = await readFileAsDataUrl(file);
+    } catch(e) {}
+
     const count = state.editorUploadedExplanationImages.length + 1;
-    const defaultCaption = (file.name && file.name !== 'image.png' && file.name !== 'blob')
+    const defaultCaption = (file.name && file.name !== 'image.png' && file.name !== 'blob' && !file.name.startsWith('schema_'))
       ? file.name.replace(/\.[^/.]+$/, "")
       : `Schéma explicatif ${count}`;
-    state.editorUploadedExplanationImages.push({
-      url: url,
-      caption: defaultCaption
+
+    const imgObj = {
+      url: localPreviewUrl || "",
+      caption: defaultCaption,
+      uploading: true
+    };
+    state.editorUploadedExplanationImages.push(imgObj);
+
+    uploadImageFile(file).then(cloudUrl => {
+      if (cloudUrl) {
+        imgObj.url = cloudUrl;
+      }
+      imgObj.uploading = false;
+      renderEditorUploadedExplanationImages();
+    }).catch(err => {
+      console.warn("Upload schéma background err:", err);
+      imgObj.uploading = false;
     });
   }
   renderEditorUploadedExplanationImages();
@@ -6547,6 +6649,51 @@ async function handleEditorExplanationDrop(e) {
   if (dt && dt.files && dt.files.length > 0) {
     await attachExplanationFilesToEditor(dt.files);
   }
+}
+
+function handleStatementDropzoneClick(e) {
+  setLastActiveImageZone('statement');
+  if (e && e.target && e.target.closest('button')) {
+    return;
+  }
+  const fileInput = document.getElementById('editor-file-input');
+  if (fileInput) fileInput.click();
+}
+
+async function pasteClipboardToStatement(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  setLastActiveImageZone('statement');
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.read) {
+      const items = await navigator.clipboard.read();
+      const imageFiles = [];
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            const blob = await item.getType(type);
+            imageFiles.push(new File([blob], "lame_microscopique.png", { type }));
+          }
+        }
+      }
+      if (imageFiles.length > 0) {
+        await attachFilesToEditor(imageFiles);
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn("Clipboard read API (statement):", err);
+  }
+
+  const dropzone = document.getElementById('editor-image-dropzone');
+  if (dropzone) {
+    dropzone.focus();
+    dropzone.classList.add('border-teal-400', 'ring-2', 'ring-teal-400/50');
+  }
+  showToast("📋 Zone de lame prête : appuyez sur ⌘V ou Ctrl+V pour coller !", "info");
 }
 
 function renderEditorUploadedExplanationImages() {
@@ -6662,15 +6809,27 @@ function initClipboardPasteListener() {
     // Ne pas intercepter si l'utilisateur est dans une modale
     const modalDetail = document.getElementById('modal-question-detail');
     if (modalDetail && !modalDetail.classList.contains('hidden')) return;
+    const modalTemplates = document.getElementById('modal-manage-statement-templates');
+    if (modalTemplates && !modalTemplates.classList.contains('hidden')) return;
 
     const items = (e.clipboardData || window.clipboardData)?.items;
-    if (!items || items.length === 0) return;
+    const files = (e.clipboardData || window.clipboardData)?.files;
 
     const imageFiles = [];
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type && items[i].type.startsWith('image/')) {
-        const file = items[i].getAsFile();
-        if (file) imageFiles.push(file);
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type && items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) imageFiles.push(file);
+        }
+      }
+    }
+    if (files && files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        if (isImageFile(f) && !imageFiles.includes(f)) {
+          imageFiles.push(f);
+        }
       }
     }
 
@@ -6944,49 +7103,57 @@ async function handleSaveQuestionForm(e) {
     }
   }
 
-  // 3. Pop-up d'alerte pour confirmer l'enregistrement direct
+  // 3. Notification visuelle immédiate (toast)
   if (cloudSuccess) {
-    alert("✅ Question enregistrée directement dans la base de données (Cloud) !");
+    showToast("✅ Question enregistrée directement dans la base de données !", "success");
+  } else if (cloudFeedback) {
+    showToast("✓ Question sauvegardée en local sur cet appareil", "info");
   } else {
-    alert("Question enregistrée avec succès !" + cloudFeedback);
+    showToast("✅ Question enregistrée avec succès !", "success");
   }
 
   // 4. Réinitialiser le formulaire
   resetQuestionForm();
 
   // 5. Positionner Ma Banque sur l'organe et déplier la lésion
-  state.bankSelectedOrgan = organ;
-  state.bankSelectedCategory = 'all';
-  const organSelect = document.getElementById('bank-filter-organ');
-  if (organSelect) organSelect.value = organ;
+  try {
+    state.bankSelectedOrgan = organ;
+    state.bankSelectedCategory = 'all';
+    const organSelect = document.getElementById('bank-filter-organ');
+    if (organSelect) organSelect.value = organ;
 
-  const searchInput = document.getElementById('bank-search-input');
-  if (searchInput) searchInput.value = '';
+    const searchInput = document.getElementById('bank-search-input');
+    if (searchInput) searchInput.value = '';
 
-  const statusFilter = document.getElementById('bank-filter-status');
-  if (statusFilter) statusFilter.value = 'all';
+    const statusFilter = document.getElementById('bank-filter-status');
+    if (statusFilter) statusFilter.value = 'all';
 
-  if (state.bankCollapsedOrgans && state.bankCollapsedOrgans.has(organ)) {
-    state.bankCollapsedOrgans.delete(organ);
-  }
+    if (state.bankCollapsedOrgans && state.bankCollapsedOrgans.has(organ)) {
+      state.bankCollapsedOrgans.delete(organ);
+    }
 
-  // Déplier automatiquement la lésion (clé :: exacte)
-  const savedLesionKey = `${organ}::${category}::${entity}`;
-  state.bankExpandedLesions.add(savedLesionKey);
+    // Déplier automatiquement la lésion (clé :: exacte)
+    const savedLesionKey = `${organ}::${category}::${entity}`;
+    if (state.bankExpandedLesions) {
+      state.bankExpandedLesions.add(savedLesionKey);
+    }
 
-  // 6. Quitter le formulaire et aller sur Ma Banque
-  switchTab('bank');
+    // 6. Quitter le formulaire et aller sur Ma Banque
+    switchTab('bank');
 
-  // 7. Scroll et surbrillance sur la carte enregistrée
-  if (savedQuestion && savedQuestion.id) {
-    setTimeout(() => {
-      const cardEl = document.getElementById(`bank-question-card-${savedQuestion.id}`);
-      if (cardEl) {
-        cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        cardEl.classList.add('highlight-saved-item');
-        setTimeout(() => cardEl.classList.remove('highlight-saved-item'), 3500);
-      }
-    }, 200);
+    // 7. Scroll et surbrillance sur la carte enregistrée
+    if (savedQuestion && savedQuestion.id) {
+      setTimeout(() => {
+        const cardEl = document.getElementById(`bank-question-card-${savedQuestion.id}`);
+        if (cardEl) {
+          cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          cardEl.classList.add('highlight-saved-item');
+          setTimeout(() => cardEl.classList.remove('highlight-saved-item'), 3500);
+        }
+      }, 200);
+    }
+  } catch (navErr) {
+    console.warn("Erreur transition vers Ma Banque:", navErr);
   }
 }
 
@@ -7065,146 +7232,53 @@ function getOrganExactKey(organName) {
   return organName.trim();
 }
 
-function renderStatementTemplates() {
-  const container = document.getElementById('statement-templates-bar');
-  if (!container) return;
-
-  if (!state.statementTemplates) state.statementTemplates = getSavedStatementTemplates();
-  if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
-
-  // Nettoyage éventuel des templates obsolètes
-  state.statementTemplates = state.statementTemplates.filter(t => typeof t === 'string' && t.trim().length > 0 && !OLD_DEFAULT_STATEMENT_TEMPLATES.includes(t.trim()));
-
-  const organInput = document.getElementById('form-q-organ');
-  const currentOrgan = (organInput ? organInput.value : '').trim();
-
-  const indicator = document.getElementById('templates-organ-indicator');
-  const labelAddOrgan = document.getElementById('label-add-organ-template');
-
-  let html = '';
-
-  if (currentOrgan) {
-    if (indicator) {
-      indicator.textContent = `🏷️ ${currentOrgan}`;
-      indicator.classList.remove('hidden');
-    }
-    if (labelAddOrgan) {
-      labelAddOrgan.textContent = `+ Pré-phrase (${currentOrgan})`;
-    }
-
-    const organList = getOrganTemplatesFor(currentOrgan);
-
-    // 1. Pré-phrases propres à l'organe sélectionné
-    html += `
-      <div class="flex items-center space-x-1 shrink-0">
-        <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 flex items-center space-x-1">
-          <i data-lucide="tag" class="w-3 h-3 text-amber-400"></i>
-          <span>${escapeHtml(currentOrgan)} :</span>
-        </span>
-      </div>
-    `;
-
-    if (organList.length > 0) {
-      html += organList.map((tmpl, idx) => `
-        <div class="inline-flex items-center bg-amber-500/10 border border-amber-500/30 hover:border-amber-400 rounded-xl px-2.5 py-1 text-xs text-amber-200 hover:text-white transition group shrink-0 shadow-sm">
-          <button type="button" onclick="applyOrganStatementTemplate('${escapeJsString(currentOrgan)}', ${idx})" class="font-medium hover:text-amber-100 transition text-left flex items-center space-x-1" title="Cliquer pour insérer dans l'énoncé">
-            <i data-lucide="sparkles" class="w-3 h-3 text-amber-400 shrink-0"></i>
-            <span>${escapeHtml(tmpl)}</span>
-          </button>
-          <button type="button" onclick="event.stopPropagation(); deleteOrganStatementTemplate('${escapeJsString(currentOrgan)}', ${idx})" class="ml-1.5 text-amber-400/60 hover:text-rose-400 transition opacity-60 group-hover:opacity-100 p-0.5 rounded" title="Supprimer cette pré-phrase">
-            <i data-lucide="x" class="w-2.5 h-2.5"></i>
-          </button>
-        </div>
-      `).join('');
-    } else {
-      html += `
-        <button type="button" onclick="promptAddNewOrganStatementTemplate('${escapeJsString(currentOrgan)}')" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl border border-dashed border-amber-500/40 hover:border-amber-400 bg-amber-500/5 text-amber-300 hover:text-white text-xs transition shrink-0">
-          <i data-lucide="plus" class="w-3 h-3"></i>
-          <span>+ Créer la 1ère pré-phrase pour ${escapeHtml(currentOrgan)}</span>
-        </button>
-      `;
-    }
-
-    // Séparateur vertical
-    html += `<span class="h-4 w-px bg-slate-800 shrink-0 mx-1"></span>`;
-
-    // 2. Modèles de phrases générales (tous organes)
-    html += `
-      <div class="flex items-center space-x-1 shrink-0">
-        <span class="text-[10px] font-bold text-teal-400 uppercase tracking-wider px-1.5 py-0.5 rounded bg-teal-500/10 border border-teal-500/20">
-          🌐 Générales :
-        </span>
-      </div>
-    `;
-
-    html += state.statementTemplates.map((tmpl, idx) => `
-      <div class="inline-flex items-center bg-slate-900 border border-slate-800 hover:border-teal-500/50 rounded-xl px-2.5 py-1 text-xs text-slate-300 hover:text-white transition group shrink-0 shadow-sm">
-        <button type="button" onclick="applyStatementTemplate(${idx})" class="font-medium hover:text-teal-300 transition text-left flex items-center space-x-1" title="Cliquer pour insérer dans l'énoncé">
-          <i data-lucide="sparkles" class="w-3 h-3 text-teal-400 shrink-0"></i>
-          <span>${escapeHtml(tmpl)}</span>
-        </button>
-        <button type="button" onclick="event.stopPropagation(); deleteStatementTemplate(${idx})" class="ml-1.5 text-slate-500 hover:text-rose-400 transition opacity-60 group-hover:opacity-100 p-0.5 rounded" title="Supprimer cette phrase type">
-          <i data-lucide="x" class="w-2.5 h-2.5"></i>
-        </button>
-      </div>
-    `).join('');
-
-  } else {
-    // Si aucun organe n'est encore saisi
-    if (indicator) indicator.classList.add('hidden');
-    if (labelAddOrgan) labelAddOrgan.textContent = `+ Pré-phrase Organe`;
-
-    html += `
-      <div class="flex items-center space-x-1 shrink-0">
-        <span class="text-[10px] font-bold text-teal-400 uppercase tracking-wider px-1.5 py-0.5 rounded bg-teal-500/10 border border-teal-500/20">
-          🌐 Générales :
-        </span>
-      </div>
-    `;
-
-    html += state.statementTemplates.map((tmpl, idx) => `
-      <div class="inline-flex items-center bg-slate-900 border border-slate-800 hover:border-teal-500/50 rounded-xl px-2.5 py-1 text-xs text-slate-300 hover:text-white transition group shrink-0 shadow-sm">
-        <button type="button" onclick="applyStatementTemplate(${idx})" class="font-medium hover:text-teal-300 transition text-left flex items-center space-x-1" title="Cliquer pour insérer dans l'énoncé">
-          <i data-lucide="sparkles" class="w-3 h-3 text-teal-400 shrink-0"></i>
-          <span>${escapeHtml(tmpl)}</span>
-        </button>
-        <button type="button" onclick="event.stopPropagation(); deleteStatementTemplate(${idx})" class="ml-1.5 text-slate-500 hover:text-rose-400 transition opacity-60 group-hover:opacity-100 p-0.5 rounded" title="Supprimer cette phrase type">
-          <i data-lucide="x" class="w-2.5 h-2.5"></i>
-        </button>
-      </div>
-    `).join('');
-
-    // Afficher des pastilles d'accès rapide aux organes existants
-    const organKeys = Object.keys(state.organStatementTemplates || {}).filter(k => (state.organStatementTemplates[k] || []).length > 0);
-    if (organKeys.length > 0) {
-      html += `<span class="h-4 w-px bg-slate-800 shrink-0 mx-1"></span>`;
-      html += `
-        <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider shrink-0">
-          Pré-phrases d'organes :
-        </span>
-      `;
-      html += organKeys.map(org => `
-        <button type="button" onclick="selectOrganForTemplates('${escapeJsString(org)}')" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-[11px] font-medium transition shrink-0">
-          <i data-lucide="tag" class="w-3 h-3 text-amber-400"></i>
-          <span>${escapeHtml(org)} (${state.organStatementTemplates[org].length})</span>
-        </button>
-      `).join('');
-    }
+function getSavedLesionStatementTemplates() {
+  const stored = localStorage.getItem(STORAGE_KEY_LESION_STATEMENT_TEMPLATES);
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch(e) {}
   }
-
-  container.innerHTML = html;
-  if (window.lucide) lucide.createIcons();
+  return JSON.parse(JSON.stringify(DEFAULT_LESION_STATEMENT_TEMPLATES));
 }
-window.renderStatementTemplates = renderStatementTemplates;
 
-function selectOrganForTemplates(organ) {
-  const organInput = document.getElementById('form-q-organ');
-  if (organInput) {
-    organInput.value = organ;
-    updateEditorDatalists();
+function saveLesionStatementTemplates() {
+  localStorage.setItem(STORAGE_KEY_LESION_STATEMENT_TEMPLATES, JSON.stringify(state.lesionStatementTemplates || {}));
+  if (state.currentUser) {
+    if (!state.stats) state.stats = {};
+    state.stats.lesionStatementTemplates = state.lesionStatementTemplates || {};
+    saveStats();
   }
 }
-window.selectOrganForTemplates = selectOrganForTemplates;
+
+function getLesionTemplatesFor(lesionName) {
+  if (!state.lesionStatementTemplates) {
+    state.lesionStatementTemplates = getSavedLesionStatementTemplates();
+  }
+  if (!lesionName || !lesionName.trim()) return [];
+  const clean = lesionName.trim().toLowerCase();
+  for (const [key, list] of Object.entries(state.lesionStatementTemplates)) {
+    if (key.trim().toLowerCase() === clean && Array.isArray(list)) {
+      return list;
+    }
+  }
+  return [];
+}
+
+function getLesionExactKey(lesionName) {
+  if (!state.lesionStatementTemplates) {
+    state.lesionStatementTemplates = getSavedLesionStatementTemplates();
+  }
+  if (!lesionName || !lesionName.trim()) return lesionName || '';
+  const clean = lesionName.trim().toLowerCase();
+  for (const key of Object.keys(state.lesionStatementTemplates)) {
+    if (key.trim().toLowerCase() === clean) return key;
+  }
+  return lesionName.trim();
+}
 
 function applyStatementTemplate(idx) {
   if (!state.statementTemplates) state.statementTemplates = getSavedStatementTemplates();
@@ -7225,6 +7299,32 @@ function applyStatementTemplate(idx) {
   showRewardToast("Énoncé inséré !", 'sparkles');
 }
 window.applyStatementTemplate = applyStatementTemplate;
+
+function applyLesionStatementTemplate(lesion, idx) {
+  const list = getLesionTemplatesFor(lesion);
+  const tmpl = list[idx];
+  if (!tmpl) return;
+
+  const entityInput = document.getElementById('form-q-entity');
+  if (entityInput && !entityInput.value.trim()) {
+    entityInput.value = lesion;
+    updateEditorDatalists();
+  }
+
+  const input = document.getElementById('form-q-text');
+  if (!input) return;
+
+  let finalText = tmpl.trim();
+  if (!finalText.endsWith('?') && !finalText.endsWith(':') && !finalText.endsWith('.')) {
+    finalText = `${finalText} `;
+  }
+
+  input.value = finalText;
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+  showRewardToast(`Énoncé [${lesion}] inséré !`, 'sparkles');
+}
+window.applyLesionStatementTemplate = applyLesionStatementTemplate;
 
 function applyOrganStatementTemplate(organ, idx) {
   const list = getOrganTemplatesFor(organ);
@@ -7253,7 +7353,7 @@ function applyOrganStatementTemplate(organ, idx) {
 window.applyOrganStatementTemplate = applyOrganStatementTemplate;
 
 function promptAddNewStatementTemplate() {
-  const val = prompt("Saisissez votre nouvelle phrase type d'énoncé (disponible pour tous les organes) :\n\n(ex: 'Quelles sont les propositions exactes concernant', 'Quel est le diagnostic le plus probable devant')");
+  const val = prompt("Saisissez votre nouvelle phrase type générale d'énoncé (disponible pour tous les QCM) :\n\n(ex: 'Quelles sont les propositions exactes concernant :', 'Quel est le diagnostic le plus probable devant :')");
   if (val === null) return;
   const trimmed = val.trim();
   if (!trimmed) {
@@ -7268,7 +7368,7 @@ function promptAddNewStatementTemplate() {
   state.statementTemplates.push(trimmed);
   saveStatementTemplates();
   renderStatementTemplates();
-  showRewardToast(`Phrase type enregistrée pour tous les organes !`, 'sparkles');
+  showRewardToast(`Phrase type générale enregistrée !`, 'sparkles');
 }
 window.promptAddNewStatementTemplate = promptAddNewStatementTemplate;
 
@@ -7282,27 +7382,27 @@ function deleteStatementTemplate(idx) {
 }
 window.deleteStatementTemplate = deleteStatementTemplate;
 
-function promptAddNewOrganStatementTemplate(specificOrgan = null) {
-  let targetOrgan = specificOrgan;
-  if (!targetOrgan) {
-    const organInput = document.getElementById('form-q-organ');
-    targetOrgan = organInput ? organInput.value.trim() : '';
+function promptAddNewLesionStatementTemplate(specificLesion = null) {
+  let targetLesion = specificLesion;
+  if (!targetLesion) {
+    const entityInput = document.getElementById('form-q-entity');
+    targetLesion = entityInput ? entityInput.value.trim() : '';
   }
 
-  if (!targetOrgan) {
-    const inputOrg = prompt("Pour quel organe souhaitez-vous créer une pré-phrase ?\n\n(ex: Sein, Placenta, Col utérin, Rein, Ovaire...)");
-    if (inputOrg === null) return;
-    targetOrgan = inputOrg.trim();
+  if (!targetLesion) {
+    const inputLes = prompt("Pour quelle lésion précise (Niveau 3) souhaitez-vous créer une pré-phrase ?\n\n(ex: Tumeurs borderlines mucineuses, Carcinome lobulaire, CIN-3...)");
+    if (inputLes === null) return;
+    targetLesion = inputLes.trim();
   }
 
-  if (!targetOrgan) {
-    alert("Veuillez spécifier un nom d'organe valide.");
+  if (!targetLesion) {
+    alert("Veuillez spécifier un nom de lésion valide.");
     return;
   }
 
-  const exactKey = getOrganExactKey(targetOrgan);
+  const exactKey = getLesionExactKey(targetLesion);
 
-  const val = prompt(`Saisissez la nouvelle pré-phrase pour l'organe "${exactKey}" :\n\n(ex: 'Quel est le profil immunohistochimique attendu dans...', 'Quel est le grade histologique devant...')`);
+  const val = prompt(`Saisissez la nouvelle pré-phrase pour la lésion "${exactKey}" :\n\n(ex: 'Quel est le profil immunohistochimique caractéristique devant...', 'Quel critère histologique permet d'exclure...')`);
   if (val === null) return;
   const trimmed = val.trim();
   if (!trimmed) {
@@ -7310,53 +7410,200 @@ function promptAddNewOrganStatementTemplate(specificOrgan = null) {
     return;
   }
 
-  if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
-  if (!state.organStatementTemplates[exactKey]) state.organStatementTemplates[exactKey] = [];
+  if (!state.lesionStatementTemplates) state.lesionStatementTemplates = getSavedLesionStatementTemplates();
+  if (!state.lesionStatementTemplates[exactKey]) state.lesionStatementTemplates[exactKey] = [];
 
-  if (state.organStatementTemplates[exactKey].includes(trimmed)) {
-    alert("Cette pré-phrase existe déjà pour cet organe.");
+  if (state.lesionStatementTemplates[exactKey].includes(trimmed)) {
+    alert("Cette pré-phrase existe déjà pour cette lésion.");
     return;
   }
 
-  state.organStatementTemplates[exactKey].push(trimmed);
-  saveOrganStatementTemplates();
+  state.lesionStatementTemplates[exactKey].push(trimmed);
+  saveLesionStatementTemplates();
   renderStatementTemplates();
   showRewardToast(`Pré-phrase enregistrée pour "${exactKey}" !`, 'sparkles');
+}
+window.promptAddNewLesionStatementTemplate = promptAddNewLesionStatementTemplate;
+
+function deleteLesionStatementTemplate(lesion, idx) {
+  if (!confirm(`Voulez-vous supprimer cette pré-phrase pour la lésion "${lesion}" ?`)) return;
+  const exactKey = getLesionExactKey(lesion);
+  if (!state.lesionStatementTemplates || !state.lesionStatementTemplates[exactKey]) return;
+  state.lesionStatementTemplates[exactKey].splice(idx, 1);
+  saveLesionStatementTemplates();
+  renderStatementTemplates();
+  showRewardToast(`Pré-phrase supprimée de "${exactKey}".`, 'trash-2');
+}
+window.deleteLesionStatementTemplate = deleteLesionStatementTemplate;
+
+function selectLesionForTemplates(lesion) {
+  const entityInput = document.getElementById('form-q-entity');
+  if (entityInput) {
+    entityInput.value = lesion;
+    updateEditorDatalists();
+  }
+}
+window.selectLesionForTemplates = selectLesionForTemplates;
+
+function promptAddNewOrganStatementTemplate(specificOrgan = null) {
+  promptAddNewLesionStatementTemplate(specificOrgan);
 }
 window.promptAddNewOrganStatementTemplate = promptAddNewOrganStatementTemplate;
 
 function deleteOrganStatementTemplate(organ, idx) {
-  if (!confirm(`Voulez-vous supprimer cette pré-phrase pour l'organe "${organ}" ?`)) return;
-  const exactKey = getOrganExactKey(organ);
-  if (!state.organStatementTemplates || !state.organStatementTemplates[exactKey]) return;
-  state.organStatementTemplates[exactKey].splice(idx, 1);
-  saveOrganStatementTemplates();
-  renderStatementTemplates();
-  showRewardToast(`Pré-phrase supprimée de "${exactKey}".`, 'trash-2');
+  deleteLesionStatementTemplate(organ, idx);
 }
 window.deleteOrganStatementTemplate = deleteOrganStatementTemplate;
 
-// --- GESTIONNAIRE CENTRALISÉ DES PRÉ-PHRASES (MODAL) ---
-function openManageStatementTemplatesModal(initialOrgan = null) {
+function renderStatementTemplates() {
+  const container = document.getElementById('statement-templates-bar');
+  if (!container) return;
+
+  if (!state.statementTemplates) state.statementTemplates = getSavedStatementTemplates();
+  if (!state.lesionStatementTemplates) state.lesionStatementTemplates = getSavedLesionStatementTemplates();
+
+  // Nettoyage éventuel des templates obsolètes
+  state.statementTemplates = state.statementTemplates.filter(t => typeof t === 'string' && t.trim().length > 0 && !OLD_DEFAULT_STATEMENT_TEMPLATES.includes(t.trim()));
+
+  const entityInput = document.getElementById('form-q-entity');
+  const currentLesion = (entityInput ? entityInput.value : '').trim();
+
+  const indicator = document.getElementById('templates-lesion-indicator');
+  const labelAddLesion = document.getElementById('label-add-lesion-template');
+
+  let html = '';
+
+  // =========================================================================
+  // 1. À GAUCHE : MODÈLES DE PHRASES GÉNÉRALES (Disponibles pour tous les QCM)
+  // =========================================================================
+  html += `
+    <div class="flex items-center space-x-1 shrink-0">
+      <span class="text-[10px] font-bold text-teal-400 uppercase tracking-wider px-2 py-0.5 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center space-x-1">
+        <span>🌐</span>
+        <span>Générales :</span>
+      </span>
+    </div>
+  `;
+
+  html += state.statementTemplates.map((tmpl, idx) => `
+    <div class="inline-flex items-center bg-slate-900 border border-slate-800 hover:border-teal-500/50 rounded-xl px-2.5 py-1 text-xs text-slate-300 hover:text-white transition group shrink-0 shadow-sm">
+      <button type="button" onclick="applyStatementTemplate(${idx})" class="font-medium hover:text-teal-300 transition text-left flex items-center space-x-1" title="Cliquer pour insérer dans l'énoncé">
+        <i data-lucide="sparkles" class="w-3 h-3 text-teal-400 shrink-0"></i>
+        <span>${escapeHtml(tmpl)}</span>
+      </button>
+      <button type="button" onclick="event.stopPropagation(); deleteStatementTemplate(${idx})" class="ml-1.5 text-slate-500 hover:text-rose-400 transition opacity-60 group-hover:opacity-100 p-0.5 rounded" title="Supprimer cette phrase type">
+        <i data-lucide="x" class="w-2.5 h-2.5"></i>
+      </button>
+    </div>
+  `).join('');
+
+  // SÉPARATEUR VERTICAL NET ENTRE PHRASES GÉNÉRALES ET PRÉ-PHRASES DE LÉSION
+  html += `<span class="h-5 w-px bg-slate-700/80 shrink-0 mx-2"></span>`;
+
+  // =========================================================================
+  // 2. À DROITE : PRÉ-PHRASES DE LA LÉSION PRÉCISE (Niveau 3 : #form-q-entity)
+  // =========================================================================
+  if (currentLesion) {
+    if (indicator) {
+      indicator.textContent = `🏷️ ${currentLesion}`;
+      indicator.classList.remove('hidden');
+    }
+    if (labelAddLesion) {
+      labelAddLesion.textContent = `+ Pré-phrase (${currentLesion})`;
+    }
+
+    const lesionList = getLesionTemplatesFor(currentLesion);
+
+    html += `
+      <div class="flex items-center space-x-1 shrink-0">
+        <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center space-x-1 shadow-sm">
+          <i data-lucide="tag" class="w-3 h-3 text-amber-400"></i>
+          <span>${escapeHtml(currentLesion)} :</span>
+        </span>
+      </div>
+    `;
+
+    if (lesionList.length > 0) {
+      html += lesionList.map((tmpl, idx) => `
+        <div class="inline-flex items-center bg-amber-500/10 border border-amber-500/30 hover:border-amber-400 rounded-xl px-2.5 py-1 text-xs text-amber-200 hover:text-white transition group shrink-0 shadow-sm">
+          <button type="button" onclick="applyLesionStatementTemplate('${escapeJsString(currentLesion)}', ${idx})" class="font-medium hover:text-amber-100 transition text-left flex items-center space-x-1" title="Cliquer pour insérer dans l'énoncé">
+            <i data-lucide="sparkles" class="w-3 h-3 text-amber-400 shrink-0"></i>
+            <span>${escapeHtml(tmpl)}</span>
+          </button>
+          <button type="button" onclick="event.stopPropagation(); deleteLesionStatementTemplate('${escapeJsString(currentLesion)}', ${idx})" class="ml-1.5 text-amber-400/60 hover:text-rose-400 transition opacity-60 group-hover:opacity-100 p-0.5 rounded" title="Supprimer cette pré-phrase">
+            <i data-lucide="x" class="w-2.5 h-2.5"></i>
+          </button>
+        </div>
+      `).join('');
+    } else {
+      html += `
+        <button type="button" onclick="promptAddNewLesionStatementTemplate('${escapeJsString(currentLesion)}')" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl border border-dashed border-amber-500/40 hover:border-amber-400 bg-amber-500/5 text-amber-300 hover:text-white text-xs transition shrink-0">
+          <i data-lucide="plus" class="w-3 h-3"></i>
+          <span>+ Créer la 1ère pré-phrase pour ${escapeHtml(currentLesion)}</span>
+        </button>
+      `;
+    }
+
+  } else {
+    // Si aucune lésion n'est encore saisie dans le Niveau 3
+    if (indicator) indicator.classList.add('hidden');
+    if (labelAddLesion) labelAddLesion.textContent = `+ Pré-phrase Lésion`;
+
+    html += `
+      <div class="flex items-center space-x-1.5 shrink-0">
+        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 py-0.5 rounded-lg bg-slate-800/80 border border-slate-700/80 flex items-center space-x-1">
+          <i data-lucide="tag" class="w-3 h-3 text-amber-400"></i>
+          <span>Lésions :</span>
+        </span>
+      </div>
+    `;
+
+    // Pastilles d'accès rapide aux lésions ayant déjà des pré-phrases configurées
+    const lesionKeys = Object.keys(state.lesionStatementTemplates || {}).filter(k => (state.lesionStatementTemplates[k] || []).length > 0);
+    if (lesionKeys.length > 0) {
+      html += lesionKeys.map(les => `
+        <button type="button" onclick="selectLesionForTemplates('${escapeJsString(les)}')" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-xs font-medium transition shrink-0 shadow-sm" title="Sélectionner cette lésion">
+          <i data-lucide="tag" class="w-3 h-3 text-amber-400"></i>
+          <span>${escapeHtml(les)} (${state.lesionStatementTemplates[les].length})</span>
+        </button>
+      `).join('');
+    } else {
+      html += `
+        <span class="text-[11px] text-slate-500 italic shrink-0">
+          Renseignez le Niveau 3 (Lésion) pour afficher ses pré-phrases dédiées
+        </span>
+      `;
+    }
+  }
+
+  container.innerHTML = html;
+  if (window.lucide) lucide.createIcons();
+}
+window.renderStatementTemplates = renderStatementTemplates;
+
+// --- GESTIONNAIRE CENTRALISÉ DES PRÉ-PHRASES DE LÉSIONS (MODAL) ---
+function openManageStatementTemplatesModal(initialLesion = null) {
   const modal = document.getElementById('modal-manage-statement-templates');
   if (!modal) return;
 
   if (!state.statementTemplates) state.statementTemplates = getSavedStatementTemplates();
-  if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
+  if (!state.lesionStatementTemplates) state.lesionStatementTemplates = getSavedLesionStatementTemplates();
 
   const select = document.getElementById('manage-templates-organ-select');
   if (select) {
-    const currentOrgan = (initialOrgan || document.getElementById('form-q-organ')?.value || '').trim();
-    const tree = getHierarchyTree(true);
-    const existingOrgans = Array.from(new Set([
-      ...Object.keys(state.organStatementTemplates || {}),
-      ...Object.keys(tree || {})
-    ])).filter(Boolean).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+    const currentLesion = (initialLesion || document.getElementById('form-q-entity')?.value || '').trim();
+    
+    // Récupérer toutes les lésions de la base et des templates
+    const allLesionsSet = new Set(Object.keys(state.lesionStatementTemplates || {}));
+    (state.questions || []).forEach(q => {
+      if (q.entity && q.entity.trim()) allLesionsSet.add(q.entity.trim());
+    });
+    const sortedLesions = Array.from(allLesionsSet).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
-    let optHtml = `<option value="__GENERAL__">🌐 Phrases Générales (Tous organes)</option>`;
-    optHtml += existingOrgans.map(o => {
-      const count = (getOrganTemplatesFor(o) || []).length;
-      return `<option value="${escapeHtml(o)}" ${o.toLowerCase() === currentOrgan.toLowerCase() ? 'selected' : ''}>🏷️ ${escapeHtml(o)} (${count})</option>`;
+    let optHtml = `<option value="__GENERAL__">🌐 Phrases Générales (Tous QCM)</option>`;
+    optHtml += sortedLesions.map(l => {
+      const count = (getLesionTemplatesFor(l) || []).length;
+      return `<option value="${escapeHtml(l)}" ${l.toLowerCase() === currentLesion.toLowerCase() ? 'selected' : ''}>🏷️ ${escapeHtml(l)} (${count})</option>`;
     }).join('');
 
     select.innerHTML = optHtml;
@@ -7391,21 +7638,21 @@ function renderManageStatementTemplatesList() {
 
   if (addLabel) {
     addLabel.textContent = isGeneral 
-      ? "Ajouter une phrase type générale (tous organes)" 
-      : `Ajouter une pré-phrase pour l'organe "${selVal}"`;
+      ? "Ajouter une phrase type générale (tous QCM)" 
+      : `Ajouter une pré-phrase pour la lésion "${selVal}"`;
   }
 
   let items = [];
   if (isGeneral) {
     items = state.statementTemplates || [];
   } else {
-    items = getOrganTemplatesFor(selVal) || [];
+    items = getLesionTemplatesFor(selVal) || [];
   }
 
   if (items.length === 0) {
     container.innerHTML = `
       <div class="text-center py-6 text-slate-500 bg-slate-950/40 rounded-xl border border-slate-800/80">
-        <p class="text-xs">Aucune pré-phrase enregistrée pour ${isGeneral ? 'les phrases générales' : `l'organe "${escapeHtml(selVal)}"`}.</p>
+        <p class="text-xs">Aucune pré-phrase enregistrée pour ${isGeneral ? 'les phrases générales' : `la lésion "${escapeHtml(selVal)}"`}.</p>
         <p class="text-[11px] text-slate-600 mt-1">Utilisez le formulaire ci-dessous pour en ajouter une !</p>
       </div>
     `;
@@ -7418,7 +7665,7 @@ function renderManageStatementTemplatesList() {
         <i data-lucide="${isGeneral ? 'sparkles' : 'tag'}" class="w-3.5 h-3.5 ${isGeneral ? 'text-teal-400' : 'text-amber-400'} shrink-0"></i>
         <span class="text-xs text-slate-200 font-medium">${escapeHtml(t)}</span>
       </div>
-      <button type="button" onclick="deleteTemplateInManager('${isGeneral ? 'general' : 'organ'}', '${escapeJsString(selVal)}', ${idx})" class="text-slate-500 hover:text-rose-400 p-1 rounded-lg transition" title="Supprimer">
+      <button type="button" onclick="deleteTemplateInManager('${isGeneral ? 'general' : 'lesion'}', '${escapeJsString(selVal)}', ${idx})" class="text-slate-500 hover:text-rose-400 p-1 rounded-lg transition" title="Supprimer">
         <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
       </button>
     </div>
@@ -7449,15 +7696,15 @@ function submitNewTemplateInManager(e) {
     state.statementTemplates.push(val);
     saveStatementTemplates();
   } else {
-    const exactKey = getOrganExactKey(selVal);
-    if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
-    if (!state.organStatementTemplates[exactKey]) state.organStatementTemplates[exactKey] = [];
-    if (state.organStatementTemplates[exactKey].includes(val)) {
-      alert("Cette pré-phrase existe déjà pour cet organe.");
+    const exactKey = getLesionExactKey(selVal);
+    if (!state.lesionStatementTemplates) state.lesionStatementTemplates = getSavedLesionStatementTemplates();
+    if (!state.lesionStatementTemplates[exactKey]) state.lesionStatementTemplates[exactKey] = [];
+    if (state.lesionStatementTemplates[exactKey].includes(val)) {
+      alert("Cette pré-phrase existe déjà pour cette lésion.");
       return;
     }
-    state.organStatementTemplates[exactKey].push(val);
-    saveOrganStatementTemplates();
+    state.lesionStatementTemplates[exactKey].push(val);
+    saveLesionStatementTemplates();
   }
 
   input.value = '';
@@ -7467,28 +7714,28 @@ function submitNewTemplateInManager(e) {
 }
 window.submitNewTemplateInManager = submitNewTemplateInManager;
 
-function deleteTemplateInManager(type, organ, idx) {
+function deleteTemplateInManager(type, key, idx) {
   if (type === 'general') {
     deleteStatementTemplate(idx);
   } else {
-    deleteOrganStatementTemplate(organ, idx);
+    deleteLesionStatementTemplate(key, idx);
   }
   renderManageStatementTemplatesList();
 }
 window.deleteTemplateInManager = deleteTemplateInManager;
 
-function promptAddNewOrganForTemplates() {
-  const newOrg = prompt("Saisissez le nom du nouvel organe pour ses pré-phrases :\n\n(ex: Thyroïde, Foie, Peau, Os et tissus mous...)");
-  if (!newOrg || !newOrg.trim()) return;
-  const clean = newOrg.trim();
-  if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
-  if (!state.organStatementTemplates[clean]) {
-    state.organStatementTemplates[clean] = [];
-    saveOrganStatementTemplates();
+function promptAddNewLesionForTemplates() {
+  const newLes = prompt("Saisissez le nom de la nouvelle lésion (Niveau 3) :\n\n(ex: Tumeurs borderlines mucineuses, Carcinome lobulaire...)");
+  if (!newLes || !newLes.trim()) return;
+  const clean = newLes.trim();
+  if (!state.lesionStatementTemplates) state.lesionStatementTemplates = getSavedLesionStatementTemplates();
+  if (!state.lesionStatementTemplates[clean]) {
+    state.lesionStatementTemplates[clean] = [];
+    saveLesionStatementTemplates();
   }
   openManageStatementTemplatesModal(clean);
 }
-window.promptAddNewOrganForTemplates = promptAddNewOrganForTemplates;
+window.promptAddNewLesionForTemplates = promptAddNewLesionForTemplates;
 window.deleteStatementTemplate = deleteStatementTemplate;
 
 // --- CRÉATION DE QUESTION DEPUIS LA HIÉRARCHIE (ORGANE, CATÉGORIE, LÉSION) ---
@@ -8242,7 +8489,7 @@ async function handleSaveDPForm(e) {
     }
   }
 
-  alert("✅ Dossier Progressif enregistré directement dans la base de données (Cloud) !");
+  showToast("✅ Dossier Progressif enregistré directement dans la base de données !", "success");
   resetDPForm();
 
   state.bankSelectedOrgan = organ;
