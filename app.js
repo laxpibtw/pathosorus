@@ -6938,10 +6938,266 @@ function renderEditorUploadedImages() {
   if (window.lucide) lucide.createIcons();
 }
 
+// =========================================================================
+// --- MODALE DE CONFIRMATION D'ENREGISTREMENT FLUIDE & REDIRECTION BANQUE ---
+// =========================================================================
+let saveSuccessModalTimer = null;
+let saveSuccessModalCountdownSec = 3;
+let pendingHighlightedItem = null; // { id, organ, category, entity, isCase }
+
+function openSaveSuccessModal({ id, organ, category, entity, question, format, imagesCount, isEdit, isCase, cloudStatus, cloudErrorMsg }) {
+  pendingHighlightedItem = { id, organ, category, entity, isCase: Boolean(isCase) };
+
+  const modal = document.getElementById('modal-save-success');
+  if (!modal) return;
+
+  const titleEl = document.getElementById('save-success-title');
+  if (titleEl) {
+    if (isCase) {
+      titleEl.textContent = isEdit ? "Dossier Progressif mis à jour !" : "Dossier Progressif enregistré !";
+    } else {
+      titleEl.textContent = isEdit ? "Question mise à jour avec succès !" : "Question enregistrée avec succès !";
+    }
+  }
+
+  const subtitleEl = document.getElementById('save-success-subtitle');
+  if (subtitleEl) {
+    subtitleEl.textContent = isCase
+      ? "Le cas clinique et toutes ses étapes sont bien enregistrés."
+      : "Votre question est bien enregistrée et immédiatement disponible pour vos entraînements.";
+  }
+
+  const formatBadge = document.getElementById('save-success-format-badge');
+  if (formatBadge) {
+    if (isCase) {
+      formatBadge.textContent = "📋 Dossier Progressif";
+      formatBadge.className = "text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/30";
+    } else {
+      formatBadge.className = "text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-300 border border-teal-500/30";
+      formatBadge.textContent = format === 'qcm' ? '☑️ QCM' : (format === 'piege' ? '⚠️ Vrai/Faux' : (format === 'ouverte' ? '✍️ Ouverte' : '🔘 QCU'));
+    }
+  }
+
+  const hierarchyBadge = document.getElementById('save-success-hierarchy-badge');
+  if (hierarchyBadge) {
+    hierarchyBadge.textContent = `${organ || 'Général'} › ${category || 'Général'} › ${entity || 'Lésion'}`;
+  }
+
+  const textEl = document.getElementById('save-success-question-text');
+  if (textEl) {
+    textEl.textContent = question || '(Sans énoncé)';
+  }
+
+  const mediaBadge = document.getElementById('save-success-media-badge');
+  const mediaCountEl = document.getElementById('save-success-media-count');
+  if (mediaBadge && mediaCountEl) {
+    if (imagesCount > 0) {
+      mediaBadge.classList.remove('hidden');
+      mediaBadge.classList.add('flex');
+      mediaCountEl.textContent = `${imagesCount} image${imagesCount > 1 ? 's' : ''}`;
+    } else {
+      mediaBadge.classList.add('hidden');
+      mediaBadge.classList.remove('flex');
+    }
+  }
+
+  // Configuration du Statut Cloud
+  const cloudCard = document.getElementById('save-success-cloud-card');
+  const cloudIconBox = document.getElementById('save-success-cloud-icon-box');
+  const cloudIcon = document.getElementById('save-success-cloud-icon');
+  const cloudPill = document.getElementById('save-success-cloud-pill');
+  const cloudDesc = document.getElementById('save-success-cloud-desc');
+
+  if (cloudStatus === 'synced') {
+    if (cloudCard) cloudCard.className = "flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-teal-500/30";
+    if (cloudIconBox) cloudIconBox.className = "w-8 h-8 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center shrink-0";
+    if (cloudIcon) {
+      cloudIcon.setAttribute('data-lucide', 'cloud');
+      cloudIcon.className = "w-4 h-4 text-teal-400";
+    }
+    if (cloudPill) {
+      cloudPill.className = "text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300 border border-teal-500/30";
+      cloudPill.textContent = "✓ EN LIGNE";
+    }
+    if (cloudDesc) cloudDesc.textContent = "Synchronisé avec le serveur Supabase. Accessible sur tous vos appareils et par vos collègues.";
+  } else if (cloudStatus === 'error') {
+    if (cloudCard) cloudCard.className = "flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-rose-500/30";
+    if (cloudIconBox) cloudIconBox.className = "w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-center shrink-0";
+    if (cloudIcon) {
+      cloudIcon.setAttribute('data-lucide', 'alert-triangle');
+      cloudIcon.className = "w-4 h-4 text-rose-400";
+    }
+    if (cloudPill) {
+      cloudPill.className = "text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30";
+      cloudPill.textContent = "⚠️ SYNCHRO ATTENTE";
+    }
+    if (cloudDesc) cloudDesc.textContent = cloudErrorMsg || "Non synchronisé en ligne. Sauvegardé en local.";
+  } else {
+    // localOnly
+    if (cloudCard) cloudCard.className = "flex items-center space-x-3 p-3 rounded-xl bg-slate-950 border border-slate-800";
+    if (cloudIconBox) cloudIconBox.className = "w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0";
+    if (cloudIcon) {
+      cloudIcon.setAttribute('data-lucide', 'cloud');
+      cloudIcon.className = "w-4 h-4 text-slate-400";
+    }
+    if (cloudPill) {
+      cloudPill.className = "text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700";
+      cloudPill.textContent = "NON CONNECTÉ";
+    }
+    if (cloudDesc) cloudDesc.textContent = "Enregistré uniquement sur ce navigateur. Connectez-vous pour synchroniser avec la banque cloud.";
+  }
+
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  if (window.lucide) lucide.createIcons();
+
+  startSaveModalCountdown();
+}
+
+function startSaveModalCountdown() {
+  cancelSaveModalCountdown();
+  saveSuccessModalCountdownSec = 3;
+  const secEl = document.getElementById('save-modal-countdown-sec');
+  const boxEl = document.getElementById('save-modal-countdown-box');
+  if (boxEl) boxEl.classList.remove('hidden');
+  if (secEl) secEl.textContent = saveSuccessModalCountdownSec;
+
+  saveSuccessModalTimer = setInterval(() => {
+    saveSuccessModalCountdownSec--;
+    if (secEl) secEl.textContent = saveSuccessModalCountdownSec;
+    if (saveSuccessModalCountdownSec <= 0) {
+      cancelSaveModalCountdown();
+      handleSaveModalGoToBank();
+    }
+  }, 1000);
+}
+
+function cancelSaveModalCountdown() {
+  if (saveSuccessModalTimer) {
+    clearInterval(saveSuccessModalTimer);
+    saveSuccessModalTimer = null;
+  }
+  const boxEl = document.getElementById('save-modal-countdown-box');
+  if (boxEl) boxEl.classList.add('hidden');
+}
+
+function closeSaveSuccessModal() {
+  cancelSaveModalCountdown();
+  const modal = document.getElementById('modal-save-success');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+
+function handleSaveModalGoToBank() {
+  cancelSaveModalCountdown();
+  if (pendingHighlightedItem) {
+    const { id, organ, category, entity, isCase } = pendingHighlightedItem;
+    goToBankAndHighlightQuestion(id, organ, category, entity, isCase);
+  } else {
+    closeSaveSuccessModal();
+    switchTab('bank');
+  }
+}
+
+function handleSaveModalCreateNew() {
+  cancelSaveModalCountdown();
+  closeSaveSuccessModal();
+  if (pendingHighlightedItem && pendingHighlightedItem.isCase) {
+    if (typeof resetDPForm === 'function') resetDPForm();
+  } else {
+    resetQuestionForm();
+  }
+  showToast("Prêt pour la question suivante !", "info");
+  const scrollTarget = document.getElementById(pendingHighlightedItem && pendingHighlightedItem.isCase ? 'creator-box-dp' : 'creator-box-simple');
+  if (scrollTarget) scrollTarget.scrollIntoView({ behavior: 'smooth' });
+}
+
+function goToBankAndHighlightQuestion(id, organ, category, entity, isCase = false) {
+  closeSaveSuccessModal();
+
+  // 1. Réinitialiser la recherche et filtres pour garantir la visibilité de la question
+  const searchInput = document.getElementById('bank-search-input');
+  if (searchInput) searchInput.value = '';
+  const statusFilter = document.getElementById('bank-filter-status');
+  if (statusFilter) statusFilter.value = 'all';
+  const formatFilter = document.getElementById('bank-filter-format');
+  if (formatFilter) formatFilter.value = 'all';
+  const tagFilter = document.getElementById('bank-filter-tag');
+  if (tagFilter) tagFilter.value = 'all';
+
+  // 2. Positionner l'organe dans state et le select
+  state.bankSelectedOrgan = organ || 'all';
+  state.bankSelectedCategory = 'all';
+  const organSelect = document.getElementById('bank-filter-organ');
+  if (organSelect && organ) organSelect.value = organ;
+
+  // 3. Déplier l'organe s'il était replié
+  if (state.bankCollapsedOrgans && state.bankCollapsedOrgans.has(organ)) {
+    state.bankCollapsedOrgans.delete(organ);
+  }
+
+  // 4. Déplier la lésion exacte (clé '::')
+  const savedLesionKey = `${organ || 'Autre'}::${category || 'Général'}::${entity || 'Lésion non spécifiée'}`;
+  if (state.bankExpandedLesions) {
+    state.bankExpandedLesions.add(savedLesionKey);
+  }
+
+  // 5. Basculer vers l'onglet Ma Banque
+  switchTab('bank');
+
+  // 6. Scroll et surbrillance sur la carte
+  setTimeout(() => {
+    const cardId = isCase ? `bank-case-card-${id}` : `bank-question-card-${id}`;
+    const cardEl = document.getElementById(cardId);
+    if (cardEl) {
+      cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      cardEl.classList.add('highlight-saved-item');
+
+      setTimeout(() => {
+        cardEl.classList.remove('highlight-saved-item');
+      }, 4000);
+    }
+  }, 220);
+}
+
+window.openSaveSuccessModal = openSaveSuccessModal;
+window.startSaveModalCountdown = startSaveModalCountdown;
+window.cancelSaveModalCountdown = cancelSaveModalCountdown;
+window.closeSaveSuccessModal = closeSaveSuccessModal;
+window.handleSaveModalGoToBank = handleSaveModalGoToBank;
+window.handleSaveModalCreateNew = handleSaveModalCreateNew;
+window.goToBankAndHighlightQuestion = goToBankAndHighlightQuestion;
+
 async function handleSaveQuestionForm(e) {
   e.preventDefault();
 
+  const submitBtn = document.getElementById('btn-submit-save-question');
+  const originalBtnHtml = submitBtn ? submitBtn.innerHTML : '';
+  const restoreSubmitBtn = () => {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove('opacity-80', 'cursor-not-allowed');
+      submitBtn.innerHTML = originalBtnHtml;
+    }
+  };
+
+  // 0. Visual feedback tactile et immédiat sur le bouton cliqué
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.classList.add('opacity-80', 'cursor-not-allowed');
+    submitBtn.innerHTML = `
+      <svg class="animate-spin -ml-1 mr-2 h-3.5 w-3.5 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+      </svg>
+      <span>Enregistrement...</span>
+    `;
+  }
+
   const editId = document.getElementById('form-q-edit-id').value;
+  const isEdit = Boolean(editId);
   const format = document.getElementById('form-q-format').value;
   const organ = document.getElementById('form-q-organ').value.trim();
   const category = document.getElementById('form-q-category').value.trim();
@@ -6960,22 +7216,26 @@ async function handleSaveQuestionForm(e) {
   const extremeClues = cluesEl ? cluesEl.value.trim() : '';
 
   if (!organ) {
-    alert("Veuillez renseigner le Niveau 1 : Organe.");
+    restoreSubmitBtn();
+    showToast("Veuillez renseigner le Niveau 1 : Organe.", "warning");
     document.getElementById('form-q-organ').focus();
     return;
   }
   if (!category) {
-    alert("Veuillez renseigner le Niveau 2 : Catégorie.");
+    restoreSubmitBtn();
+    showToast("Veuillez renseigner le Niveau 2 : Catégorie.", "warning");
     document.getElementById('form-q-category').focus();
     return;
   }
   if (!entity) {
-    alert("Veuillez renseigner le Niveau 3 : Lésion précise.");
+    restoreSubmitBtn();
+    showToast("Veuillez renseigner le Niveau 3 : Lésion précise.", "warning");
     document.getElementById('form-q-entity').focus();
     return;
   }
   if (!question) {
-    alert("Veuillez renseigner l'énoncé de la question.");
+    restoreSubmitBtn();
+    showToast("Veuillez renseigner l'énoncé de la question.", "warning");
     document.getElementById('form-q-text').focus();
     return;
   }
@@ -6999,7 +7259,8 @@ async function handleSaveQuestionForm(e) {
       if (entity) {
         acceptedAnswers = [entity];
       } else {
-        alert("En mode Question Ouverte, veuillez renseigner au moins une formulation diagnostique acceptée.");
+        restoreSubmitBtn();
+        showToast("En mode Question Ouverte, veuillez renseigner au moins une formulation diagnostique acceptée.", "warning");
         return;
       }
     }
@@ -7020,11 +7281,13 @@ async function handleSaveQuestionForm(e) {
     });
 
     if (options.length < 2) {
-      alert(`En mode ${format === 'qcm' ? 'QCM' : 'QCU'}, veuillez renseigner au moins 2 propositions.`);
+      restoreSubmitBtn();
+      showToast(`En mode ${format === 'qcm' ? 'QCM' : 'QCU'}, veuillez renseigner au moins 2 propositions.`, "warning");
       return;
     }
     if (correct.length === 0) {
-      alert(`En mode ${format === 'qcm' ? 'QCM' : 'QCU'}, veuillez sélectionner au moins une bonne réponse.`);
+      restoreSubmitBtn();
+      showToast(`En mode ${format === 'qcm' ? 'QCM' : 'QCU'}, veuillez cocher la case verte de la bonne réponse.`, "warning");
       return;
     }
   }
@@ -7036,12 +7299,33 @@ async function handleSaveQuestionForm(e) {
 
   let savedQuestion = null;
 
-  if (editId) {
-    const idx = state.questions.findIndex(q => q.id === editId);
-    if (idx !== -1) {
-      const existingStats = state.questions[idx].stats || getDefaultQuestionStats();
-      state.questions[idx] = {
-        ...state.questions[idx],
+  try {
+    if (editId) {
+      const idx = state.questions.findIndex(q => q.id === editId);
+      if (idx !== -1) {
+        const existingStats = state.questions[idx].stats || getDefaultQuestionStats();
+        state.questions[idx] = {
+          ...state.questions[idx],
+          format, organ, category, entity, question, context, explanation, trap, tags, options, correct,
+          optionExplanations,
+          optionexplanations: optionExplanations,
+          difficulty, extremeClues,
+          created_by: chosenAuthor,
+          acceptedAnswers: [...acceptedAnswers],
+          acceptedanswers: [...acceptedAnswers],
+          images: [...state.editorUploadedImages],
+          explanationImages: [...(state.editorUploadedExplanationImages || [])],
+          explanationimages: [...(state.editorUploadedExplanationImages || [])],
+          stats: {
+            ...existingStats,
+            created_by: chosenAuthor
+          }
+        };
+        savedQuestion = state.questions[idx];
+      }
+    } else {
+      const newQ = {
+        id: "q_" + Date.now(),
         format, organ, category, entity, question, context, explanation, trap, tags, options, correct,
         optionExplanations,
         optionexplanations: optionExplanations,
@@ -7052,108 +7336,73 @@ async function handleSaveQuestionForm(e) {
         images: [...state.editorUploadedImages],
         explanationImages: [...(state.editorUploadedExplanationImages || [])],
         explanationimages: [...(state.editorUploadedExplanationImages || [])],
+        flagged: false,
+        mastered: false,
         stats: {
-          ...existingStats,
+          ...getDefaultQuestionStats(),
           created_by: chosenAuthor
         }
       };
-      savedQuestion = state.questions[idx];
-    }
-  } else {
-    const newQ = {
-      id: "q_" + Date.now(),
-      format, organ, category, entity, question, context, explanation, trap, tags, options, correct,
-      optionExplanations,
-      optionexplanations: optionExplanations,
-      difficulty, extremeClues,
-      created_by: chosenAuthor,
-      acceptedAnswers: [...acceptedAnswers],
-      acceptedanswers: [...acceptedAnswers],
-      images: [...state.editorUploadedImages],
-      explanationImages: [...(state.editorUploadedExplanationImages || [])],
-      explanationimages: [...(state.editorUploadedExplanationImages || [])],
-      flagged: false,
-      mastered: false,
-      stats: {
-        ...getDefaultQuestionStats(),
-        created_by: chosenAuthor
-      }
-    };
-    state.questions.push(newQ);
-    savedQuestion = newQ;
-  }
-
-  // 1. Sauvegarde locale immédiate dans le navigateur (filet de sécurité)
-  saveQuestions();
-
-  // 2. Synchronisation Supabase directe dans la base de données (méthode Zenipad)
-  let cloudSuccess = false;
-  let cloudFeedback = "";
-  if (supabaseClient && savedQuestion) {
-    try {
-      const res = await dbUpsertQuestion(savedQuestion);
-      if (res && res.success) {
-        cloudSuccess = true;
-      } else if (res && res.error) {
-        cloudFeedback = `\n\n⚠️ Info Cloud : Sauvegardé en local, erreur base en ligne : "${res.error.message || res.error}".`;
-      }
-    } catch(err) {
-      console.warn("Supabase direct sync error:", err);
-      cloudFeedback = `\n\n⚠️ Info Cloud : Sauvegardé en local (erreur réseau).`;
-    }
-  }
-
-  // 3. Notification visuelle immédiate (toast)
-  if (cloudSuccess) {
-    showToast("✅ Question enregistrée directement dans la base de données !", "success");
-  } else if (cloudFeedback) {
-    showToast("✓ Question sauvegardée en local sur cet appareil", "info");
-  } else {
-    showToast("✅ Question enregistrée avec succès !", "success");
-  }
-
-  // 4. Réinitialiser le formulaire
-  resetQuestionForm();
-
-  // 5. Positionner Ma Banque sur l'organe et déplier la lésion
-  try {
-    state.bankSelectedOrgan = organ;
-    state.bankSelectedCategory = 'all';
-    const organSelect = document.getElementById('bank-filter-organ');
-    if (organSelect) organSelect.value = organ;
-
-    const searchInput = document.getElementById('bank-search-input');
-    if (searchInput) searchInput.value = '';
-
-    const statusFilter = document.getElementById('bank-filter-status');
-    if (statusFilter) statusFilter.value = 'all';
-
-    if (state.bankCollapsedOrgans && state.bankCollapsedOrgans.has(organ)) {
-      state.bankCollapsedOrgans.delete(organ);
+      state.questions.push(newQ);
+      savedQuestion = newQ;
     }
 
-    // Déplier automatiquement la lésion (clé :: exacte)
-    const savedLesionKey = `${organ}::${category}::${entity}`;
-    if (state.bankExpandedLesions) {
-      state.bankExpandedLesions.add(savedLesionKey);
-    }
+    // 1. Sauvegarde locale immédiate (filet de sécurité)
+    saveQuestions();
 
-    // 6. Quitter le formulaire et aller sur Ma Banque
-    switchTab('bank');
-
-    // 7. Scroll et surbrillance sur la carte enregistrée
-    if (savedQuestion && savedQuestion.id) {
-      setTimeout(() => {
-        const cardEl = document.getElementById(`bank-question-card-${savedQuestion.id}`);
-        if (cardEl) {
-          cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          cardEl.classList.add('highlight-saved-item');
-          setTimeout(() => cardEl.classList.remove('highlight-saved-item'), 3500);
+    // 2. Synchronisation Supabase directe dans la base de données (méthode Zenipad)
+    let cloudStatus = "synced";
+    let cloudErrorMsg = "";
+    if (supabaseClient && savedQuestion) {
+      try {
+        const res = await dbUpsertQuestion(savedQuestion);
+        if (res && res.error) {
+          cloudStatus = "error";
+          cloudErrorMsg = res.error.message || "Erreur Supabase";
+        } else if (res && res.localOnly) {
+          cloudStatus = "localOnly";
+        } else {
+          cloudStatus = "synced";
         }
-      }, 200);
+      } catch(err) {
+        console.warn("Supabase direct sync error:", err);
+        cloudStatus = "error";
+        cloudErrorMsg = err.message || "Erreur réseau";
+      }
+    } else {
+      cloudStatus = "localOnly";
     }
-  } catch (navErr) {
-    console.warn("Erreur transition vers Ma Banque:", navErr);
+
+    // 3. Notification visuelle discrète
+    if (cloudStatus === 'synced') {
+      showToast("✅ Question enregistrée avec succès !", "success");
+    } else {
+      showToast("✓ Question sauvegardée en local sur cet appareil", "info");
+    }
+
+    // 4. Réinitialiser le formulaire
+    resetQuestionForm();
+
+    // 5. Modale fluide avec compte à rebours et redirection Ma Banque
+    openSaveSuccessModal({
+      id: savedQuestion.id,
+      organ: savedQuestion.organ,
+      category: savedQuestion.category,
+      entity: savedQuestion.entity,
+      question: savedQuestion.question,
+      format: savedQuestion.format,
+      imagesCount: (savedQuestion.images ? savedQuestion.images.length : 0) + (savedQuestion.explanationImages ? savedQuestion.explanationImages.length : 0),
+      isEdit,
+      isCase: false,
+      cloudStatus,
+      cloudErrorMsg
+    });
+
+  } catch (err) {
+    console.error("Erreur enregistrement question:", err);
+    showToast("Erreur lors de l'enregistrement de la question.", "error");
+  } finally {
+    restoreSubmitBtn();
   }
 }
 
@@ -8403,7 +8652,31 @@ function renderDPStepImagesPreview(stepIdx) {
 async function handleSaveDPForm(e) {
   e.preventDefault();
 
+  const submitBtn = document.getElementById('btn-submit-save-dp');
+  const originalBtnHtml = submitBtn ? submitBtn.innerHTML : '';
+  const restoreSubmitBtn = () => {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove('opacity-80', 'cursor-not-allowed');
+      submitBtn.innerHTML = originalBtnHtml;
+    }
+  };
+
+  // 0. Visual feedback tactile et immédiat
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.classList.add('opacity-80', 'cursor-not-allowed');
+    submitBtn.innerHTML = `
+      <svg class="animate-spin -ml-1 mr-2 h-3.5 w-3.5 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+      </svg>
+      <span>Enregistrement...</span>
+    `;
+  }
+
   const editId = document.getElementById('form-dp-edit-id').value;
+  const isEdit = Boolean(editId);
   const title = document.getElementById('form-dp-title').value.trim();
   const organ = document.getElementById('form-dp-organ').value.trim();
   const category = document.getElementById('form-dp-category').value.trim();
@@ -8412,28 +8685,33 @@ async function handleSaveDPForm(e) {
   const tags = Array.from(state.editorSelectedTags);
 
   if (!title) {
-    alert("Veuillez renseigner le titre du Dossier Clinique.");
+    restoreSubmitBtn();
+    showToast("Veuillez renseigner le titre du Dossier Clinique.", "warning");
     document.getElementById('form-dp-title').focus();
     return;
   }
   if (!organ) {
-    alert("Veuillez renseigner le Niveau 1 : Organe.");
+    restoreSubmitBtn();
+    showToast("Veuillez renseigner le Niveau 1 : Organe.", "warning");
     document.getElementById('form-dp-organ').focus();
     return;
   }
   if (!category) {
-    alert("Veuillez renseigner le Niveau 2 : Catégorie.");
+    restoreSubmitBtn();
+    showToast("Veuillez renseigner le Niveau 2 : Catégorie.", "warning");
     document.getElementById('form-dp-category').focus();
     return;
   }
   if (!entity) {
-    alert("Veuillez renseigner le Niveau 3 : Lésion précise.");
+    restoreSubmitBtn();
+    showToast("Veuillez renseigner le Niveau 3 : Lésion précise.", "warning");
     document.getElementById('form-dp-entity').focus();
     return;
   }
 
   if (!state.dpSteps || state.dpSteps.length === 0) {
-    alert("Veuillez ajouter au moins une étape (bouton 'Ajouter une étape suivante').");
+    restoreSubmitBtn();
+    showToast("Veuillez ajouter au moins une étape (bouton 'Ajouter une étape suivante').", "warning");
     return;
   }
 
@@ -8442,75 +8720,99 @@ async function handleSaveDPForm(e) {
     if (s.format === 'ouverte') {
       const accepted = getDPStepAcceptedAnswers(s);
       if (accepted.length === 0) {
-        alert(`À l'étape ${i + 1}, veuillez renseigner au moins une réponse acceptée.`);
+        restoreSubmitBtn();
+        showToast(`À l'étape ${i + 1}, veuillez renseigner au moins une réponse acceptée.`, "warning");
         return;
       }
     } else {
       if (!s.correct || s.correct.length === 0) {
-        alert(`À l'étape ${i + 1}, veuillez cocher au moins une bonne réponse.`);
+        restoreSubmitBtn();
+        showToast(`À l'étape ${i + 1}, veuillez cocher au moins une bonne réponse.`, "warning");
         return;
       }
       const validOpts = (s.options || []).filter(o => o && o.trim());
       if (validOpts.length < 2) {
-        alert(`À l'étape ${i + 1}, veuillez renseigner au moins 2 propositions.`);
+        restoreSubmitBtn();
+        showToast(`À l'étape ${i + 1}, veuillez renseigner au moins 2 propositions.`, "warning");
         return;
       }
     }
   }
 
   let savedCase = null;
-  if (editId) {
-    const idx = state.cases.findIndex(c => c.id === editId);
-    if (idx !== -1) {
-      state.cases[idx] = {
-        ...state.cases[idx],
+
+  try {
+    if (editId) {
+      const idx = state.cases.findIndex(c => c.id === editId);
+      if (idx !== -1) {
+        state.cases[idx] = {
+          ...state.cases[idx],
+          title, organ, category, entity, synopsis, tags,
+          steps: JSON.parse(JSON.stringify(state.dpSteps))
+        };
+        savedCase = state.cases[idx];
+      }
+    } else {
+      const newCase = {
+        id: "dp_" + Date.now(),
         title, organ, category, entity, synopsis, tags,
         steps: JSON.parse(JSON.stringify(state.dpSteps))
       };
-      savedCase = state.cases[idx];
+      state.cases.push(newCase);
+      savedCase = newCase;
     }
-  } else {
-    const newCase = {
-      id: "dp_" + Date.now(),
-      title, organ, category, entity, synopsis, tags,
-      steps: JSON.parse(JSON.stringify(state.dpSteps))
-    };
-    state.cases.push(newCase);
-    savedCase = newCase;
-  }
 
-  saveCases();
+    saveCases();
 
-  if (supabaseClient && savedCase) {
-    try {
-      await dbUpsertCase(savedCase);
-    } catch(e) {
-      console.warn("Supabase DP upsert error:", e);
-    }
-  }
-
-  showToast("✅ Dossier Progressif enregistré directement dans la base de données !", "success");
-  resetDPForm();
-
-  state.bankSelectedOrgan = organ;
-  state.bankSelectedCategory = 'all';
-  const organSelect = document.getElementById('bank-filter-organ');
-  if (organSelect) organSelect.value = organ;
-
-  const savedLesionKey = `${organ}::${category}::${entity}`;
-  state.bankExpandedLesions.add(savedLesionKey);
-
-  switchTab('bank');
-
-  if (savedCase && savedCase.id) {
-    setTimeout(() => {
-      const cardEl = document.getElementById(`bank-case-card-${savedCase.id}`);
-      if (cardEl) {
-        cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        cardEl.classList.add('highlight-saved-item');
-        setTimeout(() => cardEl.classList.remove('highlight-saved-item'), 3500);
+    let cloudStatus = "synced";
+    let cloudErrorMsg = "";
+    if (supabaseClient && savedCase) {
+      try {
+        const res = await dbUpsertCase(savedCase);
+        if (res && res.error) {
+          cloudStatus = "error";
+          cloudErrorMsg = res.error.message || "Erreur Supabase";
+        } else if (res && res.localOnly) {
+          cloudStatus = "localOnly";
+        } else {
+          cloudStatus = "synced";
+        }
+      } catch(e) {
+        console.warn("Supabase DP upsert error:", e);
+        cloudStatus = "error";
+        cloudErrorMsg = e.message || "Erreur réseau";
       }
-    }, 200);
+    } else {
+      cloudStatus = "localOnly";
+    }
+
+    if (cloudStatus === 'synced') {
+      showToast("✅ Dossier Progressif enregistré avec succès !", "success");
+    } else {
+      showToast("✓ Dossier sauvegardé en local sur cet appareil", "info");
+    }
+
+    resetDPForm();
+
+    openSaveSuccessModal({
+      id: savedCase.id,
+      organ: savedCase.organ,
+      category: savedCase.category,
+      entity: savedCase.entity,
+      question: `${savedCase.title} (${savedCase.steps.length} étape${savedCase.steps.length > 1 ? 's' : ''})`,
+      format: 'dp',
+      imagesCount: 0,
+      isEdit,
+      isCase: true,
+      cloudStatus,
+      cloudErrorMsg
+    });
+
+  } catch (err) {
+    console.error("Erreur enregistrement DP:", err);
+    showToast("Erreur lors de l'enregistrement du dossier clinique.", "error");
+  } finally {
+    restoreSubmitBtn();
   }
 }
 
