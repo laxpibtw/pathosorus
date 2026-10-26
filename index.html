@@ -32,7 +32,7 @@
   <!-- Supabase JS SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Config Cloud Supabase -->
-  <script src="config.js?v=20261022_1425"></script>
+  <script src="config.js?v=20261026_1955"></script>
 
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -234,9 +234,13 @@
           </div>
 
           <div class="w-full md:w-auto flex flex-col sm:flex-row items-center gap-3">
-            <button onclick="openAuthModal()" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-teal-500/25">
+            <button onclick="startGlobalSprint()" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-teal-500/25">
+              <i data-lucide="play" class="w-4 h-4"></i>
+              <span>Jouer immédiatement (Session Libre)</span>
+            </button>
+            <button onclick="openAuthModal()" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-xs flex items-center justify-center space-x-1.5 transition border border-slate-700">
               <i data-lucide="user-check" class="w-4 h-4"></i>
-              <span>Créer un compte ou Se connecter</span>
+              <span>Se connecter</span>
             </button>
           </div>
         </div>
@@ -1984,7 +1988,7 @@
   </div>
 
   <!-- Scripts -->
-  <script src="seed_data.js?v=20261026_1940"></script>
-  <script src="app.js?v=20261026_1940"></script>
+  <script src="seed_data.js?v=20261026_1955"></script>
+  <script src="app.js?v=20261026_1955"></script>
 </body>
 </html>

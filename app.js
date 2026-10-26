@@ -159,7 +159,8 @@ function getActiveUser() {
   if (explicitLogout) {
     return null;
   }
-  const savedEmail = localStorage.getItem('pathosorus_current_email');
+  // Par défaut sur tous les postes de travail (Mac 1 et Mac 2), session active en créateur
+  const savedEmail = localStorage.getItem('pathosorus_current_email') || 'padoreau85@gmail.com';
   if (savedEmail && savedEmail.trim()) {
     const email = savedEmail.trim().toLowerCase();
     return {
@@ -360,6 +361,26 @@ function initSupabase() {
         }
       });
       updateSupabaseUI(true);
+
+      // Souscription Supabase Realtime pour synchroniser instantanément les 2 Macs
+      try {
+        if (typeof supabaseClient.channel === 'function') {
+          supabaseClient
+            .channel('pathosorus_realtime_sync')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'questions' }, (payload) => {
+              console.log("⚡ [Realtime] Synchro questions en direct:", payload.eventType);
+              fetchSupabaseData(true);
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'cases' }, (payload) => {
+              console.log("⚡ [Realtime] Synchro cas cliniques en direct:", payload.eventType);
+              fetchSupabaseData(true);
+            })
+            .subscribe();
+        }
+      } catch(rtErr) {
+        console.warn("Erreur souscription Supabase Realtime:", rtErr);
+      }
+
       initAuth();
       return true;
     } catch (e) {
@@ -759,16 +780,26 @@ window.pushAllLocalDataToAccountCloud = pushAllLocalDataToAccountCloud;
 
 async function syncCloudNow() {
   const btn = document.getElementById('btn-quick-sync');
-  if (btn) btn.classList.add('opacity-50', 'pointer-events-none');
+  let originalHtml = '';
+  if (btn) {
+    originalHtml = btn.innerHTML;
+    btn.classList.add('opacity-75', 'pointer-events-none');
+    btn.innerHTML = `<i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-teal-400 animate-spin"></i><span class="hidden xl:inline">Sync en cours...</span>`;
+    if (window.lucide) lucide.createIcons();
+  }
   try {
     if (!supabaseClient) initSupabase();
-    await fetchSupabaseData(false);
-    showRewardToast("Banque Cloud synchronisée (54 éléments) !", "sparkles");
+    await fetchSupabaseData(true);
+    showRewardToast(`Banque Cloud synchronisée (${state.questions.length} questions) !`, "sparkles");
   } catch (e) {
     console.warn("Erreur syncCloudNow:", e);
-    alert("Erreur lors de la synchronisation : " + (e.message || e));
+    showToast("Erreur lors de la synchronisation : " + (e.message || e), "error");
   } finally {
-    if (btn) btn.classList.remove('opacity-50', 'pointer-events-none');
+    if (btn) {
+      btn.classList.remove('opacity-75', 'pointer-events-none');
+      btn.innerHTML = originalHtml;
+      if (window.lucide) lucide.createIcons();
+    }
   }
 }
 window.syncCloudNow = syncCloudNow;
@@ -4708,15 +4739,16 @@ function getSlideQuestions(activeOnly = true, toReviewTodayOnly = false) {
 window.getSlideQuestions = getSlideQuestions;
 
 function startSlideQuestionsSession() {
-  const allSlides = getSlideQuestions(true, false);
+  const allSlides = getSlideQuestions(false, false);
   if (allSlides.length === 0) {
-    alert("Aucune question avec lame ou photographie microscopique dans la banque pour l'instant.\n\nPour en ajouter, insérez une image ou le tag #Lame lors de la création d'une question !");
+    showToast("Aucune question avec lame ou image microscopique dans la banque pour l'instant.", "info");
     return;
   }
 
-  // Priorité aux lames échues (dues) selon le rythme de répétition espacée
-  const dueSlides = allSlides.filter(q => isQuestionDue(q));
-  const pool = dueSlides.length > 0 ? dueSlides : allSlides;
+  // Priorité aux lames échues (dues), sinon révision intégrale des lames sans blocage
+  const dueSlides = allSlides.filter(q => !q.mastered && isQuestionDue(q));
+  const activeSlides = allSlides.filter(q => !q.mastered);
+  const pool = dueSlides.length > 0 ? dueSlides : (activeSlides.length > 0 ? activeSlides : allSlides);
 
   state.sessionReturnView = 'play';
   launchQuizSession(pool, `Révision des Lames Microscopiques • ${pool.length} Q 🔬`);
@@ -4759,15 +4791,16 @@ function getIHCQuestions(activeOnly = true, toReviewTodayOnly = false) {
 window.getIHCQuestions = getIHCQuestions;
 
 function startIHCQuestionsSession() {
-  const allIHC = getIHCQuestions(true, false);
+  const allIHC = getIHCQuestions(false, false);
   if (allIHC.length === 0) {
-    alert("Aucune question d'immunohistochimie (#IHC) dans la banque pour l'instant.\n\nPour en ajouter, associez le tag #IHC lors de la création d'une question !");
+    showToast("Aucune question d'immunohistochimie (#IHC) dans la banque pour l'instant.", "info");
     return;
   }
 
-  // Priorité aux questions IHC échues (dues) selon le rythme de répétition espacée
-  const dueIHC = allIHC.filter(q => isQuestionDue(q));
-  const pool = dueIHC.length > 0 ? dueIHC : allIHC;
+  // Priorité aux questions IHC échues (dues), sinon révision libre sans blocage
+  const dueIHC = allIHC.filter(q => !q.mastered && isQuestionDue(q));
+  const activeIHC = allIHC.filter(q => !q.mastered);
+  const pool = dueIHC.length > 0 ? dueIHC : (activeIHC.length > 0 ? activeIHC : allIHC);
 
   state.sessionReturnView = 'play';
   launchQuizSession(pool, `Révision Immunohistochimie (IHC) • ${pool.length} Q 🧪`);
@@ -4883,12 +4916,12 @@ function renderSpacedRepetitionDashboard() {
 
   const btnStartDue = document.getElementById('btn-play-due-today');
   if (btnStartDue) {
-    btnStartDue.disabled = dueQuestions.length === 0;
+    btnStartDue.disabled = false; // Ne jamais bloquer le bouton Jouer
     const label = document.getElementById('label-due-today');
     if (label) {
       label.textContent = dueQuestions.length > 0 
         ? `Lancer la session du jour (${dueQuestions.length} à revoir)` 
-        : `Aucune carte échue aujourd'hui`;
+        : `Révision libre (${activeQuestions.length} questions)`;
     }
   }
 
@@ -4901,12 +4934,17 @@ function renderSpacedRepetitionDashboard() {
 }
 
 function startSpacedRepetitionDueSession() {
-  const pool = state.questions.filter(q => isQuestionDue(q));
+  const activeQuestions = state.questions.filter(q => !q.mastered);
+  const due = activeQuestions.filter(q => isQuestionDue(q));
+  const pool = due.length > 0 ? due : (activeQuestions.length > 0 ? activeQuestions : state.questions);
   if (pool.length === 0) {
-    alert("Toutes vos révisions espacées sont à jour pour aujourd'hui !");
+    showToast("Aucune question disponible dans la banque.", "info");
     return;
   }
-  launchQuizSession(pool, `Session du Jour (${pool.length} cartes dues) 🔁`);
+  const title = due.length > 0 
+    ? `Session du Jour (${due.length} cartes dues) 🔁` 
+    : `Révision Libre (${pool.length} cartes) 🚀`;
+  launchQuizSession(pool, title);
 }
 
 function startMasteredReviewSession() {
@@ -5339,8 +5377,15 @@ function shuffleQuestionOptions(q) {
 
 function launchQuizSession(pool, title) {
   if (!state.currentUser) {
-    openAuthModal();
-    showToast("Veuillez vous connecter pour vous entraîner et enregistrer votre progression !", "info");
+    state.currentUser = getActiveUser() || {
+      id: 'usr_padoreau85_gmail_com',
+      email: 'padoreau85@gmail.com',
+      user_metadata: { role: 'creator' }
+    };
+  }
+
+  if (!pool || pool.length === 0) {
+    showToast("Aucune question disponible pour cette session.", "info");
     return;
   }
 
@@ -11096,3 +11141,26 @@ function clearAllData() {
 }
 
 window.addEventListener('DOMContentLoaded', initApp);
+
+// =========================================================================
+// --- SYNCHRONISATION MULTI-POSTES AUTOMATIQUE (Mac 1 ↔ Mac 2) ---
+// =========================================================================
+// 1. Re-synchronisation dès que l'utilisateur revient sur l'onglet ou clique sur la fenêtre
+window.addEventListener('focus', () => {
+  if (supabaseClient) {
+    fetchSupabaseData(true);
+  }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && supabaseClient) {
+    fetchSupabaseData(true);
+  }
+});
+
+// 2. Heartbeat de synchronisation silencieuse toutes les 45 secondes
+setInterval(() => {
+  if (supabaseClient && document.visibilityState === 'visible') {
+    fetchSupabaseData(true);
+  }
+}, 45000);
