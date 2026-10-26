@@ -3742,6 +3742,62 @@ function renderTrophiesView() {
     `;
   }
 
+  // 2. Rendu Carte Rédacteur / Créateur (remplit la boîte de droite)
+  const creatorCard = document.getElementById('trophies-creator-card');
+  if (creatorCard) {
+    const totalQ = (state.questions || []).length;
+    const totalC = (state.cases || []).length;
+    const isMaster = (state.currentUser && state.currentUser.email === 'padoreau85@gmail.com');
+
+    creatorCard.innerHTML = `
+      <div class="flex items-start justify-between">
+        <div class="flex items-center space-x-3.5">
+          <div class="w-12 h-12 rounded-2xl bg-teal-500/20 text-teal-300 border border-teal-500/40 flex items-center justify-center font-black text-xl shadow-inner">
+            <i data-lucide="edit-3" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 uppercase tracking-wider">
+                ${isMaster ? '👑 Maître Rédacteur' : '✍️ Créateur'}
+              </span>
+              <span class="text-xs text-slate-400 font-mono">Banque Partagée</span>
+            </div>
+            <h2 class="text-lg font-black text-white mt-0.5 tracking-tight">Atelier de Rédaction</h2>
+          </div>
+        </div>
+        <div class="text-right">
+          <span class="text-xl font-black text-white font-mono">${totalQ + totalC}</span>
+          <span class="text-xs text-teal-400 font-bold block">Fiches en Banque</span>
+        </div>
+      </div>
+
+      <div class="space-y-1.5 pt-1">
+        <div class="flex items-center justify-between text-xs font-semibold text-slate-300">
+          <span>Contribution à la Banque Collective</span>
+          <span class="font-mono text-teal-300 font-bold">${totalQ} Q • ${totalC} Cas DP</span>
+        </div>
+        <div class="w-full h-3 rounded-full bg-slate-950 border border-slate-800 overflow-hidden shadow-inner p-0.5">
+          <div class="h-full rounded-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-500" style="width: 100%;"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-center">
+        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+          <span class="text-xs font-bold text-teal-400 font-mono block">${totalQ}</span>
+          <span class="text-[10px] text-slate-400">Questions</span>
+        </div>
+        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+          <span class="text-xs font-bold text-indigo-400 font-mono block">${totalC}</span>
+          <span class="text-[10px] text-slate-400">Cas DP</span>
+        </div>
+        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+          <span class="text-xs font-bold text-amber-400 font-mono block">${(state.questions || []).filter(q => isSlideQuestion(q)).length}</span>
+          <span class="text-[10px] text-slate-400">🔬 Lames</span>
+        </div>
+      </div>
+    `;
+  }
+
   // 3. Bandeau Trophées Contestés
   const contestedBanner = document.getElementById('trophies-contested-banner');
   if (contestedBanner) {
@@ -3927,51 +3983,75 @@ async function renderLeaderboard() {
     });
   }
 
-  // 3. Lire Supabase profiles
+  // 3. Lire Supabase profiles et USTATS (avec timeout de sécurité de 2000ms pour ne JAMAIS figer l'écran)
   if (supabaseClient) {
     try {
-      const { data: profs, error } = await supabaseClient
-        .from('profiles')
-        .select('*');
+      const fetchPromise = Promise.allSettled([
+        supabaseClient.from('profiles').select('*').limit(50),
+        supabaseClient.from('custom_tags').select('name').like('name', 'USTATS:%')
+      ]);
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 2000));
+      const res = await Promise.race([fetchPromise, timeoutPromise]);
 
-      if (profs && Array.isArray(profs)) {
-        profs.forEach(p => {
-          if (p && p.email) {
-            const em = p.email.trim().toLowerCase();
-            const existing = accountsMap.get(em) || {};
-            const stats = p.stats || {};
-            const authorInfo = getQuestionAuthorDisplayName({ created_by: em });
-
-            accountsMap.set(em, {
-              ...existing,
-              id: p.id,
-              email: em,
-              name: existing.name || authorInfo.name,
-              role: p.role || existing.role || (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com' ? 'creator' : 'reader'),
-              xp: typeof stats.xp === 'number' ? stats.xp : (existing.xp || 0),
-              streak: typeof stats.streak === 'number' ? stats.streak : (existing.streak || 1),
-              totalCorrect: typeof stats.totalCorrect === 'number' ? stats.totalCorrect : (existing.totalCorrect || 0),
-              unlockedBadgesCount: stats.unlockedBadges ? Object.keys(stats.unlockedBadges).length : (existing.unlockedBadgesCount || 0)
-            });
-          }
-        });
+      if (res && Array.isArray(res)) {
+        const [profRes, tagRes] = res;
+        if (profRes && profRes.status === 'fulfilled' && Array.isArray(profRes.value.data)) {
+          profRes.value.data.forEach(p => {
+            if (p && p.email) {
+              const em = p.email.trim().toLowerCase();
+              const existing = accountsMap.get(em) || {};
+              const stats = p.stats || {};
+              accountsMap.set(em, {
+                ...existing,
+                id: p.id,
+                email: em,
+                name: existing.name || p.name || em.split('@')[0],
+                role: p.role || existing.role || (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com' ? 'creator' : 'reader'),
+                xp: typeof stats.xp === 'number' ? stats.xp : (existing.xp || 0),
+                streak: typeof stats.streak === 'number' ? stats.streak : (existing.streak || 1),
+                totalCorrect: typeof stats.totalCorrect === 'number' ? stats.totalCorrect : (existing.totalCorrect || 0)
+              });
+            }
+          });
+        }
+        if (tagRes && tagRes.status === 'fulfilled' && Array.isArray(tagRes.value.data)) {
+          tagRes.value.data.forEach(t => {
+            if (t.name && t.name.startsWith('USTATS:')) {
+              try {
+                const parts = t.name.split(':', 2);
+                const rawJson = t.name.substring(parts[0].length + parts[1].length + 2);
+                const em = parts[1].trim().toLowerCase();
+                const st = JSON.parse(rawJson);
+                const existing = accountsMap.get(em) || {};
+                accountsMap.set(em, {
+                  ...existing,
+                  email: em,
+                  name: existing.name || (em === 'padoreau85@gmail.com' ? 'Pierre-Alain Doreau' : (em === 'belhadef.samy@gmail.com' ? 'Samy Belhadef' : em.split('@')[0])),
+                  xp: Math.max(existing.xp || 0, st.xp || 0),
+                  streak: Math.max(existing.streak || 1, st.streak || 1),
+                  totalCorrect: Math.max(existing.totalCorrect || 0, st.totalCorrect || 0)
+                });
+              } catch(e) {}
+            }
+          });
+        }
       }
     } catch (e) {
-      console.warn("Erreur chargement leaderboard profiles:", e);
+      console.warn("Erreur chargement leaderboard distant:", e);
     }
   }
 
   // 4. Injecter les données temps réel du compte connecté
   if (state.currentUser && state.currentUser.email) {
     const curEmail = state.currentUser.email.trim().toLowerCase();
-    const curAuthor = getQuestionAuthorDisplayName({ created_by: curEmail });
+    const defaultName = curEmail === 'padoreau85@gmail.com' ? 'Pierre-Alain Doreau' : (curEmail === 'belhadef.samy@gmail.com' ? 'Samy Belhadef' : curEmail.split('@')[0]);
     const allBadges = getBadgesStatus();
     const unlockedCount = allBadges.filter(b => b.status === 'unlocked').length;
 
     accountsMap.set(curEmail, {
       ...(accountsMap.get(curEmail) || {}),
       email: curEmail,
-      name: curAuthor.name,
+      name: (accountsMap.get(curEmail)?.name) || defaultName,
       role: isCreator() ? 'creator' : 'reader',
       xp: state.stats.xp || 0,
       streak: state.stats.streak || 1,
@@ -3991,8 +4071,10 @@ async function renderLeaderboard() {
   const list = Array.from(accountsMap.values()).map(acc => {
     const qCount = questionsByAuthor[acc.email] || 0;
     const lvlInfo = calculatePlayerLevel(acc.xp || 0);
+    const dName = acc.name || (acc.email ? acc.email.split('@')[0] : 'Confrère');
     return {
       ...acc,
+      name: dName,
       createdQuestions: qCount,
       level: lvlInfo.level,
       tierName: lvlInfo.tierName,
@@ -4121,6 +4203,8 @@ async function renderLeaderboard() {
     const rank = idx + 1;
     let medal = rank === 1 ? '🥇' : (rank === 2 ? '🥈' : (rank === 3 ? '🥉' : `#${rank}`));
     const isCreatorRole = u.role === 'creator' || u.email === 'padoreau85@gmail.com' || u.email === 'belhadef.samy@gmail.com';
+    const displayName = u.name || (u.email ? u.email.split('@')[0] : 'Confrère');
+    const initial = (displayName.charAt(0) || 'P').toUpperCase();
 
     return `
       <tr class="border-b border-slate-800/80 ${isSelf ? 'bg-indigo-950/20 hover:bg-indigo-950/30 font-bold' : 'hover:bg-slate-900/60'} transition">
@@ -4130,15 +4214,15 @@ async function renderLeaderboard() {
         <td class="py-3 px-3.5">
           <div class="flex items-center space-x-2.5">
             <div class="w-8 h-8 rounded-xl ${isCreatorRole ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30' : 'bg-sky-500/10 text-sky-400 border border-sky-500/30'} flex items-center justify-center font-bold text-xs shrink-0 shadow-sm">
-              ${escapeHtml(u.name.charAt(0).toUpperCase())}
+              ${escapeHtml(initial)}
             </div>
             <div class="min-w-0">
               <div class="text-xs font-bold text-white flex items-center space-x-1.5 truncate">
-                <span class="truncate">${escapeHtml(u.name)}</span>
+                <span class="truncate">${escapeHtml(displayName)}</span>
                 ${isSelf ? '<span class="text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/40">Vous</span>' : ''}
                 ${u.email === 'padoreau85@gmail.com' ? '<span class="text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">Master</span>' : ''}
               </div>
-              <p class="text-[10px] text-slate-500 font-mono truncate">${escapeHtml(u.email)}</p>
+              <p class="text-[10px] text-slate-500 font-mono truncate">${escapeHtml(u.email || '')}</p>
             </div>
           </div>
         </td>
@@ -4157,13 +4241,13 @@ async function renderLeaderboard() {
           ${u.xp} <span class="text-[10px] text-indigo-400 font-bold">XP</span>
         </td>
         <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-amber-400">
-          🏆 ${u.unlockedBadgesCount}
+          🏆 ${u.unlockedBadgesCount || 0}
         </td>
         <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-teal-300">
           ✅ ${u.totalCorrect || 0}
         </td>
         <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-slate-300">
-          🔥 ${u.streak}j
+          🔥 ${u.streak || 1}j
         </td>
       </tr>
     `;
@@ -4195,7 +4279,9 @@ async function renderLeaderboard() {
     </div>
   `;
 
-  if (window.lucide) lucide.createIcons();
+  if (window.lucide && typeof window.lucide.createIcons === 'function') {
+    window.lucide.createIcons();
+  }
 }
 window.renderLeaderboard = renderLeaderboard;
 
