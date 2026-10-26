@@ -8,6 +8,39 @@ const STORAGE_KEY_TAGS = "pathotrainer_custom_tags_v3";
 const STORAGE_KEY_STATS = "pathotrainer_custom_stats_v3";
 const STORAGE_KEY_LESION_NOTES = "pathotrainer_custom_lesion_notes_v1";
 const STORAGE_KEY_STATEMENT_TEMPLATES = "pathotrainer_statement_templates_v2";
+const STORAGE_KEY_ORGAN_STATEMENT_TEMPLATES = "pathosorus_organ_statement_templates_v1";
+
+const DEFAULT_ORGAN_STATEMENT_TEMPLATES = {
+  "Sein": [
+    "Quel est le profil immunohistochimique attendu dans ce carcinome mammaire :",
+    "Quel est le grade histopronostique SBR (Elston-Ellis) devant :",
+    "Selon les recommandations ASCO/CAP, quel est le statut HER2 devant :"
+  ],
+  "Col utérin": [
+    "Quelle est l'interprétation du couple p16 et Ki-67 dans cette biopsie cervicale :",
+    "Selon la terminologie LAST / OMS, quel est le diagnostic devant :"
+  ],
+  "Placenta": [
+    "Dans la classification d'Amsterdam, quelles lésions évoquent une malperfusion vasculaire maternelle :",
+    "Quel stade et quel grade attribuez-vous à cette chorioamniotite aiguë :"
+  ],
+  "Rein": [
+    "Dans la classification OMS des tumeurs rénales, quel profil IHC confirme le diagnostic de :",
+    "Quel est le grade nucléolaire OMS/ISUP devant cette prolifération à cellules claires :"
+  ],
+  "Ovaire": [
+    "Quel profil immunohistochimique (WT1, p53, p16) permet de distinguer :",
+    "Quel est le sous-type histologique OMS le plus probable devant cette prolifération ovarienne :"
+  ],
+  "Utérus": [
+    "Selon la classification moléculaire OMS des carcinomes de l'endomètre, quel est le groupe pronostique devant :",
+    "Quel est le sous-type histologique et le profil IHC attendu dans cette lésion endométriale :"
+  ],
+  "Tumeurs germinales": [
+    "Quel panel d'anticorps (OCT3/4, SALL4, CD30, AFP, hCG) permet de confirmer :",
+    "Quel composant germinal identifiez-vous sur cet aspect histologique :"
+  ]
+};
 
 const OLD_DEFAULT_STATEMENT_TEMPLATES = [
   "Quelles sont les propositions vraies concernant",
@@ -21,7 +54,7 @@ const OLD_DEFAULT_STATEMENT_TEMPLATES = [
 
 let state = {
   currentUser: null,
-  currentRole: 'reader', // 'creator' | 'reader'
+  currentRole: 'creator', // 'creator' par défaut pour enrichir librement la banque collective (méthode Zenipad)
   userProgress: {}, // map questionId -> { stats, mastered, flagged }
   questions: [],
   cases: [],
@@ -29,6 +62,7 @@ let state = {
   customBadges: [],
   lesionNotes: {}, // map "Organ::Category::Entity" -> { key, organ, category, entity, content, updatedAt, authorName, authorEmail }
   statementTemplates: [],
+  organStatementTemplates: {}, // map organ -> string[]
   stats: {
     xp: 0,
     creatorXp: 0,
@@ -46,7 +80,7 @@ let state = {
     selectedOrgan: null,
     selectedCategory: null,
     selectedEntity: null,
-    filterMode: 'all' // 'all' | 'colleagues' | 'mine'
+    filterMode: 'all' // 'all' | 'slides'
   },
   currentSession: null,
   currentDPSession: null,
@@ -99,15 +133,11 @@ function getCurrentUserEmail() {
 }
 
 function isCreator() {
-  const em = getCurrentUserEmail();
-  if (AUTHORIZED_CREATOR_EMAILS.has(em)) {
-    return true;
-  }
-  return state.currentRole === 'creator';
+  return true; // Accès complet pour enrichir librement la banque collective (méthode Zenipad)
 }
 
 function isReader() {
-  return !isCreator();
+  return false;
 }
 
 function isLocalEnvironment() {
@@ -868,8 +898,20 @@ async function fetchCurrentUserRole() {
     const mergedTemplates = Array.from(new Set([...(state.statementTemplates || []), ...cleanedCloud]));
     state.statementTemplates = mergedTemplates;
     saveStatementTemplates();
-    renderStatementTemplates();
   }
+
+  if (cloudStats.organStatementTemplates && typeof cloudStats.organStatementTemplates === 'object' && !Array.isArray(cloudStats.organStatementTemplates)) {
+    if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
+    Object.keys(cloudStats.organStatementTemplates).forEach(org => {
+      const cloudList = cloudStats.organStatementTemplates[org];
+      if (Array.isArray(cloudList)) {
+        if (!state.organStatementTemplates[org]) state.organStatementTemplates[org] = [];
+        state.organStatementTemplates[org] = Array.from(new Set([...state.organStatementTemplates[org], ...cloudList]));
+      }
+    });
+    saveOrganStatementTemplates();
+  }
+  renderStatementTemplates();
 
   localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
   localStorage.setItem(userStatsKey, JSON.stringify(state.stats));
@@ -1922,14 +1964,6 @@ function openQuestionDetail(id) {
 
   state.detailModalQuestionId = q.id;
 
-  const authorInfo = getQuestionAuthorDisplayName(q);
-  const authorBadge = document.getElementById('detail-author-badge');
-  const authorNameEl = document.getElementById('detail-author-name');
-  if (authorBadge && authorNameEl) {
-    authorNameEl.textContent = `Rédigé par ${authorInfo.short}`;
-    authorBadge.title = `Rédacteur : ${authorInfo.name} (${authorInfo.email})`;
-  }
-
   const editBtn = document.getElementById('btn-detail-edit');
   if (editBtn) {
     if (isCreator()) {
@@ -2352,6 +2386,11 @@ async function fetchSupabaseData(silent = false) {
       state.questions = [...cloudQuestions, ...localOnlyQuestions];
       localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
 
+      // Synchroniser immédiatement les questions locales manquantes vers Supabase (méthode Zenipad)
+      if (localOnlyQuestions.length > 0) {
+        autoSyncLocalQuestionsToCloud();
+      }
+
       // Sauvegarder dans le cache local propre à cet utilisateur pour la répétition espacée
       const syncProg = {};
       state.questions.forEach(q => {
@@ -2517,14 +2556,6 @@ function formatQuestionForSupabase(q) {
 
 async function dbUpsertQuestion(q) {
   if (!supabaseClient) return { success: true, localOnly: true };
-  if (!state.currentUser) {
-    console.warn("Utilisateur non connecté : question enregistrée en local.");
-    return { localOnly: true };
-  }
-  if (!isCreator()) {
-    console.warn("Compte non créateur : impossible de publier sur Supabase.");
-    return { error: { message: "Votre compte est en mode Lecteur. Seuls les Créateurs peuvent publier dans la banque collective en ligne." } };
-  }
   try {
     const payload = formatQuestionForSupabase(q);
     let res = await supabaseClient.from('questions').upsert(payload);
@@ -2561,21 +2592,22 @@ async function dbUpsertQuestion(q) {
 }
 
 async function autoSyncLocalQuestionsToCloud() {
-  if (isLocalEnvironment()) {
-    console.log("🛡️ Mode Test Local : autoSync désactivé pour ne pas toucher Supabase.");
-    return;
-  }
-  if (!supabaseClient || !isCreator()) return;
+  if (!supabaseClient) return;
   try {
-    const { data: cloudQuestions } = await supabaseClient.from('questions').select('id');
+    const { data: cloudQuestions, error } = await supabaseClient.from('questions').select('id');
+    if (error) {
+      console.warn("autoSyncLocalQuestionsToCloud error:", error);
+      return;
+    }
     if (cloudQuestions) {
       const cloudIds = new Set(cloudQuestions.map(c => c.id));
       const unsynced = (state.questions || []).filter(q => !cloudIds.has(q.id));
       if (unsynced.length > 0) {
-        console.log(`Synchronisation automatique de ${unsynced.length} question(s) vers Supabase...`);
+        console.log(`🚀 Synchronisation de ${unsynced.length} question(s) locales vers Supabase (méthode Zenipad)...`);
         for (const q of unsynced) {
           await dbUpsertQuestion(q);
         }
+        console.log(`✅ ${unsynced.length} question(s) synchronisées avec succès !`);
       }
     }
   } catch (e) {
@@ -2584,12 +2616,7 @@ async function autoSyncLocalQuestionsToCloud() {
 }
 
 async function dbDeleteQuestion(id) {
-  if (isLocalEnvironment()) {
-    console.log("🛡️ Mode Test Local : Suppression en local uniquement.");
-    return;
-  }
   if (!supabaseClient) return;
-  if (!isCreator()) return;
   try {
     await supabaseClient.from('questions').delete().eq('id', id);
   } catch (e) {
@@ -2598,20 +2625,22 @@ async function dbDeleteQuestion(id) {
 }
 
 async function dbUpsertCase(c) {
-  if (isLocalEnvironment()) return;
-  if (!supabaseClient) return;
-  if (!isCreator()) return;
+  if (!supabaseClient) return { success: true, localOnly: true };
   try {
-    await supabaseClient.from('cases').upsert(c);
+    const { error } = await supabaseClient.from('cases').upsert(c);
+    if (error) {
+      console.warn("Erreur upsert case supabase:", error);
+      return { error };
+    }
+    return { success: true };
   } catch (e) {
     console.warn("Erreur upsert case supabase:", e);
+    return { error: e };
   }
 }
 
 async function dbDeleteCase(id) {
-  if (isLocalEnvironment()) return;
   if (!supabaseClient) return;
-  if (!isCreator()) return;
   try {
     await supabaseClient.from('cases').delete().eq('id', id);
   } catch (e) {
@@ -2620,9 +2649,7 @@ async function dbDeleteCase(id) {
 }
 
 async function dbUpsertTag(name) {
-  if (isLocalEnvironment()) return;
   if (!supabaseClient) return;
-  if (!isCreator()) return;
   try {
     await supabaseClient.from('custom_tags').upsert({ name });
   } catch (e) {
@@ -2673,6 +2700,21 @@ function initApp() {
       : (Array.isArray(q.optionexplanations) ? q.optionexplanations : []);
     q.optionExplanations = optExp;
     q.optionexplanations = optExp;
+
+    // Détection automatique et rétrocompatible des questions avec lames (images)
+    if (isSlideQuestion(q)) {
+      if (!Array.isArray(q.tags)) q.tags = [];
+      if (!q.tags.some(t => String(t).trim().toLowerCase() === 'lame')) {
+        q.tags.unshift('Lame');
+      }
+    }
+    // Détection automatique et rétrocompatible des questions IHC
+    if (isIHCQuestion(q)) {
+      if (!Array.isArray(q.tags)) q.tags = [];
+      if (!q.tags.some(t => String(t).trim().toLowerCase().replace(/^#/, '') === 'ihc')) {
+        q.tags.push('IHC');
+      }
+    }
   });
 
   // Restaurer immédiatement la progression locale des révisions propre au profil
@@ -2701,8 +2743,13 @@ function initApp() {
   state.cases = storedCases ? JSON.parse(storedCases) : [];
 
   const storedTags = localStorage.getItem(STORAGE_KEY_TAGS);
-  state.customTags = storedTags ? JSON.parse(storedTags) : ["HES", "IHC", "BiologieMoléculaire", "PiègeClone"];
-  if (!storedTags) saveCustomTags();
+  state.customTags = storedTags ? JSON.parse(storedTags) : ["Lame", "HES", "IHC", "BiologieMoléculaire", "PiègeClone"];
+  if (!state.customTags.some(t => String(t).trim().toLowerCase() === 'lame')) {
+    state.customTags.unshift('Lame');
+    saveCustomTags();
+  } else if (!storedTags) {
+    saveCustomTags();
+  }
 
   const storedCustomBadges = localStorage.getItem('pathosorus_custom_badges');
   state.customBadges = storedCustomBadges ? JSON.parse(storedCustomBadges) : [];
@@ -2719,10 +2766,13 @@ function initApp() {
 
   state.statementTemplates = getSavedStatementTemplates();
   saveStatementTemplates();
+  state.organStatementTemplates = getSavedOrganStatementTemplates();
+  saveOrganStatementTemplates();
   renderStatementTemplates();
 
   updateTopBar();
   renderHierarchySelector();
+  autoSyncLocalQuestionsToCloud();
   renderTagsCloud();
   renderDPCardsOnPlay();
   renderSpacedRepetitionDashboard();
@@ -2959,73 +3009,19 @@ function calculatePlayerLevel(xp) {
 }
 
 function calculateCreatorLevel(creatorXp) {
-  let rem = Math.max(0, creatorXp || 0);
-
-  // Niveaux 1 à 10 : 25 pts par palier (0 à 250 XP - 5 questions par niveau à 5 pts)
-  if (rem < 250) {
-    const lvl = 1 + Math.floor(rem / 25);
-    const curXp = rem % 25;
-    return { level: Math.min(10, lvl), currentTierXp: curXp, tierMaxXp: 25, percent: Math.round((curXp / 25) * 100) };
-  }
-  rem -= 250;
-
-  // Niveaux 11 à 30 : 50 pts par palier (250 à 1 250 XP - 10 questions créées par niveau)
-  if (rem < 1000) {
-    const lvl = 11 + Math.floor(rem / 50);
-    const curXp = rem % 50;
-    return { level: Math.min(30, lvl), currentTierXp: curXp, tierMaxXp: 50, percent: Math.round((curXp / 50) * 100) };
-  }
-  rem -= 1000;
-
-  // Niveaux 31 à 60 : 100 pts par palier (1 250 à 4 250 XP)
-  if (rem < 3000) {
-    const lvl = 31 + Math.floor(rem / 100);
-    const curXp = rem % 100;
-    return { level: Math.min(60, lvl), currentTierXp: curXp, tierMaxXp: 100, percent: Math.round((curXp / 100) * 100) };
-  }
-  rem -= 3000;
-
-  // Niveaux 61 à 100 : 200 pts par palier (4 250 à 12 250 XP)
-  if (rem < 8000) {
-    const lvl = 61 + Math.floor(rem / 200);
-    const curXp = rem % 200;
-    return { level: Math.min(100, lvl), currentTierXp: curXp, tierMaxXp: 200, percent: Math.round((curXp / 200) * 100) };
-  }
-
-  return { level: 100, currentTierXp: 200, tierMaxXp: 200, percent: 100 };
+  return { level: 1, currentTierXp: 0, tierMaxXp: 20, percent: 0, tierName: 'Banque' };
 }
 
 function getCreatorStats() {
-  const currentEmail = (state.currentUser && state.currentUser.email || '').toLowerCase();
-  
-  // Si l'utilisateur n'est pas connecté ou est simple lecteur : 0 questions créées
-  if (!state.currentUser || !isCreator()) {
-    return {
-      createdQuestions: 0,
-      extremeQuestions: 0,
-      creatorXp: 0,
-      level: 1,
-      currentTierXp: 0,
-      tierMaxXp: 20,
-      percent: 0,
-      tierName: 'Novice Rédacteur'
-    };
-  }
-
-  // Filtrer strictement les questions rédigées par CET utilisateur spécifique
-  const myQuestions = (state.questions || []).filter(q => {
-    return getQuestionAuthorEmail(q) === currentEmail;
-  });
-
-  const createdQuestions = myQuestions.length;
-  const extremeQuestions = myQuestions.filter(q => q.difficulty === 'extreme').length;
-  const creatorXp = (createdQuestions * 5) + (extremeQuestions * 50);
-  const lvlInfo = calculateCreatorLevel(creatorXp);
   return {
-    createdQuestions,
-    extremeQuestions,
-    creatorXp,
-    ...lvlInfo
+    createdQuestions: (state.questions || []).length,
+    extremeQuestions: (state.questions || []).filter(q => q.difficulty === 'extreme').length,
+    creatorXp: 0,
+    level: 1,
+    currentTierXp: 0,
+    tierMaxXp: 20,
+    percent: 0,
+    tierName: 'Banque'
   };
 }
 
@@ -3143,21 +3139,22 @@ const STATIC_BADGES_DEFINITIONS = [
   { id: 'patho_colon_parasite', category: 'pathology', icon: 'shield', name: 'Guerrier de la Lumière (colique)', description: 'Répondre à toutes les questions en lien avec les parasitoses coliques', organ: 'Digestif', tagOrEntity: 'parasitose', tier: 'gold' },
 
   // 4. Questions Extrêmes (PDF)
-  { id: 'extreme_first', category: 'extreme', icon: 'help-circle', name: 'Sherlock des Lames', description: 'Résoudre avec succès une énigme diagnostique de difficulté Extrême (+100 XP)', tier: 'gold' },
-
-  // 5. Voie du Créateur / Rédacteur (PDF Page 2)
-  { id: 'creator_1', category: 'creator', icon: 'edit-3', name: 'Première Encre', description: 'Rédiger et publier votre première question dans la banque collective', targetCount: 1, tier: 'bronze' },
-  { id: 'creator_10', category: 'creator', icon: 'feather', name: 'Plume d’Anapath', description: 'Rédiger 10 questions pour la banque de l’équipe', targetCount: 10, tier: 'silver' },
-  { id: 'creator_50', category: 'creator', icon: 'book-open', name: 'Bâtisseur de Banque', description: 'Rédiger 50 questions pour l’entraînement collectif', targetCount: 50, tier: 'gold' },
-  { id: 'creator_extreme', category: 'creator', icon: 'skull', name: 'Architecte Diabolique', description: 'Concevoir une question de difficulté Extrême avec indices (+50 XP Créateur)', targetCount: 1, tier: 'platinum' }
+  { id: 'extreme_first', category: 'extreme', icon: 'help-circle', name: 'Sherlock des Lames', description: 'Résoudre avec succès une énigme diagnostique de difficulté Extrême (+100 XP)', tier: 'gold' }
 ];
 
 // --- MOTEUR D'ÉVALUATION DYNAMIQUE DES BADGES & GESTION DES BADGES CONTESTÉS ---
 function getBadgesStatus() {
   if (!state.stats.badgeHistory) state.stats.badgeHistory = {};
+  if (!state.stats.unlockedBadges) state.stats.unlockedBadges = {};
+
+  // Nettoyage rétroactif des anciens trophées de rédaction
+  ['creator_1', 'creator_10', 'creator_50', 'creator_extreme'].forEach(oldId => {
+    delete state.stats.unlockedBadges[oldId];
+    delete state.stats.badgeHistory[oldId];
+  });
+
   const playerLvl = calculatePlayerLevel(state.stats.xp || 0).level;
   const streak = state.stats.streak || 1;
-  const creatorStats = getCreatorStats();
 
   const results = [];
 
@@ -3206,33 +3203,9 @@ function getBadgesStatus() {
       isNowMet = solvedExtreme >= 1;
       progressPercent = isNowMet ? 100 : 0;
       progressText = isNowMet ? '1 / 1 résolue' : '0 / 1 résolue';
-    } else if (b.category === 'creator') {
-      if (creatorStats.createdQuestions === 0) {
-        // Sécurité absolue : nettoyer tout badge créateur indûment présent sur ce compte (ex: compte d'un collègue)
-        if (state.stats.unlockedBadges && state.stats.unlockedBadges[b.id]) {
-          delete state.stats.unlockedBadges[b.id];
-        }
-        if (state.stats.badgeHistory && state.stats.badgeHistory[b.id]) {
-          delete state.stats.badgeHistory[b.id];
-        }
-        isNowMet = false;
-        progressPercent = 0;
-        progressText = `0 / ${b.targetCount || 1} rédigées`;
-      } else if (b.id === 'creator_extreme') {
-        isNowMet = creatorStats.extremeQuestions >= 1;
-        progressPercent = isNowMet ? 100 : 0;
-        progressText = `${creatorStats.extremeQuestions} / 1 rédigée`;
-      } else {
-        isNowMet = creatorStats.createdQuestions >= b.targetCount;
-        progressPercent = Math.min(100, Math.round((creatorStats.createdQuestions / b.targetCount) * 100));
-        progressText = `${creatorStats.createdQuestions} / ${b.targetCount} rédigées`;
-      }
     }
 
     let wasUnlocked = !!(state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
-    if (b.category === 'creator' && creatorStats.createdQuestions === 0) {
-      wasUnlocked = false;
-    }
     let status = 'locked';
 
     // Mécanique du badge contesté pour les badges de pathologie
@@ -3261,7 +3234,7 @@ function getBadgesStatus() {
   state.questions.forEach(q => { if (q.organ) organs.add(q.organ); });
   state.cases.forEach(c => { if (c.organ) organs.add(c.organ); });
 
-  const sortedOrgans = Array.from(organs).sort();
+  const sortedOrgans = Array.from(organs).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
   sortedOrgans.forEach(org => {
     const orgQuestions = state.questions.filter(q => (q.organ || "Autre") === org);
@@ -3347,12 +3320,6 @@ function getBadgesStatus() {
       progressPercent = Math.min(100, Math.round((streak / target) * 100));
       progressText = `${streak} / ${target} jours`;
       missingCount = Math.max(0, target - streak);
-    } else if (b.conditionType === 'creator') {
-      const target = b.targetCount || 5;
-      isNowMet = creatorStats.createdQuestions >= target;
-      progressPercent = Math.min(100, Math.round((creatorStats.createdQuestions / target) * 100));
-      progressText = `${creatorStats.createdQuestions} / ${target} rédigées`;
-      missingCount = Math.max(0, target - creatorStats.createdQuestions);
     } else {
       const wasUnlocked = !!(state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
       isNowMet = wasUnlocked;
@@ -3476,58 +3443,6 @@ function renderTrophiesView() {
     `;
   }
 
-  // 2. Rendu Carte Créateur (Voie du Rédacteur)
-  const creatorCard = document.getElementById('trophies-creator-card');
-  if (creatorCard) {
-    creatorCard.innerHTML = `
-      <div class="flex items-start justify-between">
-        <div class="flex items-center space-x-3.5">
-          <div class="w-12 h-12 rounded-2xl bg-teal-500/20 text-teal-300 border border-teal-500/40 flex items-center justify-center font-black text-xl shadow-inner">
-            ${creator.level}
-          </div>
-          <div>
-            <div class="flex items-center space-x-2">
-              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 uppercase tracking-wider">
-                ✍️ Voie du Rédacteur
-              </span>
-              <span class="text-xs text-slate-400 font-mono">Max Nv 100</span>
-            </div>
-            <h2 class="text-lg font-black text-white mt-0.5 tracking-tight">Maître Rédacteur</h2>
-          </div>
-        </div>
-        <div class="text-right">
-          <span class="text-xl font-black text-white font-mono">${creator.creatorXp}</span>
-          <span class="text-xs text-teal-400 font-bold block">XP Rédacteur</span>
-        </div>
-      </div>
-
-      <div class="space-y-1.5 pt-1">
-        <div class="flex items-center justify-between text-xs font-semibold text-slate-300">
-          <span>Progression Rédacteur Nv ${Math.min(100, creator.level + 1)}</span>
-          <span class="font-mono text-teal-300 font-bold">${creator.currentTierXp} / ${creator.tierMaxXp} XP (${creator.percent}%)</span>
-        </div>
-        <div class="w-full h-3 rounded-full bg-slate-950 border border-slate-800 overflow-hidden shadow-inner p-0.5">
-          <div class="h-full rounded-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-500" style="width: ${creator.percent}%;"></div>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-center">
-        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
-          <span class="text-xs font-bold text-teal-300 font-mono block">${creator.createdQuestions}</span>
-          <span class="text-[10px] text-slate-400">Questions créées</span>
-        </div>
-        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
-          <span class="text-xs font-bold text-purple-300 font-mono block">${creator.extremeQuestions}</span>
-          <span class="text-[10px] text-slate-400">Énigmes Extrêmes</span>
-        </div>
-        <div class="p-2 rounded-xl bg-slate-950/60 border border-slate-800">
-          <span class="text-xs font-bold text-indigo-300 font-mono block">+5 pts</span>
-          <span class="text-[10px] text-slate-400">Fixe / QCM créé</span>
-        </div>
-      </div>
-    `;
-  }
-
   // 3. Bandeau Trophées Contestés
   const contestedBanner = document.getElementById('trophies-contested-banner');
   if (contestedBanner) {
@@ -3645,7 +3560,7 @@ async function renderLeaderboard() {
       <div class="flex flex-wrap items-center gap-2">
         <div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
           <button onclick="setLeaderboardSort('xp')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'xp' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🏆 Par XP Joueur</button>
-          <button onclick="setLeaderboardSort('created')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'created' ? 'bg-teal-600 text-white shadow-sm' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">✍️ Par Rédactions</button>
+          <button onclick="setLeaderboardSort('correct')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'correct' ? 'bg-teal-600 text-white shadow-sm' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">✅ Par Réussites</button>
           <button onclick="setLeaderboardSort('streak')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'streak' ? 'bg-amber-600 text-white shadow-sm' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🔥 Par Série (Jours)</button>
         </div>
         <button onclick="renderLeaderboard()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center space-x-1.5 transition" title="Actualiser le classement depuis Supabase">
@@ -3787,12 +3702,12 @@ async function renderLeaderboard() {
   });
 
   // Tri
-  if (currentSort === 'created') {
-    list.sort((a, b) => (b.createdQuestions || 0) - (a.createdQuestions || 0) || (b.xp || 0) - (a.xp || 0));
+  if (currentSort === 'correct') {
+    list.sort((a, b) => (b.totalCorrect || 0) - (a.totalCorrect || 0) || (b.xp || 0) - (a.xp || 0));
   } else if (currentSort === 'streak') {
     list.sort((a, b) => (b.streak || 0) - (a.streak || 0) || (b.xp || 0) - (a.xp || 0));
   } else {
-    list.sort((a, b) => (b.xp || 0) - (a.xp || 0) || (b.createdQuestions || 0) - (a.createdQuestions || 0));
+    list.sort((a, b) => (b.xp || 0) - (a.xp || 0) || (b.totalCorrect || 0) - (a.totalCorrect || 0));
   }
 
   const bodyEl = document.getElementById('leaderboard-body');
@@ -3826,8 +3741,8 @@ async function renderLeaderboard() {
               <span class="text-[10px] text-slate-500">XP</span>
             </div>
             <div>
-              <span class="font-black text-teal-300 font-mono block">${top2.createdQuestions}</span>
-              <span class="text-[10px] text-slate-500">Créées</span>
+              <span class="font-black text-teal-300 font-mono block">${top2.totalCorrect || 0}</span>
+              <span class="text-[10px] text-slate-500">Réussies</span>
             </div>
             <div>
               <span class="font-black text-amber-400 font-mono block">${top2.streak}j</span>
@@ -3857,8 +3772,8 @@ async function renderLeaderboard() {
               <span class="text-[10px] text-amber-200/60 font-semibold">XP Totale</span>
             </div>
             <div>
-              <span class="font-black text-lg text-teal-300 font-mono block">${top1.createdQuestions}</span>
-              <span class="text-[10px] text-slate-400 font-semibold">Créées</span>
+              <span class="font-black text-lg text-teal-300 font-mono block">${top1.totalCorrect || 0}</span>
+              <span class="text-[10px] text-slate-400 font-semibold">Réussies</span>
             </div>
             <div>
               <span class="font-black text-lg text-amber-300 font-mono block">${top1.streak}j</span>
@@ -3887,8 +3802,8 @@ async function renderLeaderboard() {
               <span class="text-[10px] text-slate-500">XP</span>
             </div>
             <div>
-              <span class="font-black text-teal-300 font-mono block">${top3.createdQuestions}</span>
-              <span class="text-[10px] text-slate-500">Créées</span>
+              <span class="font-black text-teal-300 font-mono block">${top3.totalCorrect || 0}</span>
+              <span class="text-[10px] text-slate-500">Réussies</span>
             </div>
             <div>
               <span class="font-black text-amber-400 font-mono block">${top3.streak}j</span>
@@ -3946,7 +3861,7 @@ async function renderLeaderboard() {
           🏆 ${u.unlockedBadgesCount}
         </td>
         <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-teal-300">
-          ✍️ ${u.createdQuestions}
+          ✅ ${u.totalCorrect || 0}
         </td>
         <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-slate-300">
           🔥 ${u.streak}j
@@ -3969,7 +3884,7 @@ async function renderLeaderboard() {
               <th class="py-3 px-3.5">Niveau Joueur</th>
               <th class="py-3 px-3.5 text-right cursor-pointer hover:text-white" onclick="setLeaderboardSort('xp')">XP Totale ↕</th>
               <th class="py-3 px-3.5 text-center">Trophées</th>
-              <th class="py-3 px-3.5 text-center cursor-pointer hover:text-white" onclick="setLeaderboardSort('created')">Questions Rédigées ↕</th>
+              <th class="py-3 px-3.5 text-center cursor-pointer hover:text-white" onclick="setLeaderboardSort('correct')">Questions Réussies ↕</th>
               <th class="py-3 px-3.5 text-center cursor-pointer hover:text-white" onclick="setLeaderboardSort('streak')">Série ↕</th>
             </tr>
           </thead>
@@ -3986,12 +3901,10 @@ async function renderLeaderboard() {
 window.renderLeaderboard = renderLeaderboard;
 
 function getTrophyPillar(b) {
-  if (b.category === 'creator') return 'creator';
   if (b.category === 'organ' || b.category === 'pathology' || b.category === 'extreme') return 'organ';
   if (b.category === 'level' || b.category === 'streak') return 'progression';
   if (b.category === 'custom') {
     if (b.conditionType === 'organ_mastery') return 'organ';
-    if (b.conditionType === 'creator') return 'creator';
     return 'progression';
   }
   return 'organ';
@@ -4000,7 +3913,7 @@ window.getTrophyPillar = getTrophyPillar;
 
 function setTrophyCategoryFilter(cat) {
   state.trophyCategoryFilter = cat;
-  ['all', 'organ', 'creator', 'progression'].forEach(c => {
+  ['all', 'organ', 'progression'].forEach(c => {
     const btn = document.getElementById(`btn-trophy-cat-${c}`);
     if (btn) {
       const isSel = (c === cat);
@@ -4040,7 +3953,6 @@ function renderTrophiesGrid() {
   const counts = {
     all: { total: allBadges.length, unlocked: allBadges.filter(b => b.status === 'unlocked').length },
     organ: { total: 0, unlocked: 0 },
-    creator: { total: 0, unlocked: 0 },
     progression: { total: 0, unlocked: 0 }
   };
 
@@ -4052,7 +3964,7 @@ function renderTrophiesGrid() {
     }
   });
 
-  ['all', 'organ', 'creator', 'progression'].forEach(c => {
+  ['all', 'organ', 'progression'].forEach(c => {
     const el = document.getElementById(`trophy-cat-count-${c}`);
     if (el) {
       el.textContent = `${counts[c].unlocked} / ${counts[c].total} débloqués`;
@@ -4273,7 +4185,7 @@ function openCreateTrophyModal() {
   const organSelect = document.getElementById('trophy-input-organ');
   if (organSelect) {
     const tree = getHierarchyTree(true);
-    const organs = Object.keys(tree).sort();
+    const organs = Object.keys(tree).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
     organSelect.innerHTML = organs.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
   }
 
@@ -4331,7 +4243,7 @@ function openEditTrophyModal(badgeId) {
   const organSelect = document.getElementById('trophy-input-organ');
   if (organSelect) {
     const tree = getHierarchyTree(true);
-    const organs = Object.keys(tree).sort();
+    const organs = Object.keys(tree).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
     organSelect.innerHTML = organs.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
     if (badge.targetOrgan) organSelect.value = badge.targetOrgan;
   }
@@ -4561,12 +4473,12 @@ function renderPlayNewQuestionsFeed() {
         <div class="flex items-center space-x-2">
           <span class="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/40 text-[10px] font-black uppercase tracking-wider animate-pulse">
             <i data-lucide="flame" class="w-3 h-3 fill-orange-400"></i>
-            <span>Nouveautés de l'Équipe</span>
+            <span>Nouveautés de la Banque</span>
           </span>
           <span class="text-xs font-bold text-white">${unplayedQuestions.length} question(s) inédite(s)</span>
         </div>
         <p class="text-xs text-slate-300 leading-relaxed">
-          Des cas cliniques et QCM ont été rédigés par vos collègues que vous n'avez pas encore testés. Découvrez-les pour gagner de l'XP !
+          Des cas cliniques et QCM ont été ajoutés à la banque que vous n'avez pas encore testés. Découvrez-les pour vous entraîner !
         </p>
         <div class="flex flex-wrap gap-1.5 pt-1">
           ${organPills}
@@ -4615,16 +4527,7 @@ function getQuestionAuthorEmail(q) {
 }
 
 function getQuestionAuthorDisplayName(q) {
-  const author = getQuestionAuthorEmail(q);
-  if (author === 'belhadef.samy@gmail.com' || author.includes('samy')) {
-    return { email: 'belhadef.samy@gmail.com', name: 'Samy Belhadef', short: 'Samy' };
-  }
-  if (author === 'padoreau85@gmail.com' || author.includes('padoreau')) {
-    return { email: 'padoreau85@gmail.com', name: 'Pierre-Alain Doreau', short: 'Pierre-Alain' };
-  }
-  const prefix = author.split('@')[0];
-  const cap = prefix.charAt(0).toUpperCase() + prefix.slice(1);
-  return { email: author, name: cap, short: cap };
+  return { email: '', name: 'Banque', short: 'Banque' };
 }
 
 function getKnownAuthorsList() {
@@ -4707,52 +4610,100 @@ function onAuthorSelectChange() {
 }
 window.onAuthorSelectChange = onAuthorSelectChange;
 
-// --- RÉVISIONS DES QUESTIONS DES COLLÈGUES / ÉQUIPE ---
-function getColleaguesQuestions(activeOnly = true, toReviewTodayOnly = false) {
-  const currentEmail = getCurrentUserEmail();
+// --- DÉTECTION & RÉVISION DES QUESTIONS AVEC LAMES (IMAGES / HISTOLOGIE) ---
+function isSlideQuestion(q) {
+  if (!q) return false;
+  // 1. Tag #Lame ou dérivé
+  const hasSlideTag = Array.isArray(q.tags) && q.tags.some(t => {
+    const s = String(t).trim().toLowerCase();
+    return s === 'lame' || s === 'lames' || s.includes('lame') || s.includes('histol') || s.includes('virtuelle');
+  });
+  if (hasSlideTag) return true;
 
+  // 2. Images microscopiques attachées à l'énoncé ou à la correction
+  const hasImages = (Array.isArray(q.images) && q.images.length > 0) ||
+                    (Array.isArray(q.explanationImages) && q.explanationImages.length > 0) ||
+                    (Array.isArray(q.explanationimages) && q.explanationimages.length > 0);
+  return Boolean(hasImages);
+}
+window.isSlideQuestion = isSlideQuestion;
+
+function getSlideQuestions(activeOnly = true, toReviewTodayOnly = false) {
   return (state.questions || []).filter(q => {
     if (activeOnly && q.mastered) return false;
-
-    const author = getQuestionAuthorEmail(q);
-
-    if (currentEmail && author === currentEmail) {
-      return false; // Rédigée par soi-même
-    }
-
-    if (toReviewTodayOnly && isQuestionDoneToday(q)) {
-      return false; // Déjà révisée aujourd'hui
-    }
-
+    if (!isSlideQuestion(q)) return false;
+    if (toReviewTodayOnly && isQuestionDoneToday(q)) return false;
     return true;
   });
 }
+window.getSlideQuestions = getSlideQuestions;
 
-function getMyAuthoredQuestions(activeOnly = true) {
-  const currentEmail = getCurrentUserEmail();
-  if (!currentEmail) return [];
-
-  return (state.questions || []).filter(q => {
-    if (activeOnly && q.mastered) return false;
-
-    const author = getQuestionAuthorEmail(q);
-    return author === currentEmail;
-  });
-}
-
-function startColleaguesQuestionsSession() {
-  const allColleagues = getColleaguesQuestions(true, false);
-  if (allColleagues.length === 0) {
-    alert("Aucune question rédigée par un autre confrère pour l'instant.");
+function startSlideQuestionsSession() {
+  const allSlides = getSlideQuestions(true, false);
+  if (allSlides.length === 0) {
+    alert("Aucune question avec lame ou photographie microscopique dans la banque pour l'instant.\n\nPour en ajouter, insérez une image ou le tag #Lame lors de la création d'une question !");
     return;
   }
 
-  const toReview = getColleaguesQuestions(true, true);
-  const pool = toReview.length > 0 ? toReview : allColleagues;
+  // Priorité aux lames échues (dues) selon le rythme de répétition espacée
+  const dueSlides = allSlides.filter(q => isQuestionDue(q));
+  const pool = dueSlides.length > 0 ? dueSlides : allSlides;
 
   state.sessionReturnView = 'play';
-  launchQuizSession(pool, `Questions de l'Équipe • ${pool.length} Q 👥`);
+  launchQuizSession(pool, `Révision des Lames Microscopiques • ${pool.length} Q 🔬`);
 }
+window.startSlideQuestionsSession = startSlideQuestionsSession;
+window.startColleaguesQuestionsSession = startSlideQuestionsSession; // Rétrocompatibilité
+
+function getColleaguesQuestions(activeOnly = true, toReviewTodayOnly = false) {
+  return getSlideQuestions(activeOnly, toReviewTodayOnly);
+}
+
+function getMyAuthoredQuestions(activeOnly = true) {
+  return (state.questions || []).filter(q => (activeOnly ? !q.mastered : true));
+}
+
+// --- DÉTECTION & RÉVISION DES QUESTIONS IHC (IMMUNOHISTOCHIMIE) ---
+function isIHCQuestion(q) {
+  if (!q) return false;
+  // 1. Tag #IHC ou dérivé
+  const hasIHCTag = Array.isArray(q.tags) && q.tags.some(t => {
+    const s = String(t).trim().toLowerCase().replace(/^#/, '');
+    return s === 'ihc' || s.includes('ihc') || s.includes('immunohisto');
+  });
+  if (hasIHCTag) return true;
+
+  // 2. Énoncé, contexte ou explication mentionnant IHC / profil immunohistochimique
+  const text = `${q.question || ''} ${q.context || ''} ${q.explanation || ''}`.toLowerCase();
+  return text.includes('ihc') || text.includes('immunohistochimie') || text.includes('immunohistochimique');
+}
+window.isIHCQuestion = isIHCQuestion;
+
+function getIHCQuestions(activeOnly = true, toReviewTodayOnly = false) {
+  return (state.questions || []).filter(q => {
+    if (activeOnly && q.mastered) return false;
+    if (!isIHCQuestion(q)) return false;
+    if (toReviewTodayOnly && isQuestionDoneToday(q)) return false;
+    return true;
+  });
+}
+window.getIHCQuestions = getIHCQuestions;
+
+function startIHCQuestionsSession() {
+  const allIHC = getIHCQuestions(true, false);
+  if (allIHC.length === 0) {
+    alert("Aucune question d'immunohistochimie (#IHC) dans la banque pour l'instant.\n\nPour en ajouter, associez le tag #IHC lors de la création d'une question !");
+    return;
+  }
+
+  // Priorité aux questions IHC échues (dues) selon le rythme de répétition espacée
+  const dueIHC = allIHC.filter(q => isQuestionDue(q));
+  const pool = dueIHC.length > 0 ? dueIHC : allIHC;
+
+  state.sessionReturnView = 'play';
+  launchQuizSession(pool, `Révision Immunohistochimie (IHC) • ${pool.length} Q 🧪`);
+}
+window.startIHCQuestionsSession = startIHCQuestionsSession;
 
 // --- DASHBOARD DE RÉPÉTITION ESPACÉE ---
 function renderSpacedRepetitionDashboard() {
@@ -4760,8 +4711,11 @@ function renderSpacedRepetitionDashboard() {
   const dueQuestions = activeQuestions.filter(q => isQuestionDue(q));
   const masteredCount = state.questions.filter(q => q.mastered).length;
 
-  const allColleagues = getColleaguesQuestions(true, false);
-  const colleaguesToReview = getColleaguesQuestions(true, true);
+  const allSlides = activeQuestions.filter(q => isSlideQuestion(q));
+  const dueSlides = allSlides.filter(q => isQuestionDue(q));
+
+  const allIHC = activeQuestions.filter(q => isIHCQuestion(q));
+  const dueIHC = allIHC.filter(q => isQuestionDue(q));
 
   const dueBadge = document.getElementById('stat-due-today-count');
   if (dueBadge) dueBadge.textContent = dueQuestions.length;
@@ -4772,34 +4726,34 @@ function renderSpacedRepetitionDashboard() {
   const masteredBadge = document.getElementById('stat-mastered-count');
   if (masteredBadge) masteredBadge.textContent = masteredCount;
 
-  // Badge et bouton Questions des Collègues
-  const colleaguesBadge = document.getElementById('stat-colleagues-count');
-  if (colleaguesBadge) colleaguesBadge.textContent = colleaguesToReview.length;
+  // 2. Module Réviser des Lames (ex-Questions des Collègues)
+  const slidesBadge = document.getElementById('stat-slides-count') || document.getElementById('stat-colleagues-count');
+  if (slidesBadge) slidesBadge.textContent = allSlides.length;
 
-  const btnColleagues = document.getElementById('btn-play-colleagues');
-  const iconColleagues = document.getElementById('icon-play-colleagues');
-  if (btnColleagues) {
-    const isDone = (colleaguesToReview.length === 0);
-    btnColleagues.disabled = isDone;
-    if (iconColleagues) {
-      if (isDone) iconColleagues.classList.add('hidden');
-      else iconColleagues.classList.remove('hidden');
+  const btnSlides = document.getElementById('btn-play-slides') || document.getElementById('btn-play-colleagues');
+  const iconSlides = document.getElementById('icon-play-slides') || document.getElementById('icon-play-colleagues');
+  if (btnSlides) {
+    const isDone = (allSlides.length === 0);
+    btnSlides.disabled = isDone;
+    if (iconSlides) {
+      if (isDone) iconSlides.classList.add('hidden');
+      else iconSlides.classList.remove('hidden');
     }
-    const labelC = document.getElementById('label-colleagues-count');
-    if (labelC) {
-      if (allColleagues.length === 0) {
-        labelC.textContent = `Aucune question de collègue pour le moment`;
-      } else if (colleaguesToReview.length > 0) {
-        labelC.textContent = `Réviser les questions de l'équipe (${colleaguesToReview.length} à faire)`;
+    const labelS = document.getElementById('label-slides-count') || document.getElementById('label-colleagues-count');
+    if (labelS) {
+      if (allSlides.length === 0) {
+        labelS.textContent = `Aucune lame disponible`;
+      } else if (dueSlides.length > 0) {
+        labelS.textContent = `Réviser les lames (${dueSlides.length} à revoir)`;
       } else {
-        labelC.textContent = `À jour aujourd'hui`;
+        labelS.textContent = `Tester toutes les lames (${allSlides.length})`;
       }
     }
   }
 
-  const btnShortcut = document.getElementById('btn-play-colleagues-shortcut');
+  const btnShortcut = document.getElementById('btn-play-slides-shortcut') || document.getElementById('btn-play-colleagues-shortcut');
   if (btnShortcut) {
-    const isDone = (colleaguesToReview.length === 0);
+    const isDone = (allSlides.length === 0);
     btnShortcut.disabled = isDone;
     if (isDone) {
       btnShortcut.classList.add('opacity-40', 'cursor-not-allowed');
@@ -4808,11 +4762,54 @@ function renderSpacedRepetitionDashboard() {
     }
   }
 
-  const labelShortcut = document.getElementById('label-colleagues-shortcut');
+  const labelShortcut = document.getElementById('label-slides-shortcut') || document.getElementById('label-colleagues-shortcut');
   if (labelShortcut) {
-    labelShortcut.textContent = colleaguesToReview.length > 0 
-      ? `Questions des Collègues (${colleaguesToReview.length})` 
-      : `Questions des Collègues (À jour)`;
+    labelShortcut.textContent = allSlides.length > 0 
+      ? `Réviser les Lames (${allSlides.length})` 
+      : `Réviser les Lames (0)`;
+  }
+
+  // 3. Module Révision IHC
+  const ihcBadge = document.getElementById('stat-ihc-count');
+  if (ihcBadge) ihcBadge.textContent = allIHC.length;
+
+  const btnIHC = document.getElementById('btn-play-ihc');
+  const iconIHC = document.getElementById('icon-play-ihc');
+  if (btnIHC) {
+    const isDone = (allIHC.length === 0);
+    btnIHC.disabled = isDone;
+    if (iconIHC) {
+      if (isDone) iconIHC.classList.add('hidden');
+      else iconIHC.classList.remove('hidden');
+    }
+    const labelIHC = document.getElementById('label-ihc-count');
+    if (labelIHC) {
+      if (allIHC.length === 0) {
+        labelIHC.textContent = `Aucune question IHC`;
+      } else if (dueIHC.length > 0) {
+        labelIHC.textContent = `Réviser l'IHC (${dueIHC.length} à revoir)`;
+      } else {
+        labelIHC.textContent = `Tester tout l'IHC (${allIHC.length})`;
+      }
+    }
+  }
+
+  const btnIHCShortcut = document.getElementById('btn-play-ihc-shortcut');
+  if (btnIHCShortcut) {
+    const isDone = (allIHC.length === 0);
+    btnIHCShortcut.disabled = isDone;
+    if (isDone) {
+      btnIHCShortcut.classList.add('opacity-40', 'cursor-not-allowed');
+    } else {
+      btnIHCShortcut.classList.remove('opacity-40', 'cursor-not-allowed');
+    }
+  }
+
+  const labelIHCShortcut = document.getElementById('label-ihc-shortcut');
+  if (labelIHCShortcut) {
+    labelIHCShortcut.textContent = allIHC.length > 0 
+      ? `Réviser l'IHC (${allIHC.length})` 
+      : `Réviser l'IHC (0)`;
   }
 
   const btnStartDue = document.getElementById('btn-play-due-today');
@@ -4912,15 +4909,13 @@ function getHierarchyTree(includeMastered = false, filterMode = null) {
   const mode = filterMode || (state.playHierarchy && state.playHierarchy.filterMode) || 'all';
 
   let activeQuestions = state.questions.filter(q => includeMastered || !q.mastered);
-  if (mode === 'colleagues') {
-    const colleaguesSet = new Set(getColleaguesQuestions(includeMastered).map(q => q.id));
-    activeQuestions = activeQuestions.filter(q => colleaguesSet.has(q.id));
-  } else if (mode === 'mine') {
-    const mySet = new Set(getMyAuthoredQuestions(includeMastered).map(q => q.id));
-    activeQuestions = activeQuestions.filter(q => mySet.has(q.id));
+  if (mode === 'slides') {
+    activeQuestions = activeQuestions.filter(q => isSlideQuestion(q));
+  } else if (mode === 'ihc') {
+    activeQuestions = activeQuestions.filter(q => isIHCQuestion(q));
   }
 
-  const cases = (mode === 'mine' || mode === 'colleagues') ? [] : state.cases;
+  const cases = (mode === 'slides' || mode === 'ihc') ? [] : state.cases;
   const allItems = [...activeQuestions, ...cases];
 
   allItems.forEach(q => {
@@ -4955,17 +4950,15 @@ function renderHierarchySelector() {
 
   const currentMode = (state.playHierarchy && state.playHierarchy.filterMode) || 'all';
   const tree = getHierarchyTree(false, currentMode);
-  const organs = Object.keys(tree).sort();
+  const organs = Object.keys(tree).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
   const allActiveCount = state.questions.filter(q => !q.mastered).length + state.cases.length;
-  const colleaguesTotal = getColleaguesQuestions(true, false).length;
-  const colleaguesToReview = getColleaguesQuestions(true, true).length;
-  const colleaguesBadgeText = (colleaguesToReview === 0 && colleaguesTotal > 0) ? 'À jour' : `${colleaguesToReview}`;
-  const myCount = getMyAuthoredQuestions(true).length;
+  const slidesActiveCount = state.questions.filter(q => !q.mastered && isSlideQuestion(q)).length;
+  const ihcActiveCount = state.questions.filter(q => !q.mastered && isIHCQuestion(q)).length;
 
   let html = `<div class="space-y-4">`;
 
-  // Onglets de filtre de provenance : Toutes / Questions de l'équipe / Mes rédactions
+  // Onglets de filtre : Toutes les questions / Questions avec Lames / Questions IHC
   html += `
     <div class="flex flex-wrap items-center gap-2 pb-2 border-b border-slate-800/80">
       <span class="text-xs font-bold text-slate-400">Filtrer par :</span>
@@ -4978,38 +4971,46 @@ function renderHierarchySelector() {
         <span class="text-[10px] px-1.5 py-0.2 rounded-full ${currentMode === 'all' ? 'bg-slate-700 text-white' : 'bg-slate-900 text-slate-400'}">${allActiveCount}</span>
       </button>
 
-      <button type="button" onclick="setHierarchyFilterMode('colleagues')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
-        currentMode === 'colleagues'
+      <button type="button" onclick="setHierarchyFilterMode('slides')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
+        currentMode === 'slides'
           ? 'bg-indigo-600 text-white border border-indigo-400 shadow-sm shadow-indigo-600/30'
           : 'bg-slate-950 text-indigo-400 hover:text-white border border-slate-800'
       }">
-        <i data-lucide="users" class="w-3.5 h-3.5"></i>
-        <span>Rédigées par mes collègues</span>
-        <span class="text-[10px] px-1.5 py-0.2 rounded-full ${currentMode === 'colleagues' ? 'bg-indigo-700 text-white' : 'bg-slate-900 text-indigo-300'}">${colleaguesBadgeText}</span>
+        <i data-lucide="microscope" class="w-3.5 h-3.5"></i>
+        <span>Questions avec Lames</span>
+        <span class="text-[10px] px-1.5 py-0.2 rounded-full ${currentMode === 'slides' ? 'bg-indigo-700 text-white' : 'bg-slate-900 text-indigo-300'}">${slidesActiveCount}</span>
       </button>
 
-      ${myCount > 0 ? `
-      <button type="button" onclick="setHierarchyFilterMode('mine')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
-        currentMode === 'mine'
-          ? 'bg-teal-600 text-white border border-teal-400 shadow-sm shadow-teal-600/30'
-          : 'bg-slate-950 text-teal-400 hover:text-white border border-slate-800'
+      <button type="button" onclick="setHierarchyFilterMode('ihc')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
+        currentMode === 'ihc'
+          ? 'bg-violet-600 text-white border border-violet-400 shadow-sm shadow-violet-600/30'
+          : 'bg-slate-950 text-violet-400 hover:text-white border border-slate-800'
       }">
-        <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
-        <span>Mes rédactions</span>
-        <span class="text-[10px] px-1.5 py-0.2 rounded-full ${currentMode === 'mine' ? 'bg-teal-700 text-white' : 'bg-slate-900 text-teal-300'}">${myCount}</span>
+        <i data-lucide="flask-conical" class="w-3.5 h-3.5"></i>
+        <span>Questions IHC</span>
+        <span class="text-[10px] px-1.5 py-0.2 rounded-full ${currentMode === 'ihc' ? 'bg-violet-700 text-white' : 'bg-slate-900 text-violet-300'}">${ihcActiveCount}</span>
       </button>
-      ` : ''}
     </div>
   `;
 
   if (organs.length === 0) {
-    if (currentMode === 'colleagues') {
+    if (currentMode === 'slides') {
       html += `
         <div class="p-6 text-center bg-indigo-500/10 rounded-xl border border-indigo-500/30">
-          <i data-lucide="users" class="w-8 h-8 mx-auto mb-2 text-indigo-400"></i>
-          <h4 class="text-sm font-bold text-indigo-300">Aucune question active rédigée par un collègue</h4>
+          <i data-lucide="microscope" class="w-8 h-8 mx-auto mb-2 text-indigo-400"></i>
+          <h4 class="text-sm font-bold text-indigo-300">Aucune question avec lame ou image</h4>
           <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
-            Dès qu'un co-interne (Samy ou autre) rédige et publie une question dans la banque collective, elle apparaîtra ici classée par organe !
+            Toutes les questions comportant des photographies microscopiques ou le tag #Lame apparaîtront ici classées par organe !
+          </p>
+        </div>
+      `;
+    } else if (currentMode === 'ihc') {
+      html += `
+        <div class="p-6 text-center bg-violet-500/10 rounded-xl border border-violet-500/30">
+          <i data-lucide="flask-conical" class="w-8 h-8 mx-auto mb-2 text-violet-400"></i>
+          <h4 class="text-sm font-bold text-violet-300">Aucune question d'immunohistochimie</h4>
+          <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
+            Toutes les questions comportant des profils d'anticorps ou le tag #IHC apparaîtront ici classées par organe !
           </p>
         </div>
       `;
@@ -5082,7 +5083,7 @@ function renderHierarchySelector() {
   // Niveau 2 (Sous-organe / Catégorie - Max 2 Niveaux pour éviter les spoilers de diagnostic)
   if (state.playHierarchy.selectedOrgan) {
     const orgObj = tree[state.playHierarchy.selectedOrgan];
-    const categories = Object.keys(orgObj.categories).sort();
+    const categories = Object.keys(orgObj.categories).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
     html += `
       <div class="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3">
@@ -5185,12 +5186,10 @@ function startHierarchySession(level, organ, category, entity) {
   state.sessionReturnView = isFromBank ? 'bank' : 'play';
 
   let activeQuestions = state.questions.filter(q => !q.mastered);
-  if (!isFromBank && state.playHierarchy && state.playHierarchy.filterMode === 'colleagues') {
-    const colleaguesSet = new Set(getColleaguesQuestions(false).map(q => q.id));
-    activeQuestions = activeQuestions.filter(q => colleaguesSet.has(q.id));
-  } else if (!isFromBank && state.playHierarchy && state.playHierarchy.filterMode === 'mine') {
-    const mySet = new Set(getMyAuthoredQuestions(false).map(q => q.id));
-    activeQuestions = activeQuestions.filter(q => mySet.has(q.id));
+  if (!isFromBank && state.playHierarchy && state.playHierarchy.filterMode === 'slides') {
+    activeQuestions = activeQuestions.filter(q => isSlideQuestion(q));
+  } else if (!isFromBank && state.playHierarchy && state.playHierarchy.filterMode === 'ihc') {
+    activeQuestions = activeQuestions.filter(q => isIHCQuestion(q));
   }
 
   let matchingQuestions = [];
@@ -5356,15 +5355,6 @@ function renderSessionQuestion() {
   } else {
     formatBadge.textContent = (q.format === 'piege' ? "⚠️ Vrai / Faux" : "🔘 QCU (Choix Unique)");
     formatBadge.className = "text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20";
-  }
-
-  // Affichage du Rédacteur de la question
-  const authorInfo = getQuestionAuthorDisplayName(q);
-  const authorBadge = document.getElementById('session-author-badge');
-  const authorNameEl = document.getElementById('session-author-name');
-  if (authorBadge && authorNameEl) {
-    authorNameEl.textContent = `Rédigé par ${authorInfo.short}`;
-    authorBadge.title = `Rédacteur : ${authorInfo.name} (${authorInfo.email})`;
   }
 
   // Bouton de modification directe si compte Rédacteur/Créateur
@@ -6172,6 +6162,9 @@ function updateEditorDatalists() {
     'datalist-dp-categories',
     'datalist-dp-entities'
   );
+
+  // 3. Mettre à jour dynamiquement les pré-phrases dédiées à cet organe
+  renderStatementTemplates();
 }
 window.updateEditorDatalists = updateEditorDatalists;
 
@@ -6427,6 +6420,10 @@ async function attachFilesToEditor(files) {
       url: url,
       caption: defaultCaption
     });
+  }
+  if (!state.editorSelectedTags.has('Lame')) {
+    state.editorSelectedTags.add('Lame');
+    renderEditorTagsSelector();
   }
   renderEditorUploadedImages();
   showToast(`📸 ${validFiles.length} lame${validFiles.length > 1 ? 's' : ''} ajoutée${validFiles.length > 1 ? 's' : ''} à la question !`);
@@ -6774,6 +6771,9 @@ async function handleSaveQuestionForm(e) {
   const explanation = document.getElementById('form-q-explanation').value.trim();
   const trap = document.getElementById('form-q-trap').value.trim();
   const tags = Array.from(state.editorSelectedTags);
+  if ((state.editorUploadedImages.length > 0 || (state.editorUploadedExplanationImages && state.editorUploadedExplanationImages.length > 0)) && !tags.some(t => String(t).trim().toLowerCase() === 'lame')) {
+    tags.unshift('Lame');
+  }
   const diffEl = document.getElementById('form-q-difficulty');
   const difficulty = diffEl ? diffEl.value : 'facile';
   const cluesEl = document.getElementById('form-q-extreme-clues');
@@ -6903,27 +6903,32 @@ async function handleSaveQuestionForm(e) {
     savedQuestion = newQ;
   }
 
-  // 1. Sauvegarde locale immédiate dans le navigateur
+  // 1. Sauvegarde locale immédiate dans le navigateur (filet de sécurité)
   saveQuestions();
 
-  // 2. Synchronisation Supabase en arrière-plan sans bloquer
+  // 2. Synchronisation Supabase directe dans la base de données (méthode Zenipad)
+  let cloudSuccess = false;
   let cloudFeedback = "";
   if (supabaseClient && savedQuestion) {
     try {
-      const res = await Promise.race([
-        dbUpsertQuestion(savedQuestion),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
-      ]);
-      if (res && res.error) {
-        cloudFeedback = `\n\n⚠️ Info Cloud : Sauvegardé en local sur cet appareil, mais synchronisation en ligne non effectuée ("${res.error.message}").`;
+      const res = await dbUpsertQuestion(savedQuestion);
+      if (res && res.success) {
+        cloudSuccess = true;
+      } else if (res && res.error) {
+        cloudFeedback = `\n\n⚠️ Info Cloud : Sauvegardé en local, erreur base en ligne : "${res.error.message || res.error}".`;
       }
     } catch(err) {
-      console.warn("Supabase background sync:", err);
+      console.warn("Supabase direct sync error:", err);
+      cloudFeedback = `\n\n⚠️ Info Cloud : Sauvegardé en local (erreur réseau).`;
     }
   }
 
-  // 3. Pop-up d'alerte pour être sûr que c'est bien enregistré
-  alert("Question enregistrée avec succès !" + cloudFeedback);
+  // 3. Pop-up d'alerte pour confirmer l'enregistrement direct
+  if (cloudSuccess) {
+    alert("✅ Question enregistrée directement dans la base de données (Cloud) !");
+  } else {
+    alert("Question enregistrée avec succès !" + cloudFeedback);
+  }
 
   // 4. Réinitialiser le formulaire
   resetQuestionForm();
@@ -6964,7 +6969,7 @@ async function handleSaveQuestionForm(e) {
   }
 }
 
-// --- MODÈLES DE PHRASES PRÉ-CONSTRUITES D'ÉNONCÉ (GÉNÉRALISTES / TOUS ORGANES) ---
+// --- MODÈLES DE PHRASES PRÉ-CONSTRUITES D'ÉNONCÉ (GÉNÉRALISTES & PAR ORGANE) ---
 function getSavedStatementTemplates() {
   const stored = localStorage.getItem(STORAGE_KEY_STATEMENT_TEMPLATES) || localStorage.getItem("pathotrainer_statement_templates_v1");
   if (stored) {
@@ -6975,7 +6980,11 @@ function getSavedStatementTemplates() {
       }
     } catch(e) {}
   }
-  return [];
+  return [
+    "Quelles sont les propositions exactes concernant :",
+    "Quel est le diagnostic le plus probable devant cet aspect histologique :",
+    "Parmi les diagnostics différentiels suivants, lequel devez-vous éliminer en priorité :"
+  ];
 }
 
 function saveStatementTemplates() {
@@ -6987,43 +6996,194 @@ function saveStatementTemplates() {
   }
 }
 
+function getSavedOrganStatementTemplates() {
+  const stored = localStorage.getItem(STORAGE_KEY_ORGAN_STATEMENT_TEMPLATES);
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch(e) {}
+  }
+  return JSON.parse(JSON.stringify(DEFAULT_ORGAN_STATEMENT_TEMPLATES));
+}
+
+function saveOrganStatementTemplates() {
+  localStorage.setItem(STORAGE_KEY_ORGAN_STATEMENT_TEMPLATES, JSON.stringify(state.organStatementTemplates || {}));
+  if (state.currentUser) {
+    if (!state.stats) state.stats = {};
+    state.stats.organStatementTemplates = state.organStatementTemplates || {};
+    saveStats();
+  }
+}
+
+function getOrganTemplatesFor(organName) {
+  if (!state.organStatementTemplates) {
+    state.organStatementTemplates = getSavedOrganStatementTemplates();
+  }
+  if (!organName || !organName.trim()) return [];
+  const clean = organName.trim().toLowerCase();
+  for (const [key, list] of Object.entries(state.organStatementTemplates)) {
+    if (key.trim().toLowerCase() === clean && Array.isArray(list)) {
+      return list;
+    }
+  }
+  return [];
+}
+
+function getOrganExactKey(organName) {
+  if (!state.organStatementTemplates) {
+    state.organStatementTemplates = getSavedOrganStatementTemplates();
+  }
+  if (!organName || !organName.trim()) return organName || '';
+  const clean = organName.trim().toLowerCase();
+  for (const key of Object.keys(state.organStatementTemplates)) {
+    if (key.trim().toLowerCase() === clean) return key;
+  }
+  return organName.trim();
+}
+
 function renderStatementTemplates() {
   const container = document.getElementById('statement-templates-bar');
   if (!container) return;
 
-  if (!state.statementTemplates) {
-    state.statementTemplates = getSavedStatementTemplates();
-  }
+  if (!state.statementTemplates) state.statementTemplates = getSavedStatementTemplates();
+  if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
 
-  // Nettoyer les anciennes phrases pré-faites si encore présentes en mémoire
+  // Nettoyage éventuel des templates obsolètes
   state.statementTemplates = state.statementTemplates.filter(t => typeof t === 'string' && t.trim().length > 0 && !OLD_DEFAULT_STATEMENT_TEMPLATES.includes(t.trim()));
 
-  if (state.statementTemplates.length === 0) {
-    container.innerHTML = `
-      <div class="text-[11px] text-slate-500 italic py-1 flex items-center space-x-1.5">
-        <i data-lucide="info" class="w-3.5 h-3.5 text-slate-500 shrink-0"></i>
-        <span>Aucune phrase type enregistrée. Cliquez sur <strong>+ Ajouter une phrase type</strong> pour créer vos modèles réutilisables sur tous les organes.</span>
+  const organInput = document.getElementById('form-q-organ');
+  const currentOrgan = (organInput ? organInput.value : '').trim();
+
+  const indicator = document.getElementById('templates-organ-indicator');
+  const labelAddOrgan = document.getElementById('label-add-organ-template');
+
+  let html = '';
+
+  if (currentOrgan) {
+    if (indicator) {
+      indicator.textContent = `🏷️ ${currentOrgan}`;
+      indicator.classList.remove('hidden');
+    }
+    if (labelAddOrgan) {
+      labelAddOrgan.textContent = `+ Pré-phrase (${currentOrgan})`;
+    }
+
+    const organList = getOrganTemplatesFor(currentOrgan);
+
+    // 1. Pré-phrases propres à l'organe sélectionné
+    html += `
+      <div class="flex items-center space-x-1 shrink-0">
+        <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 flex items-center space-x-1">
+          <i data-lucide="tag" class="w-3 h-3 text-amber-400"></i>
+          <span>${escapeHtml(currentOrgan)} :</span>
+        </span>
       </div>
     `;
-    if (window.lucide) lucide.createIcons();
-    return;
+
+    if (organList.length > 0) {
+      html += organList.map((tmpl, idx) => `
+        <div class="inline-flex items-center bg-amber-500/10 border border-amber-500/30 hover:border-amber-400 rounded-xl px-2.5 py-1 text-xs text-amber-200 hover:text-white transition group shrink-0 shadow-sm">
+          <button type="button" onclick="applyOrganStatementTemplate('${escapeJsString(currentOrgan)}', ${idx})" class="font-medium hover:text-amber-100 transition text-left flex items-center space-x-1" title="Cliquer pour insérer dans l'énoncé">
+            <i data-lucide="sparkles" class="w-3 h-3 text-amber-400 shrink-0"></i>
+            <span>${escapeHtml(tmpl)}</span>
+          </button>
+          <button type="button" onclick="event.stopPropagation(); deleteOrganStatementTemplate('${escapeJsString(currentOrgan)}', ${idx})" class="ml-1.5 text-amber-400/60 hover:text-rose-400 transition opacity-60 group-hover:opacity-100 p-0.5 rounded" title="Supprimer cette pré-phrase">
+            <i data-lucide="x" class="w-2.5 h-2.5"></i>
+          </button>
+        </div>
+      `).join('');
+    } else {
+      html += `
+        <button type="button" onclick="promptAddNewOrganStatementTemplate('${escapeJsString(currentOrgan)}')" class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl border border-dashed border-amber-500/40 hover:border-amber-400 bg-amber-500/5 text-amber-300 hover:text-white text-xs transition shrink-0">
+          <i data-lucide="plus" class="w-3 h-3"></i>
+          <span>+ Créer la 1ère pré-phrase pour ${escapeHtml(currentOrgan)}</span>
+        </button>
+      `;
+    }
+
+    // Séparateur vertical
+    html += `<span class="h-4 w-px bg-slate-800 shrink-0 mx-1"></span>`;
+
+    // 2. Modèles de phrases générales (tous organes)
+    html += `
+      <div class="flex items-center space-x-1 shrink-0">
+        <span class="text-[10px] font-bold text-teal-400 uppercase tracking-wider px-1.5 py-0.5 rounded bg-teal-500/10 border border-teal-500/20">
+          🌐 Générales :
+        </span>
+      </div>
+    `;
+
+    html += state.statementTemplates.map((tmpl, idx) => `
+      <div class="inline-flex items-center bg-slate-900 border border-slate-800 hover:border-teal-500/50 rounded-xl px-2.5 py-1 text-xs text-slate-300 hover:text-white transition group shrink-0 shadow-sm">
+        <button type="button" onclick="applyStatementTemplate(${idx})" class="font-medium hover:text-teal-300 transition text-left flex items-center space-x-1" title="Cliquer pour insérer dans l'énoncé">
+          <i data-lucide="sparkles" class="w-3 h-3 text-teal-400 shrink-0"></i>
+          <span>${escapeHtml(tmpl)}</span>
+        </button>
+        <button type="button" onclick="event.stopPropagation(); deleteStatementTemplate(${idx})" class="ml-1.5 text-slate-500 hover:text-rose-400 transition opacity-60 group-hover:opacity-100 p-0.5 rounded" title="Supprimer cette phrase type">
+          <i data-lucide="x" class="w-2.5 h-2.5"></i>
+        </button>
+      </div>
+    `).join('');
+
+  } else {
+    // Si aucun organe n'est encore saisi
+    if (indicator) indicator.classList.add('hidden');
+    if (labelAddOrgan) labelAddOrgan.textContent = `+ Pré-phrase Organe`;
+
+    html += `
+      <div class="flex items-center space-x-1 shrink-0">
+        <span class="text-[10px] font-bold text-teal-400 uppercase tracking-wider px-1.5 py-0.5 rounded bg-teal-500/10 border border-teal-500/20">
+          🌐 Générales :
+        </span>
+      </div>
+    `;
+
+    html += state.statementTemplates.map((tmpl, idx) => `
+      <div class="inline-flex items-center bg-slate-900 border border-slate-800 hover:border-teal-500/50 rounded-xl px-2.5 py-1 text-xs text-slate-300 hover:text-white transition group shrink-0 shadow-sm">
+        <button type="button" onclick="applyStatementTemplate(${idx})" class="font-medium hover:text-teal-300 transition text-left flex items-center space-x-1" title="Cliquer pour insérer dans l'énoncé">
+          <i data-lucide="sparkles" class="w-3 h-3 text-teal-400 shrink-0"></i>
+          <span>${escapeHtml(tmpl)}</span>
+        </button>
+        <button type="button" onclick="event.stopPropagation(); deleteStatementTemplate(${idx})" class="ml-1.5 text-slate-500 hover:text-rose-400 transition opacity-60 group-hover:opacity-100 p-0.5 rounded" title="Supprimer cette phrase type">
+          <i data-lucide="x" class="w-2.5 h-2.5"></i>
+        </button>
+      </div>
+    `).join('');
+
+    // Afficher des pastilles d'accès rapide aux organes existants
+    const organKeys = Object.keys(state.organStatementTemplates || {}).filter(k => (state.organStatementTemplates[k] || []).length > 0);
+    if (organKeys.length > 0) {
+      html += `<span class="h-4 w-px bg-slate-800 shrink-0 mx-1"></span>`;
+      html += `
+        <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider shrink-0">
+          Pré-phrases d'organes :
+        </span>
+      `;
+      html += organKeys.map(org => `
+        <button type="button" onclick="selectOrganForTemplates('${escapeJsString(org)}')" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-[11px] font-medium transition shrink-0">
+          <i data-lucide="tag" class="w-3 h-3 text-amber-400"></i>
+          <span>${escapeHtml(org)} (${state.organStatementTemplates[org].length})</span>
+        </button>
+      `).join('');
+    }
   }
 
-  container.innerHTML = state.statementTemplates.map((tmpl, idx) => `
-    <div class="inline-flex items-center bg-slate-900 border border-slate-800 hover:border-teal-500/50 rounded-xl px-2.5 py-1 text-xs text-slate-300 hover:text-white transition group shrink-0 shadow-sm">
-      <button type="button" onclick="applyStatementTemplate(${idx})" class="font-medium hover:text-teal-300 transition text-left flex items-center space-x-1" title="Cliquer pour insérer dans l'énoncé">
-        <i data-lucide="sparkles" class="w-3 h-3 text-teal-400 shrink-0"></i>
-        <span>${escapeHtml(tmpl)}</span>
-      </button>
-      <button type="button" onclick="event.stopPropagation(); deleteStatementTemplate(${idx})" class="ml-1.5 text-slate-500 hover:text-rose-400 transition opacity-60 group-hover:opacity-100 p-0.5 rounded" title="Supprimer cette phrase type">
-        <i data-lucide="x" class="w-2.5 h-2.5"></i>
-      </button>
-    </div>
-  `).join('');
-
+  container.innerHTML = html;
   if (window.lucide) lucide.createIcons();
 }
 window.renderStatementTemplates = renderStatementTemplates;
+
+function selectOrganForTemplates(organ) {
+  const organInput = document.getElementById('form-q-organ');
+  if (organInput) {
+    organInput.value = organ;
+    updateEditorDatalists();
+  }
+}
+window.selectOrganForTemplates = selectOrganForTemplates;
 
 function applyStatementTemplate(idx) {
   if (!state.statementTemplates) state.statementTemplates = getSavedStatementTemplates();
@@ -7034,7 +7194,6 @@ function applyStatementTemplate(idx) {
   if (!input) return;
 
   let finalText = tmpl.trim();
-  // Ne jamais ajouter le nom de la lésion automatiquement
   if (!finalText.endsWith('?') && !finalText.endsWith(':') && !finalText.endsWith('.')) {
     finalText = `${finalText} `;
   }
@@ -7045,6 +7204,32 @@ function applyStatementTemplate(idx) {
   showRewardToast("Énoncé inséré !", 'sparkles');
 }
 window.applyStatementTemplate = applyStatementTemplate;
+
+function applyOrganStatementTemplate(organ, idx) {
+  const list = getOrganTemplatesFor(organ);
+  const tmpl = list[idx];
+  if (!tmpl) return;
+
+  const organInput = document.getElementById('form-q-organ');
+  if (organInput && !organInput.value.trim()) {
+    organInput.value = organ;
+    updateEditorDatalists();
+  }
+
+  const input = document.getElementById('form-q-text');
+  if (!input) return;
+
+  let finalText = tmpl.trim();
+  if (!finalText.endsWith('?') && !finalText.endsWith(':') && !finalText.endsWith('.')) {
+    finalText = `${finalText} `;
+  }
+
+  input.value = finalText;
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+  showRewardToast(`Énoncé [${organ}] inséré !`, 'sparkles');
+}
+window.applyOrganStatementTemplate = applyOrganStatementTemplate;
 
 function promptAddNewStatementTemplate() {
   const val = prompt("Saisissez votre nouvelle phrase type d'énoncé (disponible pour tous les organes) :\n\n(ex: 'Quelles sont les propositions exactes concernant', 'Quel est le diagnostic le plus probable devant')");
@@ -7067,13 +7252,222 @@ function promptAddNewStatementTemplate() {
 window.promptAddNewStatementTemplate = promptAddNewStatementTemplate;
 
 function deleteStatementTemplate(idx) {
-  if (!confirm("Voulez-vous supprimer cette phrase type ?")) return;
+  if (!confirm("Voulez-vous supprimer cette phrase type générale ?")) return;
   if (!state.statementTemplates) return;
   state.statementTemplates.splice(idx, 1);
   saveStatementTemplates();
   renderStatementTemplates();
   showRewardToast("Phrase type supprimée.", 'trash-2');
 }
+window.deleteStatementTemplate = deleteStatementTemplate;
+
+function promptAddNewOrganStatementTemplate(specificOrgan = null) {
+  let targetOrgan = specificOrgan;
+  if (!targetOrgan) {
+    const organInput = document.getElementById('form-q-organ');
+    targetOrgan = organInput ? organInput.value.trim() : '';
+  }
+
+  if (!targetOrgan) {
+    const inputOrg = prompt("Pour quel organe souhaitez-vous créer une pré-phrase ?\n\n(ex: Sein, Placenta, Col utérin, Rein, Ovaire...)");
+    if (inputOrg === null) return;
+    targetOrgan = inputOrg.trim();
+  }
+
+  if (!targetOrgan) {
+    alert("Veuillez spécifier un nom d'organe valide.");
+    return;
+  }
+
+  const exactKey = getOrganExactKey(targetOrgan);
+
+  const val = prompt(`Saisissez la nouvelle pré-phrase pour l'organe "${exactKey}" :\n\n(ex: 'Quel est le profil immunohistochimique attendu dans...', 'Quel est le grade histologique devant...')`);
+  if (val === null) return;
+  const trimmed = val.trim();
+  if (!trimmed) {
+    alert("La pré-phrase ne peut pas être vide.");
+    return;
+  }
+
+  if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
+  if (!state.organStatementTemplates[exactKey]) state.organStatementTemplates[exactKey] = [];
+
+  if (state.organStatementTemplates[exactKey].includes(trimmed)) {
+    alert("Cette pré-phrase existe déjà pour cet organe.");
+    return;
+  }
+
+  state.organStatementTemplates[exactKey].push(trimmed);
+  saveOrganStatementTemplates();
+  renderStatementTemplates();
+  showRewardToast(`Pré-phrase enregistrée pour "${exactKey}" !`, 'sparkles');
+}
+window.promptAddNewOrganStatementTemplate = promptAddNewOrganStatementTemplate;
+
+function deleteOrganStatementTemplate(organ, idx) {
+  if (!confirm(`Voulez-vous supprimer cette pré-phrase pour l'organe "${organ}" ?`)) return;
+  const exactKey = getOrganExactKey(organ);
+  if (!state.organStatementTemplates || !state.organStatementTemplates[exactKey]) return;
+  state.organStatementTemplates[exactKey].splice(idx, 1);
+  saveOrganStatementTemplates();
+  renderStatementTemplates();
+  showRewardToast(`Pré-phrase supprimée de "${exactKey}".`, 'trash-2');
+}
+window.deleteOrganStatementTemplate = deleteOrganStatementTemplate;
+
+// --- GESTIONNAIRE CENTRALISÉ DES PRÉ-PHRASES (MODAL) ---
+function openManageStatementTemplatesModal(initialOrgan = null) {
+  const modal = document.getElementById('modal-manage-statement-templates');
+  if (!modal) return;
+
+  if (!state.statementTemplates) state.statementTemplates = getSavedStatementTemplates();
+  if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
+
+  const select = document.getElementById('manage-templates-organ-select');
+  if (select) {
+    const currentOrgan = (initialOrgan || document.getElementById('form-q-organ')?.value || '').trim();
+    const tree = getHierarchyTree(true);
+    const existingOrgans = Array.from(new Set([
+      ...Object.keys(state.organStatementTemplates || {}),
+      ...Object.keys(tree || {})
+    ])).filter(Boolean).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+
+    let optHtml = `<option value="__GENERAL__">🌐 Phrases Générales (Tous organes)</option>`;
+    optHtml += existingOrgans.map(o => {
+      const count = (getOrganTemplatesFor(o) || []).length;
+      return `<option value="${escapeHtml(o)}" ${o.toLowerCase() === currentOrgan.toLowerCase() ? 'selected' : ''}>🏷️ ${escapeHtml(o)} (${count})</option>`;
+    }).join('');
+
+    select.innerHTML = optHtml;
+  }
+
+  renderManageStatementTemplatesList();
+
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  if (window.lucide) lucide.createIcons();
+}
+window.openManageStatementTemplatesModal = openManageStatementTemplatesModal;
+
+function closeManageStatementTemplatesModal() {
+  const modal = document.getElementById('modal-manage-statement-templates');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+  renderStatementTemplates();
+}
+window.closeManageStatementTemplatesModal = closeManageStatementTemplatesModal;
+
+function renderManageStatementTemplatesList() {
+  const container = document.getElementById('manage-templates-list-container');
+  const select = document.getElementById('manage-templates-organ-select');
+  const addLabel = document.getElementById('manage-templates-add-label');
+  if (!container || !select) return;
+
+  const selVal = select.value;
+  const isGeneral = (selVal === '__GENERAL__');
+
+  if (addLabel) {
+    addLabel.textContent = isGeneral 
+      ? "Ajouter une phrase type générale (tous organes)" 
+      : `Ajouter une pré-phrase pour l'organe "${selVal}"`;
+  }
+
+  let items = [];
+  if (isGeneral) {
+    items = state.statementTemplates || [];
+  } else {
+    items = getOrganTemplatesFor(selVal) || [];
+  }
+
+  if (items.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-6 text-slate-500 bg-slate-950/40 rounded-xl border border-slate-800/80">
+        <p class="text-xs">Aucune pré-phrase enregistrée pour ${isGeneral ? 'les phrases générales' : `l'organe "${escapeHtml(selVal)}"`}.</p>
+        <p class="text-[11px] text-slate-600 mt-1">Utilisez le formulaire ci-dessous pour en ajouter une !</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = items.map((t, idx) => `
+    <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 hover:border-slate-700 transition group">
+      <div class="flex items-center space-x-2 flex-1 pr-2">
+        <i data-lucide="${isGeneral ? 'sparkles' : 'tag'}" class="w-3.5 h-3.5 ${isGeneral ? 'text-teal-400' : 'text-amber-400'} shrink-0"></i>
+        <span class="text-xs text-slate-200 font-medium">${escapeHtml(t)}</span>
+      </div>
+      <button type="button" onclick="deleteTemplateInManager('${isGeneral ? 'general' : 'organ'}', '${escapeJsString(selVal)}', ${idx})" class="text-slate-500 hover:text-rose-400 p-1 rounded-lg transition" title="Supprimer">
+        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+      </button>
+    </div>
+  `).join('');
+
+  if (window.lucide) lucide.createIcons();
+}
+window.renderManageStatementTemplatesList = renderManageStatementTemplatesList;
+
+function submitNewTemplateInManager(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const select = document.getElementById('manage-templates-organ-select');
+  const input = document.getElementById('manage-templates-input-text');
+  if (!select || !input) return;
+
+  const val = input.value.trim();
+  if (!val) return;
+
+  const selVal = select.value;
+  const isGeneral = (selVal === '__GENERAL__');
+
+  if (isGeneral) {
+    if (!state.statementTemplates) state.statementTemplates = getSavedStatementTemplates();
+    if (state.statementTemplates.includes(val)) {
+      alert("Cette phrase type existe déjà.");
+      return;
+    }
+    state.statementTemplates.push(val);
+    saveStatementTemplates();
+  } else {
+    const exactKey = getOrganExactKey(selVal);
+    if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
+    if (!state.organStatementTemplates[exactKey]) state.organStatementTemplates[exactKey] = [];
+    if (state.organStatementTemplates[exactKey].includes(val)) {
+      alert("Cette pré-phrase existe déjà pour cet organe.");
+      return;
+    }
+    state.organStatementTemplates[exactKey].push(val);
+    saveOrganStatementTemplates();
+  }
+
+  input.value = '';
+  renderManageStatementTemplatesList();
+  renderStatementTemplates();
+  showRewardToast("Pré-phrase ajoutée !", 'sparkles');
+}
+window.submitNewTemplateInManager = submitNewTemplateInManager;
+
+function deleteTemplateInManager(type, organ, idx) {
+  if (type === 'general') {
+    deleteStatementTemplate(idx);
+  } else {
+    deleteOrganStatementTemplate(organ, idx);
+  }
+  renderManageStatementTemplatesList();
+}
+window.deleteTemplateInManager = deleteTemplateInManager;
+
+function promptAddNewOrganForTemplates() {
+  const newOrg = prompt("Saisissez le nom du nouvel organe pour ses pré-phrases :\n\n(ex: Thyroïde, Foie, Peau, Os et tissus mous...)");
+  if (!newOrg || !newOrg.trim()) return;
+  const clean = newOrg.trim();
+  if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
+  if (!state.organStatementTemplates[clean]) {
+    state.organStatementTemplates[clean] = [];
+    saveOrganStatementTemplates();
+  }
+  openManageStatementTemplatesModal(clean);
+}
+window.promptAddNewOrganForTemplates = promptAddNewOrganForTemplates;
 window.deleteStatementTemplate = deleteStatementTemplate;
 
 // --- CRÉATION DE QUESTION DEPUIS LA HIÉRARCHIE (ORGANE, CATÉGORIE, LÉSION) ---
@@ -7820,10 +8214,14 @@ async function handleSaveDPForm(e) {
   saveCases();
 
   if (supabaseClient && savedCase) {
-    dbUpsertCase(savedCase).catch(e => console.warn("Supabase DP upsert error:", e));
+    try {
+      await dbUpsertCase(savedCase);
+    } catch(e) {
+      console.warn("Supabase DP upsert error:", e);
+    }
   }
 
-  alert("Dossier Progressif enregistré avec succès !");
+  alert("✅ Dossier Progressif enregistré directement dans la base de données (Cloud) !");
   resetDPForm();
 
   state.bankSelectedOrgan = organ;
@@ -9122,7 +9520,6 @@ function createLesionTopoCard(organ, category, entity, key) {
             </h4>
             <div class="flex flex-wrap items-center gap-x-2 text-[11px] text-slate-400 mt-0.5">
               <span>${formatLesionNoteDate(note.updatedAt)}</span>
-              ${note.authorName ? `<span class="text-teal-400 font-medium">• Rédigé par ${escapeHtml(note.authorName)}</span>` : ''}
             </div>
           </div>
         </div>
@@ -9512,7 +9909,7 @@ function renderBank() {
     organMap[org].cases.push(c);
   });
 
-  const availableOrgans = Object.keys(organMap).sort();
+  const availableOrgans = Object.keys(organMap).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
   if (availableOrgans.length === 0) {
     itemsContainer.innerHTML = `
@@ -9616,7 +10013,7 @@ function renderBank() {
         categoryMap[cat].cases.push(c);
       });
 
-      const availableCats = Object.keys(categoryMap).sort();
+      const availableCats = Object.keys(categoryMap).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
       if (state.bankSelectedCategory !== 'all' && !categoryMap[state.bankSelectedCategory]) {
         state.bankSelectedCategory = 'all';
       }
@@ -9764,9 +10161,9 @@ function renderBank() {
   const lesionKeys = Object.keys(lesionMap).sort((a, b) => {
     const la = lesionMap[a];
     const lb = lesionMap[b];
-    if (la.organ !== lb.organ) return la.organ.localeCompare(lb.organ);
-    if (la.category !== lb.category) return la.category.localeCompare(lb.category);
-    return la.entity.localeCompare(lb.entity);
+    if (la.organ !== lb.organ) return la.organ.localeCompare(lb.organ, 'fr', { sensitivity: 'base' });
+    if (la.category !== lb.category) return la.category.localeCompare(lb.category, 'fr', { sensitivity: 'base' });
+    return la.entity.localeCompare(lb.entity, 'fr', { sensitivity: 'base' });
   });
 
   state.currentRenderedLesionKeys = lesionKeys;
@@ -9989,10 +10386,6 @@ function renderBank() {
         <div class="space-y-1.5 flex-1">
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/20">${formatBadge}</span>
-            <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-teal-300 border border-teal-500/20 flex items-center space-x-1" title="Rédacteur : ${escapeHtml(authorInfo.name)} (${escapeHtml(authorInfo.email)})">
-              <span>✍️</span>
-              <span>${escapeHtml(authorInfo.short)}</span>
-            </span>
             <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
               ${escapeHtml(q.category)} > ${escapeHtml(q.entity)}
             </span>
@@ -10045,13 +10438,15 @@ function populateBankFilterDropdowns() {
   if (organSelect) {
     const curVal = organSelect.value;
     const tree = getHierarchyTree(true);
-    organSelect.innerHTML = `<option value="all">Tous les organes</option>` + Object.keys(tree).map(o => `<option value="${o}">${o}</option>`).join('');
+    const sortedOrgans = Object.keys(tree).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+    organSelect.innerHTML = `<option value="all">Tous les organes</option>` + sortedOrgans.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
     organSelect.value = curVal || 'all';
   }
 
   if (tagSelect) {
     const curVal = tagSelect.value;
-    tagSelect.innerHTML = `<option value="all">Tous les tags (#)</option>` + state.customTags.map(t => `<option value="${t}">#${t}</option>`).join('');
+    const sortedTags = [...state.customTags].sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+    tagSelect.innerHTML = `<option value="all">Tous les tags (#)</option>` + sortedTags.map(t => `<option value="${escapeHtml(t)}">#${escapeHtml(t)}</option>`).join('');
     tagSelect.value = curVal || 'all';
   }
 }
