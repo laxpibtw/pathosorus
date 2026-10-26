@@ -823,6 +823,20 @@ async function forceFullCloudSync() {
 window.forceFullCloudSync = forceFullCloudSync;
 window.pushAllLocalDataToAccountCloud = pushAllLocalDataToAccountCloud;
 
+async function resetToCloudBank() {
+  if (!supabaseClient) {
+    showToast("Supabase non connecté.", "error");
+    return;
+  }
+  showToast("Alignement strict sur Supabase en cours...", "info");
+  localStorage.removeItem(STORAGE_KEY_QUESTIONS);
+  localStorage.removeItem(STORAGE_KEY_CASES);
+  await fetchSupabaseData(true);
+  const total = (state.questions ? state.questions.length : 0) + (state.cases ? state.cases.length : 0);
+  showToast(`✅ Banque alignée sur Supabase : ${total} éléments (${state.questions.length} questions, ${state.cases.length} cas)`, "success");
+}
+window.resetToCloudBank = resetToCloudBank;
+
 async function syncCloudNow() {
   const btn = document.getElementById('btn-quick-sync');
   let originalHtml = '';
@@ -2534,30 +2548,10 @@ async function fetchSupabaseData(silent = false) {
         }
       });
 
-      // Le Cloud Supabase est la référence maîtresse (en filtrant les tombstones)
-      const validCloudQuestions = cloudQuestions.filter(q => !deletedQuestionIds.has(q.id));
-      const cloudIds = new Set(validCloudQuestions.map(q => q.id));
-
-      // Ne préserver que les questions expressément créées hors-ligne sur cet appareil (non encore envoyées au Cloud)
-      const unsyncedOfflineQuestions = (state.questions || []).filter(q => 
-        !cloudIds.has(q.id) && !deletedQuestionIds.has(q.id) && q._localUnsynced === true
-      );
-
-      state.questions = [...validCloudQuestions, ...unsyncedOfflineQuestions];
+      // Le Cloud Supabase est l'UNIQUE source de vérité absolue
+      // Aucune réinjection de vieux caches locaux : Supabase fait autorité à 100%
+      state.questions = cloudQuestions.filter(q => !deletedQuestionIds.has(q.id));
       localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
-
-      // Si des questions ont été créées hors-ligne, les synchroniser vers Supabase
-      if (unsyncedOfflineQuestions.length > 0) {
-        console.log(`🚀 ${unsyncedOfflineQuestions.length} question(s) créée(s) hors-ligne. Synchronisation vers Supabase...`);
-        for (const lq of unsyncedOfflineQuestions) {
-          dbUpsertQuestion(lq).then(res => {
-            if (res && res.success) {
-              delete lq._localUnsynced;
-              saveQuestions();
-            }
-          }).catch(e => console.warn("Erreur sync question locale vers Supabase:", e));
-        }
-      }
 
       // Sauvegarder dans le cache local propre à cet utilisateur pour la répétition espacée
       const syncProg = {};
@@ -2774,31 +2768,8 @@ async function dbUpsertQuestion(q) {
 }
 
 async function autoSyncLocalQuestionsToCloud() {
-  if (!supabaseClient) return;
-  try {
-    let deletedIds = new Set();
-    try {
-      const localDel = JSON.parse(localStorage.getItem('pathosorus_deleted_ids') || '[]');
-      if (Array.isArray(localDel)) localDel.forEach(id => deletedIds.add(id));
-    } catch (e) {}
-
-    const unsynced = (state.questions || []).filter(q => 
-      q && q.id && q._localUnsynced === true && !deletedIds.has(q.id)
-    );
-    if (unsynced.length > 0) {
-      console.log(`🚀 Synchronisation de ${unsynced.length} question(s) hors-ligne vers Supabase...`);
-      for (const q of unsynced) {
-        const res = await dbUpsertQuestion(q);
-        if (res && res.success) {
-          delete q._localUnsynced;
-        }
-      }
-      saveQuestions();
-      console.log(`✅ ${unsynced.length} question(s) hors-ligne synchronisées avec succès !`);
-    }
-  } catch (e) {
-    console.warn("Erreur autoSyncLocalQuestionsToCloud:", e);
-  }
+  // Désactivé : Supabase est l'unique source de vérité. Aucune réinjection depuis le cache local.
+  return;
 }
 
 async function dbDeleteQuestion(id) {
