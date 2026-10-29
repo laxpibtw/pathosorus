@@ -885,11 +885,30 @@ window.syncCloudNow = syncCloudNowSafe;
 
 async function syncStatsToCloud() {
   if (!supabaseClient || !state.currentUser) return;
+  const currentEmail = getCurrentUserEmail();
   try {
     const statsPayload = {
       ...state.stats,
       customBadges: state.customBadges || []
     };
+
+    // 0. Sauvegarde principale dans la table SQL public.user_stats (Source de vérité universelle)
+    if (currentEmail) {
+      try {
+        await supabaseClient.from('user_stats').upsert({
+          email: currentEmail,
+          name: getQuestionAuthorDisplayName(currentEmail).name,
+          role: state.currentRole || 'creator',
+          xp: state.stats.xp || 0,
+          streak: state.stats.streak || 1,
+          total_correct: state.stats.totalCorrect || 0,
+          total_answered: state.stats.totalAnswered || 0,
+          unlocked_badges: state.stats.unlockedBadges || {},
+          completed_categories: state.stats.completedCategories || [],
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'email' });
+      } catch (statsErr) {}
+    }
 
     // 1. Sauvegarde dans la table public.profiles (si UUID valide)
     if (isValidUUID(state.currentUser.id)) {
@@ -1291,6 +1310,27 @@ async function dbSaveUserProgress(q) {
   localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
 
   if (!supabaseClient) return;
+
+  // 0. Sauvegarde principale dans la table SQL public.user_question_progress (Strictement isolée par email)
+  const currentEmail = getCurrentUserEmail();
+  if (currentEmail) {
+    try {
+      const qst = q.stats || getDefaultQuestionStats();
+      await supabaseClient.from('user_question_progress').upsert({
+        user_email: currentEmail,
+        question_id: q.id,
+        mastered: Boolean(q.mastered),
+        flagged: Boolean(q.flagged),
+        seen: qst.seen || 1,
+        correct: qst.correct || 0,
+        consecutive_correct: qst.consecutiveCorrect || 0,
+        interval_days: qst.intervalDays || 1,
+        last_reviewed: qst.lastReviewed || new Date().toISOString(),
+        next_review_date: qst.nextReviewDate || null,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_email,question_id' });
+    } catch (e) {}
+  }
 
   // 1. Synchronisation par tag utilisateur UPROG & USTATS (multi-postes instantané sans RLS, strictement isolé par email)
   debouncedSyncUserProgressTagToCloud();
@@ -2502,7 +2542,59 @@ async function fetchSupabaseData(silent = false) {
     const cloudProgressMap = new Map();
     const currentEmail = getCurrentUserEmail();
 
-    // 0. Progression et Stats depuis custom_tags (UPROG & USTATS) - 100% garanti multi-appareils sans RLS
+    // 0A. Source de vérité officielle SQL : public.user_stats & public.user_question_progress
+    if (currentEmail && supabaseClient) {
+      try {
+        const { data: dbUserStats } = await supabaseClient
+          .from('user_stats')
+          .select('*')
+          .eq('email', currentEmail)
+          .maybeSingle();
+
+        if (dbUserStats) {
+          state.stats = {
+            ...getDefaultStats(),
+            xp: typeof dbUserStats.xp === 'number' ? dbUserStats.xp : 0,
+            creatorXp: (state.stats && state.stats.creatorXp) || 0,
+            streak: typeof dbUserStats.streak === 'number' ? dbUserStats.streak : 1,
+            totalAnswered: typeof dbUserStats.total_answered === 'number' ? dbUserStats.total_answered : 0,
+            totalCorrect: typeof dbUserStats.total_correct === 'number' ? dbUserStats.total_correct : 0,
+            unlockedBadges: dbUserStats.unlocked_badges || {},
+            completedCategories: dbUserStats.completed_categories || []
+          };
+          localStorage.setItem(getUserStatsStorageKey(currentEmail), JSON.stringify(state.stats));
+          localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+        }
+
+        const { data: dbProg } = await supabaseClient
+          .from('user_question_progress')
+          .select('*')
+          .eq('user_email', currentEmail);
+
+        if (dbProg && Array.isArray(dbProg) && dbProg.length > 0) {
+          state.userProgress = {};
+          dbProg.forEach(row => {
+            const up = {
+              question_id: row.question_id,
+              stats: {
+                seen: row.seen || 0,
+                correct: row.correct || 0,
+                consecutiveCorrect: row.consecutive_correct || 0,
+                intervalDays: row.interval_days || 0,
+                lastReviewed: row.last_reviewed,
+                nextReviewDate: row.next_review_date
+              },
+              mastered: Boolean(row.mastered),
+              flagged: Boolean(row.flagged)
+            };
+            cloudProgressMap.set(row.question_id, up);
+            state.userProgress[row.question_id] = up;
+          });
+        }
+      } catch (sqlErr) {}
+    }
+
+    // 0. Progression et Stats depuis custom_tags (UPROG & USTATS) - Fallback de secours
     if (tRes && !tRes.error && tRes.data && Array.isArray(tRes.data) && currentEmail) {
       const uProgTag = tRes.data.find(t => t.name && t.name.startsWith(`UPROG:${currentEmail}:`));
       if (uProgTag) {
@@ -4896,6 +4988,62 @@ async function renderLeaderboard(forceRefresh = false) {
   // 5. Synchronisation Cloud en tâche de fond (silencieuse, fluide et non-bloquante)
   (async () => {
     try {
+      // 5A. Priorité absolue : Table SQL dédiée public.user_stats
+      if (supabaseClient) {
+        try {
+          const { data: dbStats } = await supabaseClient
+            .from('user_stats')
+            .select('*')
+            .order('xp', { ascending: false });
+
+          if (dbStats && Array.isArray(dbStats) && dbStats.length > 0) {
+            let hasChanges = false;
+            dbStats.forEach(row => {
+              if (row && row.email) {
+                const em = row.email.trim().toLowerCase();
+                const existing = accountsMap.get(em) || {};
+                const badgesMap = (row.unlocked_badges && typeof row.unlocked_badges === 'object') ? row.unlocked_badges : {};
+                const badgesCount = Object.keys(badgesMap).length;
+
+                const cleanObj = {
+                  ...getDefaultStats(),
+                  xp: typeof row.xp === 'number' ? row.xp : 0,
+                  streak: typeof row.streak === 'number' ? row.streak : 1,
+                  totalCorrect: typeof row.total_correct === 'number' ? row.total_correct : 0,
+                  totalAnswered: typeof row.total_answered === 'number' ? row.total_answered : 0,
+                  unlockedBadges: badgesMap,
+                  completedCategories: row.completed_categories || []
+                };
+                try {
+                  localStorage.setItem(getUserStatsStorageKey(em), JSON.stringify(cleanObj));
+                } catch(e) {}
+
+                accountsMap.set(em, {
+                  ...existing,
+                  email: em,
+                  name: row.name || existing.name || getQuestionAuthorDisplayName(em).name,
+                  role: row.role || (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com' ? 'creator' : 'reader'),
+                  xp: cleanObj.xp,
+                  streak: cleanObj.streak,
+                  totalCorrect: cleanObj.totalCorrect,
+                  unlockedBadgesCount: badgesCount
+                });
+                hasChanges = true;
+              }
+            });
+
+            if (hasChanges) {
+              const updatedList = computeLeaderboardList(accountsMap);
+              state.lastLeaderboardAccounts = updatedList;
+              const updatedSorted = sortLeaderboardAccounts(updatedList, state.leaderboardSortBy || 'xp');
+              renderLeaderboardBody(updatedSorted, state.leaderboardSortBy || 'xp');
+              return; // Terminé, source de données SQL officielle chargée !
+            }
+          }
+        } catch(e) {}
+      }
+
+      // 5B. Fallback sur custom_tags si user_stats pas encore disponible
       let allTags = [];
       if (supabaseClient) {
         try {
