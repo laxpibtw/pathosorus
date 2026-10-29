@@ -3054,8 +3054,30 @@ async function dbUpsertCaseWithTimeout(c, timeoutMs = 4500) {
   });
 }
 
+function dataUrlToBlob(dataUrl) {
+  try {
+    const parts = dataUrl.split(';base64,');
+    if (parts.length < 2) return null;
+    const contentType = parts[0].split(':')[1] || 'image/jpeg';
+    const byteCharacters = atob(parts[1]);
+    const byteArrays = [];
+    const sliceSize = 512;
+    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+      const slice = byteCharacters.slice(offset, offset + sliceSize);
+      const byteNumbers = new Array(slice.length);
+      for (let i = 0; i < slice.length; i++) {
+        byteNumbers[i] = slice.charCodeAt(i);
+      }
+      byteArrays.push(new Uint8Array(byteNumbers));
+    }
+    return new Blob(byteArrays, { type: contentType });
+  } catch (e) {
+    return null;
+  }
+}
+
 async function uploadImageFile(file) {
-  // Compression systématique pour un upload ultra-rapide (<100ms) sans saturer le réseau ni le stockage local
+  // Compression systématique pour un upload ultra-rapide (<100ms) sans saturer le réseau ni le stockage Supabase
   let compressedDataUrl = "";
   try {
     compressedDataUrl = await compressImageToDataUrl(file, 1280, 0.82);
@@ -3065,9 +3087,16 @@ async function uploadImageFile(file) {
     try {
       const ext = 'jpg';
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`;
+      const blob = compressedDataUrl ? dataUrlToBlob(compressedDataUrl) : null;
+      const uploadBody = blob || file;
+
       const { data, error } = await supabaseClient.storage
         .from('pathosorus_images')
-        .upload(fileName, file, { cacheControl: '3600', upsert: false });
+        .upload(fileName, uploadBody, { 
+          cacheControl: '31536000', // Cache navigateur 1 an : préserve le quota Egress/Bande passante Supabase
+          contentType: blob ? 'image/jpeg' : (file.type || 'image/jpeg'),
+          upsert: false 
+        });
 
       if (!error && data) {
         const { data: publicData } = supabaseClient.storage
