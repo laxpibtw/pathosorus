@@ -913,7 +913,7 @@ async function syncStatsToCloud() {
     // 1. Sauvegarde dans la table public.profiles (si UUID valide)
     if (isValidUUID(state.currentUser.id)) {
       try {
-        const res = await supabaseClient
+        await supabaseClient
           .from('profiles')
           .upsert({
             id: state.currentUser.id,
@@ -921,32 +921,12 @@ async function syncStatsToCloud() {
             role: state.currentRole || 'creator',
             stats: statsPayload
           });
-        if (res && res.error) {
-          console.warn("Avertissement sync stats profiles:", res.error.message);
-        } else {
-          console.log("☁️ Stats synchronisées dans profiles pour", state.currentUser.email);
-        }
-      } catch (profErr) {
-        console.warn("Avertissement profiles upsert:", profErr);
-      }
+      } catch (profErr) {}
     }
 
-    // 2. Sauvegarde directe dans custom_tags (100% garanti multi-appareils sans RLS)
+    // 2. Sauvegarde directe dans custom_tags (Fallback)
     await syncUserStatsTagToCloud();
 
-    // 3. Sauvegarde directe dans le compte utilisateur auth
-    try {
-      if (supabaseClient.auth && typeof supabaseClient.auth.updateUser === 'function') {
-        await supabaseClient.auth.updateUser({
-          data: {
-            stats: statsPayload,
-            role: state.currentRole || 'creator'
-          }
-        });
-      }
-    } catch (authErr) {
-      console.warn("Avertissement auth updateUser stats:", authErr);
-    }
   } catch (e) {
     console.warn("Erreur sync stats:", e);
   }
@@ -955,163 +935,34 @@ async function syncStatsToCloud() {
 async function fetchCurrentUserRole() {
   if (!state.currentUser) {
     state.currentRole = 'reader';
+    updateUserRoleUI();
     return;
   }
-  const email = (state.currentUser.email || '').toLowerCase();
+  const email = (state.currentUser.email || '').toLowerCase().trim();
   const isAdminUser = (email === 'padoreau85@gmail.com');
-  if (isAdminUser) {
-    state.currentRole = 'creator';
-  }
-
-  // 1. Extraire les stats directes stockées dans le compte auth Supabase (multi-appareils garanti)
-  const metaStats = (state.currentUser.user_metadata && state.currentUser.user_metadata.stats) || {};
-
-  // 2. Restaurer d'abord les stats spécifiques à ce compte depuis localStorage
-  const userStatsKey = STORAGE_KEY_STATS + '_' + state.currentUser.id;
-  const userStoredStats = localStorage.getItem(userStatsKey);
-  let localStats = state.stats || {};
-  if (userStoredStats) {
-    try {
-      localStats = Object.assign(localStats, JSON.parse(userStoredStats));
-    } catch(e) {}
-  }
-
-  // 3. Charger le profil depuis la table profiles
-  let cloudStats = {};
-  let cloudProfileRole = null;
-  if (supabaseClient && isValidUUID(state.currentUser.id)) {
-    try {
-      const { data, error } = await supabaseClient
-        .from('profiles')
-        .select('role, stats')
-        .eq('id', state.currentUser.id)
-        .maybeSingle();
-
-      if (!error && data) {
-        if (data.role) cloudProfileRole = data.role;
-        if (data.stats && typeof data.stats === 'object') {
-          cloudStats = data.stats;
-        }
-      }
-    } catch (e) {}
-  }
-
-  // 3bis. Vérifier si ce compte a reçu une attribution de rôle dans custom_tags (ex: ROLE_CREATOR:email)
-  let tagRole = null;
-  if (supabaseClient && email) {
-    try {
-      const { data: creatorTag } = await supabaseClient
-        .from('custom_tags')
-        .select('name')
-        .eq('name', 'ROLE_CREATOR:' + email)
-        .maybeSingle();
-
-      if (creatorTag) {
-        tagRole = 'creator';
-      } else {
-        const { data: readerTag } = await supabaseClient
-          .from('custom_tags')
-          .select('name')
-          .eq('name', 'ROLE_READER:' + email)
-          .maybeSingle();
-        if (readerTag) tagRole = 'reader';
-      }
-    } catch (tagErr) {}
-  }
-
-  // Métadonnées du compte auth Supabase
-  const metaRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role);
-
   if (isAdminUser || AUTHORIZED_CREATOR_EMAILS.has(email)) {
     state.currentRole = 'creator';
-  } else if (tagRole) {
-    state.currentRole = tagRole;
-  } else if (cloudProfileRole) {
-    state.currentRole = cloudProfileRole;
-  } else if (metaRole) {
-    state.currentRole = metaRole;
   } else {
-    state.currentRole = 'reader';
-  }
-
-  // 3ter. Enregistrement / mise à jour automatique dans public.profiles pour tout compte connecté (si UUID valide)
-  if (supabaseClient && state.currentUser && isValidUUID(state.currentUser.id)) {
-    try {
-      await supabaseClient.from('profiles').upsert({
-        id: state.currentUser.id,
-        email: state.currentUser.email,
-        role: state.currentRole,
-        stats: Object.keys(cloudStats).length > 0 ? cloudStats : (state.stats || {})
-      });
-    } catch (profUpsertErr) {
-      console.warn("Profil auto-upsert:", profUpsertErr);
+    let tagRole = null;
+    if (supabaseClient && email) {
+      try {
+        const { data: creatorTag } = await supabaseClient
+          .from('custom_tags')
+          .select('name')
+          .eq('name', 'ROLE_CREATOR:' + email)
+          .maybeSingle();
+        if (creatorTag) tagRole = 'creator';
+      } catch (e) {}
     }
+    const metaRole = (state.currentUser.user_metadata && state.currentUser.user_metadata.role);
+    state.currentRole = tagRole || metaRole || 'reader';
   }
 
   if (email) {
     addKnownColleague(email, state.currentRole);
   }
 
-  // 4. Fusion robuste : Cloud stats prioritaires (Supabase source de vérité absolue)
-  const hasCloudStats = Object.keys(cloudStats).length > 0;
-  const mergedXp = hasCloudStats && typeof cloudStats.xp === 'number' ? cloudStats.xp : (localStats.xp || 0);
-  const mergedCreatorXp = hasCloudStats && typeof cloudStats.creatorXp === 'number' ? cloudStats.creatorXp : (localStats.creatorXp || 0);
-  const mergedStreak = hasCloudStats && typeof cloudStats.streak === 'number' ? cloudStats.streak : (localStats.streak || 1);
-  const mergedAnswered = hasCloudStats && typeof cloudStats.totalAnswered === 'number' ? cloudStats.totalAnswered : (localStats.totalAnswered || 0);
-  const mergedCorrect = hasCloudStats && typeof cloudStats.totalCorrect === 'number' ? cloudStats.totalCorrect : (localStats.totalCorrect || 0);
-
-  state.stats = {
-    ...localStats,
-    ...metaStats,
-    ...cloudStats,
-    xp: mergedXp,
-    creatorXp: mergedCreatorXp,
-    streak: mergedStreak,
-    totalAnswered: mergedAnswered,
-    totalCorrect: mergedCorrect,
-    unlockedBadges: hasCloudStats ? (cloudStats.unlockedBadges || {}) : (localStats.unlockedBadges || {}),
-    badgeHistory: hasCloudStats ? (cloudStats.badgeHistory || {}) : (localStats.badgeHistory || {}),
-    completedCategories: hasCloudStats ? (cloudStats.completedCategories || []) : (localStats.completedCategories || [])
-  };
-
-  const allCustomBadges = [...(cloudStats.customBadges || []), ...(metaStats.customBadges || []), ...(state.customBadges || [])];
-  if (allCustomBadges.length > 0) {
-    const seenBadges = new Set();
-    state.customBadges = allCustomBadges.filter(b => {
-      if (!b || !b.id || seenBadges.has(b.id)) return false;
-      seenBadges.add(b.id);
-      return true;
-    });
-    localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
-  }
-
-  if (cloudStats.statementTemplates && Array.isArray(cloudStats.statementTemplates)) {
-    const cleanedCloud = cloudStats.statementTemplates.filter(t => typeof t === 'string' && t.trim().length > 0 && !OLD_DEFAULT_STATEMENT_TEMPLATES.includes(t.trim()));
-    const mergedTemplates = Array.from(new Set([...(state.statementTemplates || []), ...cleanedCloud]));
-    state.statementTemplates = mergedTemplates;
-    saveStatementTemplates();
-  }
-
-  if (cloudStats.organStatementTemplates && typeof cloudStats.organStatementTemplates === 'object' && !Array.isArray(cloudStats.organStatementTemplates)) {
-    if (!state.organStatementTemplates) state.organStatementTemplates = getSavedOrganStatementTemplates();
-    Object.keys(cloudStats.organStatementTemplates).forEach(org => {
-      const cloudList = cloudStats.organStatementTemplates[org];
-      if (Array.isArray(cloudList)) {
-        if (!state.organStatementTemplates[org]) state.organStatementTemplates[org] = [];
-        state.organStatementTemplates[org] = Array.from(new Set([...state.organStatementTemplates[org], ...cloudList]));
-      }
-    });
-    saveOrganStatementTemplates();
-  }
-  renderStatementTemplates();
-
-  localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
-  localStorage.setItem(userStatsKey, JSON.stringify(state.stats));
-  updateTopBar();
-  renderTrophiesView();
-
-  // Mettre à jour immédiatement Supabase avec ces valeurs consolidées
-  syncStatsToCloud();
+  updateUserRoleUI();
 }
 
 // --- CLÉS DE STOCKAGE ET PROGRESSION ISOLÉES PAR COMPTE UTILISATEUR ---
@@ -2542,6 +2393,7 @@ async function fetchSupabaseData(silent = false) {
     const cloudProgressMap = new Map();
     const currentEmail = getCurrentUserEmail();
 
+    let hasSqlStats = false;
     // 0A. Source de vérité officielle SQL : public.user_stats & public.user_question_progress
     if (currentEmail && supabaseClient) {
       try {
@@ -2552,6 +2404,7 @@ async function fetchSupabaseData(silent = false) {
           .maybeSingle();
 
         if (dbUserStats) {
+          hasSqlStats = true;
           state.stats = {
             ...getDefaultStats(),
             xp: typeof dbUserStats.xp === 'number' ? dbUserStats.xp : 0,
@@ -2594,8 +2447,8 @@ async function fetchSupabaseData(silent = false) {
       } catch (sqlErr) {}
     }
 
-    // 0. Progression et Stats depuis custom_tags (UPROG & USTATS) - Fallback de secours
-    if (tRes && !tRes.error && tRes.data && Array.isArray(tRes.data) && currentEmail) {
+    // 0. Progression et Stats depuis custom_tags (UPROG & USTATS) - Fallback uniquement si user_stats non disponible
+    if (!hasSqlStats && tRes && !tRes.error && tRes.data && Array.isArray(tRes.data) && currentEmail) {
       const uProgTag = tRes.data.find(t => t.name && t.name.startsWith(`UPROG:${currentEmail}:`));
       if (uProgTag) {
         try {
@@ -5017,6 +4870,14 @@ async function renderLeaderboard(forceRefresh = false) {
                 try {
                   localStorage.setItem(getUserStatsStorageKey(em), JSON.stringify(cleanObj));
                 } catch(e) {}
+
+                if (state.currentUser && state.currentUser.email && em === state.currentUser.email.trim().toLowerCase()) {
+                  state.stats = {
+                    ...state.stats,
+                    ...cleanObj
+                  };
+                  updateTopBar();
+                }
 
                 accountsMap.set(em, {
                   ...existing,
