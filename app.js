@@ -1012,25 +1012,26 @@ async function fetchCurrentUserRole() {
     addKnownColleague(email, state.currentRole);
   }
 
-  // 4. Fusion robuste : garantir que le créateur principal conserve son palier Niveau 25 (750 XP) partout
-  const defaultMinXp = isAdminUser ? 750 : 0;
-  const mergedXp = Math.max(cloudStats.xp || 0, metaStats.xp || 0, localStats.xp || 0, defaultMinXp);
-  const mergedStreak = Math.max(cloudStats.streak || 1, metaStats.streak || 1, localStats.streak || 1);
-  const mergedAnswered = Math.max(cloudStats.totalAnswered || 0, metaStats.totalAnswered || 0, localStats.totalAnswered || 0, isAdminUser ? 12 : 0);
-  const mergedCorrect = Math.max(cloudStats.totalCorrect || 0, metaStats.totalCorrect || 0, localStats.totalCorrect || 0, isAdminUser ? 12 : 0);
+  // 4. Fusion robuste : Cloud stats prioritaires (Supabase source de vérité absolue)
+  const hasCloudStats = Object.keys(cloudStats).length > 0;
+  const mergedXp = hasCloudStats && typeof cloudStats.xp === 'number' ? cloudStats.xp : (localStats.xp || 0);
+  const mergedCreatorXp = hasCloudStats && typeof cloudStats.creatorXp === 'number' ? cloudStats.creatorXp : (localStats.creatorXp || 0);
+  const mergedStreak = hasCloudStats && typeof cloudStats.streak === 'number' ? cloudStats.streak : (localStats.streak || 1);
+  const mergedAnswered = hasCloudStats && typeof cloudStats.totalAnswered === 'number' ? cloudStats.totalAnswered : (localStats.totalAnswered || 0);
+  const mergedCorrect = hasCloudStats && typeof cloudStats.totalCorrect === 'number' ? cloudStats.totalCorrect : (localStats.totalCorrect || 0);
 
   state.stats = {
     ...localStats,
     ...metaStats,
     ...cloudStats,
     xp: mergedXp,
-    creatorXp: Math.max(cloudStats.creatorXp || 0, metaStats.creatorXp || 0, localStats.creatorXp || 0, isAdminUser ? 60 : 0),
+    creatorXp: mergedCreatorXp,
     streak: mergedStreak,
     totalAnswered: mergedAnswered,
     totalCorrect: mergedCorrect,
-    unlockedBadges: { ...(cloudStats.unlockedBadges || {}), ...(metaStats.unlockedBadges || {}), ...(localStats.unlockedBadges || {}) },
-    badgeHistory: { ...(cloudStats.badgeHistory || {}), ...(metaStats.badgeHistory || {}), ...(localStats.badgeHistory || {}) },
-    completedCategories: Array.from(new Set([...(cloudStats.completedCategories || []), ...(metaStats.completedCategories || []), ...(localStats.completedCategories || [])]))
+    unlockedBadges: hasCloudStats ? (cloudStats.unlockedBadges || {}) : (localStats.unlockedBadges || {}),
+    badgeHistory: hasCloudStats ? (cloudStats.badgeHistory || {}) : (localStats.badgeHistory || {}),
+    completedCategories: hasCloudStats ? (cloudStats.completedCategories || []) : (localStats.completedCategories || [])
   };
 
   const allCustomBadges = [...(cloudStats.customBadges || []), ...(metaStats.customBadges || []), ...(state.customBadges || [])];
@@ -2492,11 +2493,17 @@ async function fetchSupabaseData(silent = false) {
             state.stats = {
               ...state.stats,
               ...parsedStats,
-              xp: Math.max(state.stats.xp || 0, parsedStats.xp || 0),
-              streak: Math.max(state.stats.streak || 1, parsedStats.streak || 1),
-              totalAnswered: Math.max(state.stats.totalAnswered || 0, parsedStats.totalAnswered || 0),
-              totalCorrect: Math.max(state.stats.totalCorrect || 0, parsedStats.totalCorrect || 0)
+              xp: typeof parsedStats.xp === 'number' ? parsedStats.xp : (state.stats.xp || 0),
+              creatorXp: typeof parsedStats.creatorXp === 'number' ? parsedStats.creatorXp : (state.stats.creatorXp || 0),
+              streak: typeof parsedStats.streak === 'number' ? parsedStats.streak : 1,
+              totalAnswered: typeof parsedStats.totalAnswered === 'number' ? parsedStats.totalAnswered : 0,
+              totalCorrect: typeof parsedStats.totalCorrect === 'number' ? parsedStats.totalCorrect : 0,
+              unlockedBadges: parsedStats.unlockedBadges || {},
+              badgeHistory: parsedStats.badgeHistory || {},
+              completedCategories: parsedStats.completedCategories || []
             };
+            const userStatsKey = getUserStatsStorageKey(currentEmail);
+            localStorage.setItem(userStatsKey, JSON.stringify(state.stats));
             localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
           }
         } catch (e) {
@@ -2562,15 +2569,20 @@ async function fetchSupabaseData(silent = false) {
         let mastered = false;
         let flagged = false;
 
-        // Progression Cloud du compte connecté (Supabase est l'UNIQUE source de vérité pour tous les appareils)
+        // Progression personnelle (Répétition espacée) strictement isolée par compte
         if (cloudProg) {
           stats = { ...stats, ...(cloudProg.stats || {}) };
           if (typeof cloudProg.mastered !== 'undefined') mastered = Boolean(cloudProg.mastered);
           if (typeof cloudProg.flagged !== 'undefined') flagged = Boolean(cloudProg.flagged);
-        } else if (q.stats) {
-          stats = { ...stats, ...(q.stats || {}) };
-          if (typeof q.mastered !== 'undefined') mastered = Boolean(q.mastered);
-          if (typeof q.flagged !== 'undefined') flagged = Boolean(q.flagged);
+        } else if (localProg) {
+          stats = { ...stats, ...(localProg.stats || {}) };
+          if (typeof localProg.mastered !== 'undefined') mastered = Boolean(localProg.mastered);
+          if (typeof localProg.flagged !== 'undefined') flagged = Boolean(localProg.flagged);
+        } else {
+          // Nouveau compte ou question jamais révisée par cet utilisateur : état vierge propre
+          stats = getDefaultQuestionStats();
+          mastered = false;
+          flagged = false;
         }
 
         // Récupérer optionExplanations depuis la colonne Supabase (optionexplanations ou optionExplanations)
@@ -2791,7 +2803,6 @@ async function fetchSupabaseData(silent = false) {
     renderDPCardsOnPlay();
     renderSpacedRepetitionDashboard();
     renderBank();
-    checkAndUnlockBadges();
     renderTrophiesView();
 
     const newTotal = (state.questions ? state.questions.length : 0) + (state.cases ? state.cases.length : 0);
@@ -3293,8 +3304,20 @@ function initApp() {
     state.lesionNotes = {};
   }
 
-  const storedStats = localStorage.getItem(STORAGE_KEY_STATS);
-  if (storedStats) state.stats = Object.assign(state.stats, JSON.parse(storedStats));
+  // Migration propre : réinitialisation des caches locaux pollués pour garantir XP=0 et Trophées=0
+  const RESET_STATS_FLAG = 'pathosorus_reset_xp_trophies_v20261029_clean';
+  if (!localStorage.getItem(RESET_STATS_FLAG)) {
+    localStorage.setItem(RESET_STATS_FLAG, 'true');
+    localStorage.removeItem(STORAGE_KEY_STATS);
+    Object.keys(localStorage).forEach(k => {
+      if (k.startsWith('pathosorus_stats_') || k.startsWith('pathotrainer_custom_stats')) {
+        localStorage.removeItem(k);
+      }
+    });
+    state.stats = getDefaultStats();
+  } else {
+    loadUserStatsForAccount(getCurrentUserEmail());
+  }
 
   state.statementTemplates = getSavedStatementTemplates();
   saveStatementTemplates();
@@ -3332,7 +3355,6 @@ function initApp() {
 
 function saveQuestions() {
   localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
-  checkAndUnlockBadges();
   updateTopBar();
   renderHierarchySelector();
   renderTagsCloud();
@@ -3958,7 +3980,6 @@ function checkAndUnlockBadges() {
 
 // --- VUE PALMARÈS & TROPHÉES (VIEW-TROPHIES) ---
 function renderTrophiesView() {
-  checkAndUnlockBadges();
   const player = calculatePlayerLevel(state.stats.xp || 0);
   const creator = getCreatorStats();
   const allBadges = getBadgesStatus();
