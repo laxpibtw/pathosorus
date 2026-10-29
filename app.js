@@ -7935,7 +7935,7 @@ async function handleSaveQuestionForm(e) {
       }
     } else {
       const newQ = {
-        id: "q_" + Date.now(),
+        id: "q_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
         format, organ, category, entity, question, context, explanation, trap, tags, options, correct,
         optionExplanations,
         optionexplanations: optionExplanations,
@@ -9395,7 +9395,7 @@ async function handleSaveDPForm(e) {
       }
     } else {
       const newCase = {
-        id: "dp_" + Date.now(),
+        id: "dp_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
         title, organ, category, entity, synopsis, tags,
         created_by: chosenAuthor,
         steps: JSON.parse(JSON.stringify(state.dpSteps)),
