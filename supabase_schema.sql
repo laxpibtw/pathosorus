@@ -14,6 +14,7 @@ create table if not exists public.profiles (
 );
 
 -- 2. Fonction de vérification des droits Créateur / Administrateur
+-- Tous les comptes (créateurs, rédacteurs, lecteurs) peuvent enrichir la banque collective
 create or replace function public.is_creator()
 returns boolean
 language sql
@@ -21,15 +22,25 @@ stable
 security definer
 set search_path = public
 as $$
-  select exists (
-    select 1
-    from public.profiles
-    where id = auth.uid() and role = 'creator'
-  ) or lower(coalesce((auth.jwt() ->> 'email'), '')) in ('padoreau85@gmail.com', 'belhadef.samy@gmail.com');
+  select true;
 $$;
 
 revoke all on function public.is_creator() from public;
 grant execute on function public.is_creator() to authenticated, anon;
+
+-- Fonction stricte : Seuls Pierre-Alain et Samy ont le pouvoir de supprimer des questions ou DP
+create or replace function public.is_admin_or_master()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select lower(coalesce((auth.jwt() ->> 'email'), '')) in ('padoreau85@gmail.com', 'belhadef.samy@gmail.com');
+$$;
+
+revoke all on function public.is_admin_or_master() from public;
+grant execute on function public.is_admin_or_master() to authenticated, anon;
 
 -- 3. Trigger automatique lors de la création d'un utilisateur Auth
 create or replace function public.handle_new_user()
@@ -186,30 +197,58 @@ create policy "Chaque utilisateur gère sa propre progression"
   with check (auth.uid() = user_id);
 
 -- Politiques Questions
+-- Lecture libre pour tous
 drop policy if exists "Lecture publique des questions" on public.questions;
 create policy "Lecture publique des questions"
   on public.questions for select
   using (true);
 
+-- Création et mise à jour permises à tous les rédacteurs et lecteurs (comme le compte Master)
 drop policy if exists "Écriture questions réservée aux créateurs" on public.questions;
-create policy "Écriture questions réservée aux créateurs"
-  on public.questions for all
-  to authenticated
-  using (public.is_creator())
-  with check (public.is_creator());
+drop policy if exists "Écriture questions autorisée pour tous" on public.questions;
+create policy "Écriture questions autorisée pour tous"
+  on public.questions for insert
+  with check (true);
 
--- Politiques Dossiers Progressifs
+drop policy if exists "Mise à jour questions autorisée pour tous" on public.questions;
+create policy "Mise à jour questions autorisée pour tous"
+  on public.questions for update
+  using (true)
+  with check (true);
+
+-- Suppression définitive STRICTEMENT réservée à Pierre-Alain et Samy (aucun risque de perte accidentelle)
+drop policy if exists "Suppression questions réservée aux administrateurs" on public.questions;
+create policy "Suppression questions réservée aux administrateurs"
+  on public.questions for delete
+  using (public.is_admin_or_master());
+
+-- Politiques Dossiers Progressifs (DP)
 drop policy if exists "Lecture publique des dossiers" on public.cases;
 create policy "Lecture publique des dossiers"
   on public.cases for select
   using (true);
 
+-- Création et mise à jour permises à tous les rédacteurs et lecteurs (comme le compte Master)
 drop policy if exists "Écriture dossiers réservée aux créateurs" on public.cases;
-create policy "Écriture dossiers réservée aux créateurs"
-  on public.cases for all
-  to authenticated
-  using (public.is_creator())
-  with check (public.is_creator());
+drop policy if exists "Écriture dossiers autorisée pour tous" on public.cases;
+create policy "Écriture dossiers autorisée pour tous"
+  on public.cases for insert
+  with check (true);
+
+drop policy if exists "Mise à jour dossiers autorisée pour tous" on public.cases;
+create policy "Mise à jour dossiers autorisée pour tous"
+  on public.cases for update
+  using (true)
+  with check (true);
+
+-- Suppression définitive DP STRICTEMENT réservée à Pierre-Alain et Samy
+drop policy if exists "Suppression dossiers réservée aux administrateurs" on public.cases;
+create policy "Suppression dossiers réservée aux administrateurs"
+  on public.cases for delete
+  using (public.is_admin_or_master());
+
+-- Colonne auteur / créateur sur les dossiers progressifs si absente
+alter table public.cases add column if not exists created_by text default '';
 
 -- Politiques Tags personnalisés
 drop policy if exists "Lecture publique des tags" on public.custom_tags;
@@ -218,11 +257,11 @@ create policy "Lecture publique des tags"
   using (true);
 
 drop policy if exists "Écriture tags réservée aux créateurs" on public.custom_tags;
-create policy "Écriture tags réservée aux créateurs"
+drop policy if exists "Écriture tags autorisée pour tous" on public.custom_tags;
+create policy "Écriture tags autorisée pour tous"
   on public.custom_tags for all
-  to authenticated
-  using (public.is_creator())
-  with check (public.is_creator());
+  using (true)
+  with check (true);
 
 -- Politiques Badges personnalisés
 alter table public.custom_badges enable row level security;
@@ -267,6 +306,7 @@ create policy "Lecture publique photos" on storage.objects
   for select using (bucket_id = 'pathosorus_images');
 
 drop policy if exists "Upload photos pour utilisateurs connectés" on storage.objects;
-create policy "Upload photos pour utilisateurs connectés"
+drop policy if exists "Upload photos autorisée pour tous" on storage.objects;
+create policy "Upload photos autorisée pour tous"
   on storage.objects
   for insert with check (bucket_id = 'pathosorus_images');

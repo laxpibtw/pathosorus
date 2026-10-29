@@ -151,6 +151,12 @@ const AUTHORIZED_CREATOR_EMAILS = new Set([
   'belhadef.samy@gmail.com'
 ]);
 
+function isAuthorizedToDelete(email = null) {
+  const targetEmail = (email || getCurrentUserEmail() || '').trim().toLowerCase();
+  return targetEmail === 'padoreau85@gmail.com' || targetEmail === 'belhadef.samy@gmail.com';
+}
+window.isAuthorizedToDelete = isAuthorizedToDelete;
+
 function getActiveUser() {
   if (state.currentUser && state.currentUser.email) {
     return state.currentUser;
@@ -159,7 +165,7 @@ function getActiveUser() {
   if (explicitLogout) {
     return null;
   }
-  // Par défaut sur tous les postes de travail (Mac 1 et Mac 2), session active en créateur
+  // Par défaut sur tous les postes de travail (Mac 1, Mac 2 et collègues), session active avec droits complets de rédaction
   const savedEmail = localStorage.getItem('pathosorus_current_email') || 'padoreau85@gmail.com';
   if (savedEmail && savedEmail.trim()) {
     const email = savedEmail.trim().toLowerCase();
@@ -167,7 +173,7 @@ function getActiveUser() {
       id: 'usr_' + email.replace(/[^a-z0-9]/gi, '_'),
       email: email,
       user_metadata: {
-        role: AUTHORIZED_CREATOR_EMAILS.has(email) ? 'creator' : 'reader'
+        role: 'creator' // Tous les comptes possèdent les droits complets d'enregistrement et de rédaction comme le Master
       }
     };
   }
@@ -180,7 +186,7 @@ function getCurrentUserEmail() {
 }
 
 function isCreator() {
-  return true; // Accès complet pour enrichir librement la banque collective (méthode Zenipad)
+  return true; // Accès complet pour enrichir librement la banque collective (méthode Zenipad) pour tous les comptes
 }
 
 function isReader() {
@@ -821,36 +827,31 @@ async function forceFullCloudSync() {
 window.forceFullCloudSync = forceFullCloudSync;
 window.pushAllLocalDataToAccountCloud = pushAllLocalDataToAccountCloud;
 
-async function resetToCloudBank() {
+async function syncCloudNowSafe() {
   if (!supabaseClient) {
     showToast("Supabase non connecté.", "error");
     return;
   }
-  showToast("Alignement strict sur Supabase en cours...", "info");
-  localStorage.removeItem(STORAGE_KEY_QUESTIONS);
-  localStorage.removeItem(STORAGE_KEY_CASES);
-  await fetchSupabaseData(true);
-  const total = (state.questions ? state.questions.length : 0) + (state.cases ? state.cases.length : 0);
-  showToast(`✅ Banque alignée sur Supabase : ${total} éléments (${state.questions.length} questions, ${state.cases.length} cas)`, "success");
-}
-window.resetToCloudBank = resetToCloudBank;
-
-async function syncCloudNow() {
-  const btn = document.getElementById('btn-quick-sync');
+  const btn = document.getElementById('btn-quick-sync') || document.querySelector('button[onclick*="syncCloudNowSafe"]') || document.querySelector('button[onclick*="resetToCloudBank"]');
   let originalHtml = '';
   if (btn) {
     originalHtml = btn.innerHTML;
     btn.classList.add('opacity-75', 'pointer-events-none');
-    btn.innerHTML = `<i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-teal-400 animate-spin"></i><span class="hidden xl:inline">Sync en cours...</span>`;
+    btn.innerHTML = `<i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-teal-400 animate-spin"></i><span>Sync en cours...</span>`;
     if (window.lucide) lucide.createIcons();
   }
+  showToast("Synchronisation Cloud bidirectionnelle sécurisée en cours...", "info");
   try {
-    if (!supabaseClient) initSupabase();
+    // 1. Envoyer d'abord tous les éléments locaux non synchronisés vers Supabase (questions et DP)
+    await autoSyncLocalDataToCloud();
+    // 2. Télécharger les nouveautés du Cloud et fusionner sans JAMAIS rien supprimer
     await fetchSupabaseData(true);
-    showRewardToast(`Banque Cloud synchronisée (${state.questions.length} questions) !`, "sparkles");
-  } catch (e) {
-    console.warn("Erreur syncCloudNow:", e);
-    showToast("Erreur lors de la synchronisation : " + (e.message || e), "error");
+    const totalQ = (state.questions ? state.questions.length : 0);
+    const totalC = (state.cases ? state.cases.length : 0);
+    showToast(`✅ Banque Cloud synchronisée : ${totalQ} questions et ${totalC} DP à jour !`, "success");
+  } catch (err) {
+    console.warn("Erreur lors de la synchronisation Cloud:", err);
+    showToast("Données locales sécurisées.", "info");
   } finally {
     if (btn) {
       btn.classList.remove('opacity-75', 'pointer-events-none');
@@ -859,7 +860,9 @@ async function syncCloudNow() {
     }
   }
 }
-window.syncCloudNow = syncCloudNow;
+window.syncCloudNowSafe = syncCloudNowSafe;
+window.resetToCloudBank = syncCloudNowSafe; // Remplacement sécurisé : NE SUPPRIME JAMAIS LE STOCKAGE LOCAL
+window.syncCloudNow = syncCloudNowSafe;
 
 async function syncStatsToCloud() {
   if (!supabaseClient || !state.currentUser) return;
@@ -2531,14 +2534,9 @@ async function fetchSupabaseData(silent = false) {
         };
       });
 
-      // Collecte des tombstones (questions et cas expressément supprimés)
+      // Collecte des tombstones Cloud (suppressions expressément validées par un administrateur)
       const deletedQuestionIds = new Set();
       const deletedCaseIds = new Set();
-
-      try {
-        const localDel = JSON.parse(localStorage.getItem('pathosorus_deleted_ids') || '[]');
-        if (Array.isArray(localDel)) localDel.forEach(id => deletedQuestionIds.add(id));
-      } catch (e) {}
 
       if (tRes && tRes.data && Array.isArray(tRes.data)) {
         tRes.data.forEach(t => {
@@ -2550,17 +2548,55 @@ async function fetchSupabaseData(silent = false) {
         });
       }
 
-      // Nettoyer localement toute trace des questions supprimées et purger Supabase si nécessaire
+      // Nettoyage intelligent du cache local de suppressions :
+      // Si une question ou un DP est vivant sur Supabase et qu'aucun tombstone DEL_ n'existe,
+      // c'est qu'il n'a JAMAIS été supprimé par Pierre-Alain ou Samy. On retire le faux positif local.
+      try {
+        let localDel = JSON.parse(localStorage.getItem('pathosorus_deleted_ids') || '[]');
+        if (Array.isArray(localDel)) {
+          const rawCloudQIds = new Set((qRes.data || []).map(q => q.id));
+          const rawCloudCIds = new Set(((cRes && cRes.data) || []).map(c => c.id));
+          localDel = localDel.filter(id => {
+            if (rawCloudQIds.has(id) && !deletedQuestionIds.has(id)) return false;
+            if (rawCloudCIds.has(id) && !deletedCaseIds.has(id)) return false;
+            return true;
+          });
+          localStorage.setItem('pathosorus_deleted_ids', JSON.stringify(localDel));
+          localDel.forEach(id => {
+            if (id.startsWith('dp_')) deletedCaseIds.add(id);
+            else deletedQuestionIds.add(id);
+          });
+        }
+      } catch (e) {}
+
+      // Nettoyer localement la progression des questions réellement supprimées
       deletedQuestionIds.forEach(delId => {
         if (state.userProgress && state.userProgress[delId]) delete state.userProgress[delId];
-        if (rawCloudQuestionsMap.has(delId)) {
-          supabaseClient.from('questions').delete().eq('id', delId).catch(() => {});
+      });
+
+      // FUSION SÉCURISÉE DES QUESTIONS (ZÉRO PERTE DE DONNÉES)
+      const validCloudQuestions = cloudQuestions.filter(q => !deletedQuestionIds.has(q.id));
+      const cloudQMap = new Map(validCloudQuestions.map(q => [q.id, q]));
+      const unsyncedQuestionsToPush = [];
+      const mergedQuestions = [...validCloudQuestions];
+
+      (state.questions || []).forEach(localQ => {
+        if (!localQ || !localQ.id || deletedQuestionIds.has(localQ.id)) return;
+        const remoteQ = cloudQMap.get(localQ.id);
+        if (!remoteQ) {
+          // Question créée localement non encore reçue par Supabase : NE JAMAIS L'ÉCRASER
+          localQ._localUnsynced = true;
+          mergedQuestions.push(localQ);
+          unsyncedQuestionsToPush.push(localQ);
+        } else if (localQ._localUnsynced || localQ._localEdited) {
+          // Modifications locales en cours
+          const idx = mergedQuestions.findIndex(q => q.id === localQ.id);
+          if (idx !== -1) mergedQuestions[idx] = { ...remoteQ, ...localQ };
+          unsyncedQuestionsToPush.push(mergedQuestions[idx]);
         }
       });
 
-      // Le Cloud Supabase est l'UNIQUE source de vérité absolue
-      // Aucune réinjection de vieux caches locaux : Supabase fait autorité à 100%
-      state.questions = cloudQuestions.filter(q => !deletedQuestionIds.has(q.id));
+      state.questions = mergedQuestions;
       localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
 
       // Sauvegarder dans le cache local propre à cet utilisateur pour la répétition espacée
@@ -2574,14 +2610,40 @@ async function fetchSupabaseData(silent = false) {
     }
 
     if (!cRes.error && cRes.data) {
-      state.cases = cRes.data
+      // FUSION SÉCURISÉE DES DOSSIERS PROGRESSIFS (DP)
+      const validCloudCases = cRes.data
         .filter(c => !deletedCaseIds.has(c.id))
         .map(c => ({
           ...c,
           tags: c.tags || [],
           steps: c.steps || []
         }));
+      const cloudCMap = new Map(validCloudCases.map(c => [c.id, c]));
+      const unsyncedCasesToPush = [];
+      const mergedCases = [...validCloudCases];
+
+      (state.cases || []).forEach(localC => {
+        if (!localC || !localC.id || deletedCaseIds.has(localC.id)) return;
+        const remoteC = cloudCMap.get(localC.id);
+        if (!remoteC) {
+          // Dossier Progressif créé localement non encore sur Supabase : NE JAMAIS L'ÉCRASER
+          localC._localUnsynced = true;
+          mergedCases.push(localC);
+          unsyncedCasesToPush.push(localC);
+        } else if (localC._localUnsynced || localC._localEdited) {
+          const idx = mergedCases.findIndex(c => c.id === localC.id);
+          if (idx !== -1) mergedCases[idx] = { ...remoteC, ...localC };
+          unsyncedCasesToPush.push(mergedCases[idx]);
+        }
+      });
+
+      state.cases = mergedCases;
       localStorage.setItem(STORAGE_KEY_CASES, JSON.stringify(state.cases));
+
+      // Auto-push automatique en tâche de fond pour garantir la persistance Cloud
+      if (unsyncedQuestionsToPush.length > 0 || unsyncedCasesToPush.length > 0) {
+        autoSyncLocalDataToCloud(unsyncedQuestionsToPush, unsyncedCasesToPush);
+      }
     }
 
     if (!tRes.error && tRes.data && tRes.data.length > 0) {
@@ -2777,10 +2839,76 @@ async function dbUpsertQuestion(q) {
   }
 }
 
-async function autoSyncLocalQuestionsToCloud() {
-  // Désactivé : Supabase est l'unique source de vérité. Aucune réinjection depuis le cache local.
-  return;
+async function autoSyncLocalDataToCloud(customQuestions = null, customCases = null) {
+  if (!supabaseClient) return;
+
+  const deletedQIds = new Set();
+  const deletedCIds = new Set();
+  try {
+    const localDel = JSON.parse(localStorage.getItem('pathosorus_deleted_ids') || '[]');
+    if (Array.isArray(localDel)) {
+      localDel.forEach(id => {
+        if (id.startsWith('dp_')) deletedCIds.add(id);
+        else deletedQIds.add(id);
+      });
+    }
+  } catch (e) {}
+
+  const questionsToSync = customQuestions || (state.questions || []).filter(q => 
+    q && q.id && (q._localUnsynced === true || q._localEdited === true) && !deletedQIds.has(q.id)
+  );
+
+  const casesToSync = customCases || (state.cases || []).filter(c => 
+    c && c.id && (c._localUnsynced === true || c._localEdited === true) && !deletedCIds.has(c.id)
+  );
+
+  let updated = false;
+
+  if (questionsToSync.length > 0) {
+    console.log(`🚀 Synchronisation Cloud de ${questionsToSync.length} question(s)...`);
+    for (const q of questionsToSync) {
+      try {
+        const res = await dbUpsertQuestion(q);
+        if (res && res.success) {
+          delete q._localUnsynced;
+          delete q._localEdited;
+          updated = true;
+        }
+      } catch (err) {
+        console.warn("Erreur auto-sync question vers Supabase:", q.id, err);
+      }
+    }
+  }
+
+  if (casesToSync.length > 0) {
+    console.log(`🚀 Synchronisation Cloud de ${casesToSync.length} Dossier(s) Progressif(s)...`);
+    for (const c of casesToSync) {
+      try {
+        const res = await dbUpsertCase(c);
+        if (res && res.success) {
+          delete c._localUnsynced;
+          delete c._localEdited;
+          updated = true;
+        }
+      } catch (err) {
+        console.warn("Erreur auto-sync DP vers Supabase:", c.id, err);
+      }
+    }
+  }
+
+  if (updated) {
+    saveQuestions();
+    saveCases();
+    broadcastLocalUpdate();
+    console.log("✅ Synchronisation des questions et DP locaux vers Supabase achevée !");
+  }
 }
+window.autoSyncLocalDataToCloud = autoSyncLocalDataToCloud;
+
+async function autoSyncLocalQuestionsToCloud() {
+  await autoSyncLocalDataToCloud();
+}
+window.autoSyncLocalQuestionsToCloud = autoSyncLocalQuestionsToCloud;
 
 async function dbDeleteQuestion(id) {
   if (!supabaseClient) return;
@@ -3190,6 +3318,7 @@ function switchTab(viewId) {
       if (contentEl) contentEl.classList.remove('hidden');
       setCreatorMode(state.creatorMode);
       renderStatementTemplates();
+      updateQuestionAuthorSelect();
     }
   }
 
@@ -7796,6 +7925,7 @@ async function handleSaveQuestionForm(e) {
           images: [...state.editorUploadedImages],
           explanationImages: [...(state.editorUploadedExplanationImages || [])],
           explanationimages: [...(state.editorUploadedExplanationImages || [])],
+          _localEdited: true,
           stats: {
             ...existingStats,
             created_by: chosenAuthor
@@ -7818,6 +7948,7 @@ async function handleSaveQuestionForm(e) {
         explanationimages: [...(state.editorUploadedExplanationImages || [])],
         flagged: false,
         mastered: false,
+        _localUnsynced: true,
         stats: {
           ...getDefaultQuestionStats(),
           created_by: chosenAuthor
@@ -7851,19 +7982,21 @@ async function handleSaveQuestionForm(e) {
 
     // 4. Synchronisation Supabase en arrière-plan sans JAMAIS figer l'écran
     if (supabaseClient && savedQuestion) {
-      dbUpsertQuestionWithTimeout(savedQuestion, 5000).then(res => {
-        if (res && res.error && !res.localOnly) {
-          savedQuestion._localUnsynced = true;
+      dbUpsertQuestionWithTimeout(savedQuestion, 7000).then(res => {
+        if (res && res.success) {
+          delete savedQuestion._localUnsynced;
+          delete savedQuestion._localEdited;
           saveQuestions();
-          updateSaveModalCloudStatus("error", res.error.message || "Erreur Supabase");
+          broadcastLocalUpdate();
+          updateSaveModalCloudStatus("synced");
         } else if (res && res.localOnly) {
           savedQuestion._localUnsynced = true;
           saveQuestions();
           updateSaveModalCloudStatus("localOnly");
         } else {
-          delete savedQuestion._localUnsynced;
+          savedQuestion._localUnsynced = true;
           saveQuestions();
-          updateSaveModalCloudStatus("synced");
+          updateSaveModalCloudStatus("error", (res && res.error && res.error.message) || "Erreur Supabase");
         }
       }).catch(err => {
         savedQuestion._localUnsynced = true;
@@ -8679,11 +8812,14 @@ function editQuestion(id) {
 }
 
 async function deleteQuestion(id) {
-  if (!isCreator()) {
-    alert("Action réservée aux comptes Créateurs.");
+  if (!isAuthorizedToDelete()) {
+    showToast("Action refusée : Seuls Pierre-Alain et Samy peuvent supprimer une question.", "warning");
+    alert("Action réservée aux administrateurs (Pierre-Alain & Samy).\nPour protéger l'intégrité de la banque collective contre toute perte de données, seuls Pierre-Alain et Samy sont habilités à supprimer définitivement une question.");
     return;
   }
-  if (!confirm("Voulez-vous supprimer cette question ?")) return;
+  const targetQ = state.questions.find(q => q.id === id);
+  const qTitle = targetQ ? `"${(targetQ.question || '').substring(0, 60)}..."` : 'cette question';
+  if (!confirm(`Êtes-vous sûr de vouloir supprimer définitivement ${qTitle} de la banque partagée ?`)) return;
 
   // 1. Enregistrer dans la liste locale des tombstones supprimés
   try {
@@ -9237,6 +9373,11 @@ async function handleSaveDPForm(e) {
     }
   }
 
+  const authorSelect = document.getElementById('form-q-author');
+  const chosenAuthor = (authorSelect && authorSelect.value && authorSelect.value !== '__NEW__')
+    ? authorSelect.value.trim().toLowerCase()
+    : ((state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : 'padoreau85@gmail.com');
+
   let savedCase = null;
 
   try {
@@ -9246,7 +9387,9 @@ async function handleSaveDPForm(e) {
         state.cases[idx] = {
           ...state.cases[idx],
           title, organ, category, entity, synopsis, tags,
-          steps: JSON.parse(JSON.stringify(state.dpSteps))
+          created_by: state.cases[idx].created_by || chosenAuthor,
+          steps: JSON.parse(JSON.stringify(state.dpSteps)),
+          _localEdited: true
         };
         savedCase = state.cases[idx];
       }
@@ -9254,7 +9397,9 @@ async function handleSaveDPForm(e) {
       const newCase = {
         id: "dp_" + Date.now(),
         title, organ, category, entity, synopsis, tags,
-        steps: JSON.parse(JSON.stringify(state.dpSteps))
+        created_by: chosenAuthor,
+        steps: JSON.parse(JSON.stringify(state.dpSteps)),
+        _localUnsynced: true
       };
       state.cases.push(newCase);
       savedCase = newCase;
@@ -9282,17 +9427,30 @@ async function handleSaveDPForm(e) {
 
     // Synchronisation en tâche de fond non bloquante
     if (supabaseClient && savedCase) {
-      dbUpsertCaseWithTimeout(savedCase, 5000).then(res => {
-        if (res && res.error && !res.localOnly) {
-          updateSaveModalCloudStatus("error", res.error.message || "Erreur Supabase");
+      dbUpsertCaseWithTimeout(savedCase, 7000).then(res => {
+        if (res && res.success) {
+          delete savedCase._localUnsynced;
+          delete savedCase._localEdited;
+          saveCases();
+          broadcastLocalUpdate();
+          updateSaveModalCloudStatus("synced");
         } else if (res && res.localOnly) {
+          savedCase._localUnsynced = true;
+          saveCases();
           updateSaveModalCloudStatus("localOnly");
         } else {
-          updateSaveModalCloudStatus("synced");
+          savedCase._localUnsynced = true;
+          saveCases();
+          updateSaveModalCloudStatus("error", (res && res.error && res.error.message) || "Erreur Supabase");
         }
       }).catch(e => {
+        savedCase._localUnsynced = true;
+        saveCases();
         updateSaveModalCloudStatus("error", e.message || "Erreur réseau");
       });
+    } else if (savedCase) {
+      savedCase._localUnsynced = true;
+      saveCases();
     }
 
   } catch (err) {
@@ -9338,11 +9496,14 @@ function editDP(id) {
 }
 
 async function deleteDP(id) {
-  if (!isCreator()) {
-    alert("Action réservée aux comptes Créateurs.");
+  if (!isAuthorizedToDelete()) {
+    showToast("Action refusée : Seuls Pierre-Alain et Samy peuvent supprimer un Dossier Progressif.", "warning");
+    alert("Action réservée aux administrateurs (Pierre-Alain & Samy).\nPour protéger l'intégrité de la banque collective contre toute perte de données, seuls Pierre-Alain et Samy sont habilités à supprimer définitivement un Dossier Progressif.");
     return;
   }
-  if (!confirm("Voulez-vous supprimer ce Dossier Progressif ?")) return;
+  const targetC = state.cases.find(c => c.id === id);
+  const cTitle = targetC ? `"${targetC.title}"` : 'ce Dossier Progressif';
+  if (!confirm(`Êtes-vous sûr de vouloir supprimer définitivement ${cTitle} de la banque partagée ?`)) return;
 
   try {
     const del = JSON.parse(localStorage.getItem('pathosorus_deleted_ids') || '[]');
@@ -11180,13 +11341,15 @@ function renderBank() {
   let scopedCases = baseFilteredCases;
 
   if (state.bankSelectedOrgan !== 'all') {
-    scopedQ = scopedQ.filter(q => (q.organ || "Autre") === state.bankSelectedOrgan);
-    scopedCases = scopedCases.filter(c => (c.organ || "Autre") === state.bankSelectedOrgan);
+    const selOrganNorm = state.bankSelectedOrgan.trim().toLowerCase();
+    scopedQ = scopedQ.filter(q => (q.organ || "Autre").trim().toLowerCase() === selOrganNorm);
+    scopedCases = scopedCases.filter(c => (c.organ || "Autre").trim().toLowerCase() === selOrganNorm);
   }
 
   if (state.bankSelectedCategory !== 'all') {
-    scopedQ = scopedQ.filter(q => (q.category || "Général") === state.bankSelectedCategory);
-    scopedCases = scopedCases.filter(c => (c.category || "Général") === state.bankSelectedCategory);
+    const selCatNorm = state.bankSelectedCategory.trim().toLowerCase();
+    scopedQ = scopedQ.filter(q => (q.category || "Général").trim().toLowerCase() === selCatNorm);
+    scopedCases = scopedCases.filter(c => (c.category || "Général").trim().toLowerCase() === selCatNorm);
   }
 
   if (scopedQ.length === 0 && scopedCases.length === 0) {
@@ -11415,11 +11578,11 @@ function renderBank() {
             <i data-lucide="play" class="w-3.5 h-3.5"></i>
             <span>Jouer</span>
           </button>
-          ${isCreator() ? `
           <button onclick="editDP('${escapeJsString(c.id)}')" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Modifier le DP">
             <i data-lucide="edit-3" class="w-4 h-4"></i>
           </button>
-          <button onclick="deleteDP('${escapeJsString(c.id)}')" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition" title="Supprimer le DP">
+          ${isAuthorizedToDelete() ? `
+          <button onclick="deleteDP('${escapeJsString(c.id)}')" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition" title="Supprimer le DP (Admin)">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
           ` : ''}
@@ -11479,11 +11642,11 @@ function renderBank() {
             <i data-lucide="${q.mastered ? 'check-check' : 'award'}" class="w-3.5 h-3.5"></i>
             <span>${q.mastered ? 'Maîtrisée' : 'Neutraliser'}</span>
           </button>
-          ${isCreator() ? `
           <button onclick="editQuestion('${escapeJsString(q.id)}')" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Modifier">
             <i data-lucide="edit-3" class="w-4 h-4"></i>
           </button>
-          <button onclick="deleteQuestion('${escapeJsString(q.id)}')" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition" title="Supprimer">
+          ${isAuthorizedToDelete() ? `
+          <button onclick="deleteQuestion('${escapeJsString(q.id)}')" class="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition" title="Supprimer (Admin)">
             <i data-lucide="trash-2" class="w-4 h-4"></i>
           </button>
           ` : ''}

@@ -83,7 +83,7 @@ exports.handler = async (event) => {
       });
       if (userRes.ok) {
         const u = await userRes.json();
-        if (u && u.email && u.email.toLowerCase() === "padoreau85@gmail.com") {
+        if (u && u.email && (u.email.toLowerCase() === "padoreau85@gmail.com" || u.email.toLowerCase() === "belhadef.samy@gmail.com")) {
           isCreator = true;
         }
       }
