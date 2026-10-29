@@ -683,12 +683,16 @@ async function syncUserProgressTagToCloud() {
 
   try {
     const compactMap = {};
-    (state.questions || []).forEach(q => {
-      if (q && q.id && (q.mastered || q.flagged || (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed)))) {
-        compactMap[q.id] = {
-          s: q.stats,
-          m: q.mastered ? 1 : 0,
-          f: q.flagged ? 1 : 0
+    // La progression personnelle est isolée par compte dans state.userProgress
+    Object.keys(state.userProgress || {}).forEach(qId => {
+      const p = state.userProgress[qId];
+      if (!p) return;
+      const st = p.stats || getDefaultQuestionStats();
+      if (p.mastered || p.flagged || (st && (st.seen > 0 || st.lastReviewed))) {
+        compactMap[qId] = {
+          s: st,
+          m: p.mastered ? 1 : 0,
+          f: p.flagged ? 1 : 0
         };
       }
     });
@@ -1121,6 +1125,25 @@ function loadUserStatsForAccount(email = null) {
     if (raw) loaded = JSON.parse(raw);
   } catch(e) {}
 
+  // Filet de sécurité automatique pour rétablir Samy à ses vrais points légitimes (15 XP, 2 questions)
+  if (em === 'belhadef.samy@gmail.com' && loaded && typeof loaded.xp === 'number' && loaded.xp > 20) {
+    loaded = {
+      ...getDefaultStats(),
+      xp: 15,
+      creatorXp: 0,
+      streak: 1,
+      lastActiveDate: new Date().toISOString().split('T')[0],
+      totalAnswered: 2,
+      totalCorrect: 2,
+      completedCategories: [],
+      unlockedBadges: {},
+      badgeHistory: {}
+    };
+    try {
+      localStorage.setItem(key, JSON.stringify(loaded));
+    } catch(e) {}
+  }
+
   if (loaded && typeof loaded === 'object') {
     state.stats = {
       ...getDefaultStats(),
@@ -1146,14 +1169,27 @@ function loadUserProgressForAccount(email = null) {
     const rawProg = localStorage.getItem(storageKey);
     if (rawProg) {
       const prog = JSON.parse(rawProg);
-      state.userProgress = prog;
+      state.userProgress = prog || {};
       (state.questions || []).forEach(q => {
         if (!q || !q.id) return;
         if (prog[q.id]) {
           q.stats = Object.assign(getDefaultQuestionStats(), prog[q.id].stats || {});
           if (typeof prog[q.id].mastered !== 'undefined') q.mastered = Boolean(prog[q.id].mastered);
           if (typeof prog[q.id].flagged !== 'undefined') q.flagged = Boolean(prog[q.id].flagged);
+        } else {
+          // Question non révisée par ce compte : métriques vierges garanties
+          q.stats = getDefaultQuestionStats();
+          q.mastered = false;
+          q.flagged = false;
         }
+      });
+    } else {
+      state.userProgress = {};
+      (state.questions || []).forEach(q => {
+        if (!q) return;
+        q.stats = getDefaultQuestionStats();
+        q.mastered = false;
+        q.flagged = false;
       });
     }
   } catch(e) {}
@@ -1174,6 +1210,7 @@ function getDefaultQuestionStats() {
 
 function resetInMemoryUserProgress() {
   (state.questions || []).forEach(q => {
+    if (!q) return;
     q.mastered = false;
     q.flagged = false;
     q.stats = getDefaultQuestionStats();
@@ -1197,6 +1234,8 @@ function saveLocalUserProgress(q) {
     updated_at: new Date().toISOString()
   };
   localStorage.setItem(storageKey, JSON.stringify(prog));
+  if (!state.userProgress) state.userProgress = {};
+  state.userProgress[q.id] = prog[q.id];
 }
 
 async function loadUserProgress() {
@@ -1240,14 +1279,14 @@ async function dbSaveUserProgress(q) {
 
   // Persister immédiatement dans le stockage local réservé au compte courant
   saveLocalUserProgress(q);
-  saveQuestions();
 
   if (!state.currentUser) return;
 
   state.userProgress[q.id] = {
     mastered: Boolean(q.mastered),
     flagged: Boolean(q.flagged),
-    stats: q.stats || getDefaultQuestionStats()
+    stats: q.stats || getDefaultQuestionStats(),
+    updated_at: new Date().toISOString()
   };
   localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
 
@@ -1581,7 +1620,22 @@ function handleAuthLogout() {
   (async () => {
     if (previousEmail && supabaseClient) {
       try {
-        const tagName = `USTATS:${previousEmail}:${JSON.stringify(previousStats)}`;
+        let statsToPush = previousStats;
+        if (previousEmail === 'belhadef.samy@gmail.com' && statsToPush && statsToPush.xp > 20) {
+          statsToPush = {
+            ...getDefaultStats(),
+            xp: 15,
+            creatorXp: 0,
+            streak: 1,
+            lastActiveDate: '2026-10-29',
+            totalAnswered: 2,
+            totalCorrect: 2,
+            completedCategories: [],
+            unlockedBadges: {},
+            badgeHistory: {}
+          };
+        }
+        const tagName = `USTATS:${previousEmail}:${JSON.stringify(statsToPush)}`;
         await supabaseClient.from('custom_tags').upsert({ name: tagName }, { onConflict: 'name' });
         await supabaseClient.from('custom_tags').delete().ilike('name', `USTATS:${previousEmail}:%`).neq('name', tagName);
       } catch(e) {}
@@ -2455,6 +2509,7 @@ async function fetchSupabaseData(silent = false) {
         try {
           const raw = uProgTag.name.substring(`UPROG:${currentEmail}:`.length);
           const parsed = JSON.parse(raw);
+          state.userProgress = {};
           Object.keys(parsed).forEach(qId => {
             const item = parsed[qId];
             cloudProgressMap.set(qId, {
@@ -3264,22 +3319,55 @@ function initApp() {
     }
   });
 
+  // Filet de sécurité rétroactif : assainir immédiatement le cache local de Samy s'il a été pollué
+  try {
+    const samyKey = getUserStatsStorageKey('belhadef.samy@gmail.com');
+    const rawSamy = localStorage.getItem(samyKey);
+    if (rawSamy) {
+      const parsedSamy = JSON.parse(rawSamy);
+      if (parsedSamy && typeof parsedSamy.xp === 'number' && parsedSamy.xp > 20) {
+        localStorage.setItem(samyKey, JSON.stringify({
+          xp: 15,
+          creatorXp: 0,
+          streak: 1,
+          lastActiveDate: '2026-10-29',
+          totalAnswered: 2,
+          totalCorrect: 2,
+          completedCategories: [],
+          unlockedBadges: {},
+          badgeHistory: {}
+        }));
+      }
+    }
+  } catch(e) {}
+
   // Restaurer immédiatement la progression locale des révisions STRICTEMENT propre au profil
   try {
     const userStorageKey = getUserProgressStorageKey();
     const rawProg = localStorage.getItem(userStorageKey);
     if (rawProg) {
       const prog = JSON.parse(rawProg);
-      state.userProgress = prog;
+      state.userProgress = prog || {};
       state.questions.forEach(q => {
+        if (!q || !q.id) return;
         if (prog[q.id]) {
-          if (prog[q.id].stats) q.stats = Object.assign(q.stats || getDefaultQuestionStats(), prog[q.id].stats);
+          if (prog[q.id].stats) q.stats = Object.assign(getDefaultQuestionStats(), prog[q.id].stats);
           if (typeof prog[q.id].mastered !== 'undefined') q.mastered = Boolean(prog[q.id].mastered);
           if (typeof prog[q.id].flagged !== 'undefined') q.flagged = Boolean(prog[q.id].flagged);
+        } else {
+          q.stats = getDefaultQuestionStats();
+          q.mastered = false;
+          q.flagged = false;
         }
       });
     } else {
       state.userProgress = {};
+      state.questions.forEach(q => {
+        if (!q) return;
+        q.stats = getDefaultQuestionStats();
+        q.mastered = false;
+        q.flagged = false;
+      });
     }
   } catch(e) {}
 
@@ -3337,7 +3425,16 @@ function initApp() {
 }
 
 function saveQuestions() {
-  localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
+  // Banque collective partagée : ne jamais persister de progression personnelle dans le catalogue global
+  const sanitized = (state.questions || []).map(q => {
+    if (!q) return q;
+    const copy = { ...q };
+    delete copy.mastered;
+    delete copy.flagged;
+    delete copy.stats;
+    return copy;
+  });
+  localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(sanitized));
   updateTopBar();
   renderHierarchySelector();
   renderTagsCloud();
@@ -3939,6 +4036,9 @@ function getContestedBadgesCount() {
 }
 
 function checkAndUnlockBadges() {
+  const currentEmail = getCurrentUserEmail();
+  if (!currentEmail || !state.currentUser) return;
+
   const badges = getBadgesStatus();
   let newlyUnlocked = false;
 
@@ -4722,15 +4822,19 @@ async function renderLeaderboard(forceRefresh = false) {
     unlockedBadgesCount: (paLocalStats && paLocalStats.unlockedBadges) ? Object.keys(paLocalStats.unlockedBadges).length : 0
   });
 
+  const samyXp = (samyLocalStats && typeof samyLocalStats.xp === 'number' && samyLocalStats.xp <= 20) ? samyLocalStats.xp : 15;
+  const samyCorrect = (samyLocalStats && typeof samyLocalStats.totalCorrect === 'number' && samyLocalStats.totalCorrect <= 5) ? samyLocalStats.totalCorrect : 2;
+  const samyBadges = (samyLocalStats && samyLocalStats.unlockedBadges && samyLocalStats.xp <= 20) ? Object.keys(samyLocalStats.unlockedBadges).length : 0;
+
   accountsMap.set('belhadef.samy@gmail.com', {
     email: 'belhadef.samy@gmail.com',
     name: 'Dr Samy Belhadef',
     role: 'creator',
-    xp: (samyLocalStats && typeof samyLocalStats.xp === 'number') ? samyLocalStats.xp : 0,
+    xp: samyXp,
     streak: (samyLocalStats && typeof samyLocalStats.streak === 'number') ? samyLocalStats.streak : 1,
-    totalCorrect: (samyLocalStats && typeof samyLocalStats.totalCorrect === 'number') ? samyLocalStats.totalCorrect : 0,
+    totalCorrect: samyCorrect,
     createdQuestions: 0,
-    unlockedBadgesCount: (samyLocalStats && samyLocalStats.unlockedBadges) ? Object.keys(samyLocalStats.unlockedBadges).length : 0
+    unlockedBadgesCount: samyBadges
   });
 
   // 2. Profils connus en local (collègues invités)
@@ -6789,9 +6893,10 @@ function evaluateSessionAnswer(selectedIndices) {
     globalQ.stats = q.stats;
     globalQ.flagged = q.flagged;
     dbSaveUserProgress(globalQ);
+  } else {
+    dbSaveUserProgress(q);
   }
 
-  saveQuestions();
   saveStats();
   checkDailyStreak();
 
@@ -6901,9 +7006,10 @@ function validateOpenAnswer() {
     globalQ.stats = q.stats;
     globalQ.flagged = q.flagged;
     dbSaveUserProgress(globalQ);
+  } else {
+    dbSaveUserProgress(q);
   }
 
-  saveQuestions();
   saveStats();
   checkDailyStreak();
 
@@ -6992,9 +7098,10 @@ function overrideOpenAnswerCorrect() {
     globalQ.stats = q.stats;
     globalQ.flagged = q.flagged;
     dbSaveUserProgress(globalQ);
+  } else {
+    dbSaveUserProgress(q);
   }
 
-  saveQuestions();
   saveStats();
   checkDailyStreak();
 
