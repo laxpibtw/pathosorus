@@ -1447,16 +1447,15 @@ async function handleAuthLoginSubmit(e) {
 
     // 2. Connexion réussie avec vrai compte et UUID Supabase
     state.currentUser = data.user;
+    state.currentRole = isAuthorizedCreator ? 'creator' : 'reader';
     localStorage.removeItem('pathosorus_explicit_logout');
     localStorage.setItem('pathosorus_current_email', normalizedEmail);
 
-    // 3. Charger le rôle, insérer/mettre à jour dans public.profiles avec l'UUID officiel
-    await fetchCurrentUserRole();
-    checkDailyStreak();
-    await fetchSupabaseData(true);
-    checkDailyStreak();
+    // 3. Charger immédiatement les données locales de cet utilisateur (0 ms)
+    loadUserStatsForAccount(normalizedEmail);
+    loadUserProgressForAccount(normalizedEmail);
 
-    // 4. Fermer la modale et mettre à jour l'interface
+    // 4. Fermer la modale IMMÉDIATEMENT et mettre à jour l'interface (aucun blocage UI)
     closeAuthModal();
     updateUserRoleUI();
     updateTopBar();
@@ -1464,8 +1463,26 @@ async function handleAuthLoginSubmit(e) {
     renderBank();
     renderTrophiesView();
 
-    const isAuthorizedCreator = (state.currentRole === 'creator');
-    showToast(`Bienvenue ${isAuthorizedCreator ? (normalizedEmail === 'padoreau85@gmail.com' ? 'Dr Pierre-Alain Doreau' : 'Dr Samy Belhadef') : normalizedEmail} ! Connecté avec succès.`, "success");
+    const displayName = (normalizedEmail === 'padoreau85@gmail.com') ? 'Dr Pierre-Alain Doreau' : ((normalizedEmail === 'belhadef.samy@gmail.com') ? 'Dr Samy Belhadef' : normalizedEmail);
+    showToast(`Bienvenue ${displayName} ! Connecté avec succès.`, "success");
+
+    // 5. Synchronisation complète Cloud en arrière-plan fluide (non-bloquant)
+    (async () => {
+      try {
+        await fetchCurrentUserRole();
+        checkDailyStreak();
+        await fetchSupabaseData(true);
+        checkDailyStreak();
+        updateTopBar();
+        renderSpacedRepetitionDashboard();
+        renderBank();
+        renderTrophiesView();
+        renderLeaderboard();
+        if (window.lucide) lucide.createIcons();
+      } catch (syncErr) {
+        console.warn("Sync arrière-plan connexion:", syncErr);
+      }
+    })();
 
   } catch (err) {
     console.error("Erreur connexion:", err);
@@ -3169,8 +3186,10 @@ function initApp() {
   const storedQ = localStorage.getItem(STORAGE_KEY_QUESTIONS);
   state.questions = storedQ ? JSON.parse(storedQ) : [];
   state.questions.forEach(q => {
-    if (typeof q.mastered === 'undefined') q.mastered = false;
-    if (!q.stats) q.stats = { seen: 0, correct: 0, consecutiveCorrect: 0, lastReviewed: null, nextReviewDate: null, intervalDays: 0 };
+    // Les questions constituent la banque partagée : réinitialisation des métriques personnelles
+    q.mastered = false;
+    q.flagged = false;
+    q.stats = getDefaultQuestionStats();
     if (!q.explanationImages) q.explanationImages = q.explanationimages || [];
     if (!q.images) q.images = [];
     if (!q.acceptedAnswers) q.acceptedAnswers = q.acceptedanswers || (q.format === 'ouverte' ? (q.options || []) : []);
@@ -3196,18 +3215,13 @@ function initApp() {
     }
   });
 
-  // Restaurer immédiatement la progression locale des révisions propre au profil
+  // Restaurer immédiatement la progression locale des révisions STRICTEMENT propre au profil
   try {
     const userStorageKey = getUserProgressStorageKey();
-    let rawProg = localStorage.getItem(userStorageKey);
-    if (!rawProg) {
-      rawProg = localStorage.getItem('pathosorus_user_progress_guest') || localStorage.getItem('pathosorus_user_progress');
-      if (rawProg) {
-        localStorage.setItem(userStorageKey, rawProg);
-      }
-    }
+    const rawProg = localStorage.getItem(userStorageKey);
     if (rawProg) {
       const prog = JSON.parse(rawProg);
+      state.userProgress = prog;
       state.questions.forEach(q => {
         if (prog[q.id]) {
           if (prog[q.id].stats) q.stats = Object.assign(q.stats || getDefaultQuestionStats(), prog[q.id].stats);
@@ -3215,6 +3229,8 @@ function initApp() {
           if (typeof prog[q.id].flagged !== 'undefined') q.flagged = Boolean(prog[q.id].flagged);
         }
       });
+    } else {
+      state.userProgress = {};
     }
   } catch(e) {}
 
@@ -3241,16 +3257,29 @@ function initApp() {
   }
 
   // Migration propre : réinitialisation des caches locaux pollués pour garantir XP=0 et Trophées=0
-  const RESET_STATS_FLAG = 'pathosorus_reset_xp_trophies_v20261029_clean';
+  const RESET_STATS_FLAG = 'pathosorus_reset_xp_trophies_v20261029_clean_v4';
   if (!localStorage.getItem(RESET_STATS_FLAG)) {
     localStorage.setItem(RESET_STATS_FLAG, 'true');
     localStorage.removeItem(STORAGE_KEY_STATS);
-    Object.keys(localStorage).forEach(k => {
-      if (k.startsWith('pathosorus_stats_') || k.startsWith('pathotrainer_custom_stats')) {
-        localStorage.removeItem(k);
-      }
-    });
-    state.stats = getDefaultStats();
+    localStorage.removeItem('pathosorus_user_progress');
+    localStorage.removeItem('pathosorus_user_progress_guest');
+    localStorage.removeItem('pathosorus_stats_guest');
+
+    const curEmail = (getCurrentUserEmail() || '').toLowerCase();
+    // Samy ou compte non-master repart avec un profil 100% vierge localement
+    if (curEmail === 'belhadef.samy@gmail.com') {
+      localStorage.removeItem('pathosorus_stats_belhadef_samy_gmail_com');
+      localStorage.removeItem('pathosorus_user_progress_belhadef_samy_gmail_com');
+      state.stats = getDefaultStats();
+      state.userProgress = {};
+      (state.questions || []).forEach(q => {
+        q.mastered = false;
+        q.flagged = false;
+        q.stats = getDefaultQuestionStats();
+      });
+    } else {
+      loadUserStatsForAccount(curEmail);
+    }
   } else {
     loadUserStatsForAccount(getCurrentUserEmail());
   }
@@ -3731,7 +3760,8 @@ function getBadgesStatus() {
       progressText = isNowMet ? '1 / 1 résolue' : '0 / 1 résolue';
     }
 
-    let wasUnlocked = !!(state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
+    const isUnlockedInStats = !!(state.stats.unlockedBadges && state.stats.unlockedBadges[b.id]);
+    let wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
     let status = 'locked';
 
     // Mécanique du badge contesté pour les badges de pathologie
@@ -3739,9 +3769,8 @@ function getBadgesStatus() {
       status = 'contested';
     } else if (isNowMet) {
       status = 'unlocked';
-      if (!state.stats.badgeHistory[b.id]) {
-        state.stats.badgeHistory[b.id] = { unlocked: true, unlockedAt: Date.now() };
-      }
+    } else if (wasUnlocked) {
+      status = 'unlocked';
     }
 
     const displayName = (state.stats && state.stats.trophyCustomNames && state.stats.trophyCustomNames[b.id]) || b.name;
@@ -3781,7 +3810,8 @@ function getBadgesStatus() {
       const badgeId = `organ_${org.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${t.pct}`;
       const targetCount = Math.max(1, Math.ceil((t.pct / 100) * totalInOrg));
       const isNowMet = completedInOrg >= targetCount;
-      const wasUnlocked = !!(state.stats.badgeHistory[badgeId] && state.stats.badgeHistory[badgeId].unlocked);
+      const isUnlockedInStats = !!(state.stats.unlockedBadges && state.stats.unlockedBadges[badgeId]);
+      const wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[badgeId] && state.stats.badgeHistory[badgeId].unlocked);
 
       let status = 'locked';
       const missingCount = Math.max(0, targetCount - completedInOrg);
@@ -3791,9 +3821,6 @@ function getBadgesStatus() {
         status = 'contested'; // GRISÉ / CONTESTÉ !
       } else if (isNowMet) {
         status = 'unlocked';
-        if (!state.stats.badgeHistory[badgeId]) {
-          state.stats.badgeHistory[badgeId] = { unlocked: true, unlockedAt: Date.now() };
-        }
       }
 
       const progressPercent = Math.min(100, Math.round((completedInOrg / targetCount) * 100));
@@ -3847,22 +3874,23 @@ function getBadgesStatus() {
       progressText = `${streak} / ${target} jours`;
       missingCount = Math.max(0, target - streak);
     } else {
-      const wasUnlocked = !!(state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
+      const isUnlockedInStats = !!(state.stats.unlockedBadges && state.stats.unlockedBadges[b.id]);
+      const wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
       isNowMet = wasUnlocked;
       progressPercent = wasUnlocked ? 100 : 0;
       progressText = wasUnlocked ? 'Défi accompli !' : 'Défi à valider';
     }
 
-    const wasUnlocked = !!(state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
+    const isUnlockedInStats = !!(state.stats.unlockedBadges && state.stats.unlockedBadges[b.id]);
+    const wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
     let status = 'locked';
 
     if (wasUnlocked && !isNowMet && b.conditionType === 'organ_mastery') {
       status = 'contested';
     } else if (isNowMet) {
       status = 'unlocked';
-      if (!state.stats.badgeHistory[b.id]) {
-        state.stats.badgeHistory[b.id] = { unlocked: true, unlockedAt: Date.now() };
-      }
+    } else if (wasUnlocked) {
+      status = 'unlocked';
     }
 
     const displayName = (state.stats && state.stats.trophyCustomNames && state.stats.trophyCustomNames[b.id]) || b.name;
@@ -3895,6 +3923,8 @@ function checkAndUnlockBadges() {
       if (!state.stats.unlockedBadges) state.stats.unlockedBadges = {};
       if (!state.stats.unlockedBadges[b.id]) {
         state.stats.unlockedBadges[b.id] = Date.now();
+        if (!state.stats.badgeHistory) state.stats.badgeHistory = {};
+        state.stats.badgeHistory[b.id] = { unlocked: true, unlockedAt: Date.now() };
         newlyUnlocked = true;
         const reward = getTrophyXpReward(b);
         state.stats.xp = (state.stats.xp || 0) + reward;
@@ -4209,14 +4239,14 @@ async function renderLeaderboard() {
     });
   }
 
-  // 3. Lire Supabase profiles et USTATS (avec timeout de sécurité de 2000ms pour ne JAMAIS figer l'écran)
+  // 3. Lire Supabase profiles et USTATS (avec timeout de sécurité de 8000ms pour garantir le chargement distant)
   if (supabaseClient) {
     try {
       const fetchPromise = Promise.allSettled([
         supabaseClient.from('profiles').select('*').limit(50),
         supabaseClient.from('custom_tags').select('name').like('name', 'USTATS:%')
       ]);
-      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 2000));
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 8000));
       const res = await Promise.race([fetchPromise, timeoutPromise]);
 
       if (res && Array.isArray(res)) {
@@ -4227,6 +4257,12 @@ async function renderLeaderboard() {
               const em = p.email.trim().toLowerCase();
               const existing = accountsMap.get(em) || {};
               const stats = p.stats || {};
+              let profBadgesCount = 0;
+              if (stats.unlockedBadges && typeof stats.unlockedBadges === 'object') {
+                profBadgesCount = Object.keys(stats.unlockedBadges).length;
+              } else if (typeof stats.unlockedBadgesCount === 'number') {
+                profBadgesCount = stats.unlockedBadgesCount;
+              }
               accountsMap.set(em, {
                 ...existing,
                 id: p.id,
@@ -4235,7 +4271,8 @@ async function renderLeaderboard() {
                 role: p.role || existing.role || (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com' ? 'creator' : 'reader'),
                 xp: typeof stats.xp === 'number' ? stats.xp : (existing.xp || 0),
                 streak: typeof stats.streak === 'number' ? stats.streak : (existing.streak || 1),
-                totalCorrect: typeof stats.totalCorrect === 'number' ? stats.totalCorrect : (existing.totalCorrect || 0)
+                totalCorrect: typeof stats.totalCorrect === 'number' ? stats.totalCorrect : (existing.totalCorrect || 0),
+                unlockedBadgesCount: Math.max(existing.unlockedBadgesCount || 0, profBadgesCount)
               });
             }
           });
@@ -4249,13 +4286,20 @@ async function renderLeaderboard() {
                 const em = parts[1].trim().toLowerCase();
                 const st = JSON.parse(rawJson);
                 const existing = accountsMap.get(em) || {};
+                let tagBadgesCount = 0;
+                if (st.unlockedBadges && typeof st.unlockedBadges === 'object') {
+                  tagBadgesCount = Object.keys(st.unlockedBadges).length;
+                } else if (typeof st.unlockedBadgesCount === 'number') {
+                  tagBadgesCount = st.unlockedBadgesCount;
+                }
                 accountsMap.set(em, {
                   ...existing,
                   email: em,
                   name: existing.name || (em === 'padoreau85@gmail.com' ? 'Pierre-Alain Doreau' : (em === 'belhadef.samy@gmail.com' ? 'Samy Belhadef' : em.split('@')[0])),
                   xp: Math.max(existing.xp || 0, st.xp || 0),
                   streak: Math.max(existing.streak || 1, st.streak || 1),
-                  totalCorrect: Math.max(existing.totalCorrect || 0, st.totalCorrect || 0)
+                  totalCorrect: Math.max(existing.totalCorrect || 0, st.totalCorrect || 0),
+                  unlockedBadgesCount: Math.max(existing.unlockedBadgesCount || 0, tagBadgesCount)
                 });
               } catch(e) {}
             }
@@ -4271,8 +4315,7 @@ async function renderLeaderboard() {
   if (state.currentUser && state.currentUser.email) {
     const curEmail = state.currentUser.email.trim().toLowerCase();
     const defaultName = curEmail === 'padoreau85@gmail.com' ? 'Pierre-Alain Doreau' : (curEmail === 'belhadef.samy@gmail.com' ? 'Samy Belhadef' : curEmail.split('@')[0]);
-    const allBadges = getBadgesStatus();
-    const unlockedCount = allBadges.filter(b => b.status === 'unlocked').length;
+    const selfBadgesCount = (state.stats && state.stats.unlockedBadges) ? Object.keys(state.stats.unlockedBadges).length : 0;
 
     accountsMap.set(curEmail, {
       ...(accountsMap.get(curEmail) || {}),
@@ -4282,7 +4325,7 @@ async function renderLeaderboard() {
       xp: state.stats.xp || 0,
       streak: state.stats.streak || 1,
       totalCorrect: state.stats.totalCorrect || 0,
-      unlockedBadgesCount: unlockedCount,
+      unlockedBadgesCount: selfBadgesCount,
       isSelf: true
     });
   }
