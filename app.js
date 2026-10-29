@@ -143,8 +143,11 @@ let state = {
   bankSelectedCategory: 'all',
   bankCollapsedOrgans: new Set(),
   bankExpandedLesions: new Set(),
-  currentRenderedLesionKeys: []
+  currentRenderedLesionKeys: [],
+  duelOpponentEmail: null
 };
+
+let _isHandlingAuthLogin = false;
 
 const AUTHORIZED_CREATOR_EMAILS = new Set([
   'padoreau85@gmail.com',
@@ -619,6 +622,7 @@ async function initAuth() {
     }
 
     supabaseClient.auth.onAuthStateChange(async (event, session) => {
+      if (_isHandlingAuthLogin) return;
       if (session && session.user) {
         state.currentUser = session.user;
         if (session.user.email) {
@@ -1424,6 +1428,8 @@ async function handleAuthLoginSubmit(e) {
 
   if (!email) return;
 
+  _isHandlingAuthLogin = true;
+
   const originalBtnHtml = btn ? btn.innerHTML : '';
   if (btn) {
     btn.disabled = true;
@@ -1476,13 +1482,18 @@ async function handleAuthLoginSubmit(e) {
 
     // 4. Fermer la modale IMMÉDIATEMENT et mettre à jour l'interface (aucun blocage UI)
     closeAuthModal();
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalBtnHtml || `<i data-lucide="log-in" class="w-4 h-4"></i><span>Se connecter</span>`;
+    }
     updateUserRoleUI();
     updateTopBar();
     renderSpacedRepetitionDashboard();
     renderBank();
     renderTrophiesView();
 
-    const displayName = (normalizedEmail === 'padoreau85@gmail.com') ? 'Dr Pierre-Alain Doreau' : ((normalizedEmail === 'belhadef.samy@gmail.com') ? 'Dr Samy Belhadef' : normalizedEmail);
+    const docInfo = getQuestionAuthorDisplayName(normalizedEmail);
+    const displayName = docInfo.name || normalizedEmail;
     showToast(`Bienvenue ${displayName} ! Connecté avec succès.`, "success");
 
     // 5. Synchronisation complète Cloud en arrière-plan fluide (non-bloquant)
@@ -1500,10 +1511,13 @@ async function handleAuthLoginSubmit(e) {
         if (window.lucide) lucide.createIcons();
       } catch (syncErr) {
         console.warn("Sync arrière-plan connexion:", syncErr);
+      } finally {
+        _isHandlingAuthLogin = false;
       }
     })();
 
   } catch (err) {
+    _isHandlingAuthLogin = false;
     console.error("Erreur connexion:", err);
     if (alertBox) {
       alertBox.className = "p-3 rounded-xl text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start space-x-2";
@@ -4209,7 +4223,7 @@ async function refreshLeaderboard() {
 }
 window.refreshLeaderboard = refreshLeaderboard;
 
-function getLeadBadge(valA, valB, nameA = 'Dr Doreau', nameB = 'Dr Belhadef') {
+function getLeadBadge(valA, valB, nameA = 'Dr A', nameB = 'Dr B') {
   if (valA > valB) {
     return {
       text: `👑 ${nameA} (+${valA - valB})`,
@@ -4227,47 +4241,79 @@ function getLeadBadge(valA, valB, nameA = 'Dr Doreau', nameB = 'Dr Belhadef') {
   };
 }
 
+function setDuelOpponent(opponentEmail) {
+  state.duelOpponentEmail = opponentEmail ? opponentEmail.trim().toLowerCase() : null;
+  if (state.lastLeaderboardAccounts) {
+    const currentSort = state.leaderboardSortBy || 'xp';
+    const sorted = sortLeaderboardAccounts(state.lastLeaderboardAccounts, currentSort);
+    renderLeaderboardBody(sorted, currentSort);
+  }
+}
+window.setDuelOpponent = setDuelOpponent;
+
 function renderLeaderboardBody(list, currentSort) {
   const bodyEl = document.getElementById('leaderboard-body');
   if (!bodyEl) return;
+  if (!Array.isArray(list) || list.length === 0) return;
 
-  // 1. Détecter Dr Pierre-Alain Doreau et Dr Samy Belhadef pour le duel comparatif
-  const pa = list.find(a => a.email === 'padoreau85@gmail.com') || {
-    name: 'Dr Pierre-Alain Doreau',
-    email: 'padoreau85@gmail.com',
-    xp: 0,
-    totalCorrect: 0,
-    unlockedBadgesCount: 0,
-    createdQuestions: 0,
-    streak: 1,
-    level: 1,
-    tierName: 'Interne Novice'
-  };
-
-  const samy = list.find(a => a.email === 'belhadef.samy@gmail.com') || {
-    name: 'Dr Samy Belhadef',
-    email: 'belhadef.samy@gmail.com',
-    xp: 0,
-    totalCorrect: 0,
-    unlockedBadgesCount: 0,
-    createdQuestions: 0,
-    streak: 1,
-    level: 1,
-    tierName: 'Interne Novice'
-  };
-
-  const totalDuelXp = (pa.xp || 0) + (samy.xp || 0);
-  let paPercent = 50;
-  let samyPercent = 50;
-  if (totalDuelXp > 0) {
-    paPercent = Math.round(((pa.xp || 0) / totalDuelXp) * 100);
-    samyPercent = 100 - paPercent;
+  // 1. Détection dynamique de Joueur A (Vous / Joueur connecté ou 1er du classement)
+  const currentEmail = (state.currentUser && state.currentUser.email) ? state.currentUser.email.trim().toLowerCase() : null;
+  let playerA = null;
+  if (currentEmail) {
+    playerA = list.find(a => a.email === currentEmail);
+  }
+  if (!playerA) {
+    playerA = list[0];
   }
 
-  const xpLead = getLeadBadge(pa.xp || 0, samy.xp || 0);
-  const correctLead = getLeadBadge(pa.totalCorrect || 0, samy.totalCorrect || 0);
-  const badgesLead = getLeadBadge(pa.unlockedBadgesCount || 0, samy.unlockedBadgesCount || 0);
-  const createdLead = getLeadBadge(pa.createdQuestions || 0, samy.createdQuestions || 0);
+  // Candidats possibles pour Joueur B (tous les confrères sauf Joueur A)
+  const availableOpponents = list.filter(a => a.email !== playerA.email);
+
+  // Joueur B : sélectionné par l'utilisateur OU Rival direct par défaut
+  let playerB = null;
+  if (state.duelOpponentEmail && availableOpponents.some(a => a.email === state.duelOpponentEmail)) {
+    playerB = availableOpponents.find(a => a.email === state.duelOpponentEmail);
+  } else {
+    // Si Joueur A est 1er, le rival par défaut est le 2e.
+    // Si Joueur A n'est pas 1er, le rival par défaut est le confrère immédiatement au-dessus de lui !
+    const rankA = list.findIndex(a => a.email === playerA.email);
+    if (rankA > 0) {
+      playerB = list[rankA - 1];
+    } else {
+      playerB = availableOpponents[0] || null;
+    }
+  }
+
+  // Fallback sécurisé
+  if (!playerB) {
+    playerB = {
+      name: (playerA.email === 'belhadef.samy@gmail.com') ? 'Dr Pierre-Alain Doreau' : 'Dr Samy Belhadef',
+      email: (playerA.email === 'belhadef.samy@gmail.com') ? 'padoreau85@gmail.com' : 'belhadef.samy@gmail.com',
+      xp: 0,
+      totalCorrect: 0,
+      unlockedBadgesCount: 0,
+      createdQuestions: 0,
+      streak: 1,
+      level: 1,
+      tierName: 'Interne Novice'
+    };
+  }
+
+  const totalDuelXp = (playerA.xp || 0) + (playerB.xp || 0);
+  let percentA = 50;
+  let percentB = 50;
+  if (totalDuelXp > 0) {
+    percentA = Math.round(((playerA.xp || 0) / totalDuelXp) * 100);
+    percentB = 100 - percentA;
+  }
+
+  const shortA = getQuestionAuthorDisplayName(playerA.email).short || playerA.name;
+  const shortB = getQuestionAuthorDisplayName(playerB.email).short || playerB.name;
+
+  const xpLead = getLeadBadge(playerA.xp || 0, playerB.xp || 0, shortA, shortB);
+  const correctLead = getLeadBadge(playerA.totalCorrect || 0, playerB.totalCorrect || 0, shortA, shortB);
+  const badgesLead = getLeadBadge(playerA.unlockedBadgesCount || 0, playerB.unlockedBadgesCount || 0, shortA, shortB);
+  const createdLead = getLeadBadge(playerA.createdQuestions || 0, playerB.createdQuestions || 0, shortA, shortB);
 
   // Carte Duel Médical
   const headToHeadHtml = `
@@ -4282,30 +4328,49 @@ function renderLeaderboardBody(list, currentSort) {
               <span>Duel Confraternel & Avancement Comparatif</span>
               <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">Direct</span>
             </h3>
-            <p class="text-xs text-slate-400">Dr Pierre-Alain Doreau (Master) vs Dr Samy Belhadef (Confrère) • Points acquis aux révisions</p>
+            <p class="text-xs text-slate-400">
+              <span class="text-amber-300 font-semibold">${escapeHtml(playerA.name)}</span>
+              <span class="text-slate-500 font-bold mx-1">vs</span>
+              <span class="text-teal-300 font-semibold">${escapeHtml(playerB.name)}</span>
+              • Points acquis aux révisions
+            </p>
           </div>
         </div>
-        <div class="text-right">
-          <span class="text-[11px] font-semibold text-slate-400">Total XP cumulée :</span>
-          <span class="text-xs font-mono font-black text-indigo-300 ml-1.5">${totalDuelXp} XP</span>
+        <div class="flex items-center space-x-3 self-end sm:self-auto">
+          ${availableOpponents.length > 1 ? `
+          <div class="flex items-center space-x-1.5 bg-slate-950/80 px-2.5 py-1 rounded-xl border border-indigo-500/30 shadow-sm">
+            <label for="select-duel-opponent" class="text-[11px] text-slate-400 font-medium">Adversaire :</label>
+            <select id="select-duel-opponent" onchange="setDuelOpponent(this.value)" class="bg-transparent text-teal-300 text-xs font-bold focus:outline-none cursor-pointer">
+              ${availableOpponents.map(op => `
+                <option value="${escapeHtml(op.email)}" class="bg-slate-900 text-white" ${op.email === playerB.email ? 'selected' : ''}>
+                  ${escapeHtml(op.name)} (${op.xp} XP)
+                </option>
+              `).join('')}
+            </select>
+          </div>
+          ` : ''}
+          <div class="text-right">
+            <span class="text-[11px] font-semibold text-slate-400">Total duel :</span>
+            <span class="text-xs font-mono font-black text-indigo-300 ml-1.5">${totalDuelXp} XP</span>
+          </div>
         </div>
       </div>
 
       <!-- Barre de progression comparative -->
       <div class="space-y-1.5 mb-5">
         <div class="flex justify-between items-center text-xs font-mono">
-          <span class="font-bold text-amber-300 flex items-center space-x-1.5">
-            <span>Dr Pierre-Alain Doreau</span>
-            <span class="text-[10px] text-amber-400/90 font-black">(${pa.xp} XP - ${paPercent}%)</span>
+          <span class="font-bold text-amber-300 flex items-center space-x-1.5 truncate">
+            <span class="truncate">${escapeHtml(playerA.name)}</span>
+            <span class="text-[10px] text-amber-400/90 font-black shrink-0">(${playerA.xp} XP - ${percentA}%)</span>
           </span>
-          <span class="font-bold text-teal-300 flex items-center space-x-1.5">
-            <span class="text-[10px] text-teal-400/90 font-black">(${samyPercent}% - ${samy.xp} XP)</span>
-            <span>Dr Samy Belhadef</span>
+          <span class="font-bold text-teal-300 flex items-center space-x-1.5 truncate justify-end">
+            <span class="text-[10px] text-teal-400/90 font-black shrink-0">(${percentB}% - ${playerB.xp} XP)</span>
+            <span class="truncate">${escapeHtml(playerB.name)}</span>
           </span>
         </div>
         <div class="w-full h-3 rounded-full bg-slate-950 overflow-hidden flex p-0.5 border border-slate-800">
-          <div class="h-full bg-gradient-to-r from-amber-500 to-amber-400 rounded-l-full transition-all duration-500" style="width: ${paPercent}%"></div>
-          <div class="h-full bg-gradient-to-r from-teal-400 to-emerald-400 rounded-r-full transition-all duration-500" style="width: ${samyPercent}%"></div>
+          <div class="h-full bg-gradient-to-r from-amber-500 to-amber-400 rounded-l-full transition-all duration-500" style="width: ${percentA}%"></div>
+          <div class="h-full bg-gradient-to-r from-teal-400 to-emerald-400 rounded-r-full transition-all duration-500" style="width: ${percentB}%"></div>
         </div>
       </div>
 
@@ -4318,9 +4383,9 @@ function renderLeaderboardBody(list, currentSort) {
             <span class="text-[10px] font-mono px-1.5 py-0.2 rounded ${xpLead.cls}">${xpLead.text}</span>
           </div>
           <div class="mt-2 flex items-baseline justify-between">
-            <div class="text-amber-400 font-mono font-black text-sm">${pa.xp} <span class="text-[10px] text-slate-500 font-normal">PA</span></div>
+            <div class="text-amber-400 font-mono font-black text-sm">${playerA.xp} <span class="text-[10px] text-slate-500 font-normal">${escapeHtml(shortA)}</span></div>
             <div class="text-slate-600 font-black text-xs">vs</div>
-            <div class="text-teal-400 font-mono font-black text-sm">${samy.xp} <span class="text-[10px] text-slate-500 font-normal">SB</span></div>
+            <div class="text-teal-400 font-mono font-black text-sm">${playerB.xp} <span class="text-[10px] text-slate-500 font-normal">${escapeHtml(shortB)}</span></div>
           </div>
         </div>
 
@@ -4331,9 +4396,9 @@ function renderLeaderboardBody(list, currentSort) {
             <span class="text-[10px] font-mono px-1.5 py-0.2 rounded ${correctLead.cls}">${correctLead.text}</span>
           </div>
           <div class="mt-2 flex items-baseline justify-between">
-            <div class="text-amber-400 font-mono font-black text-sm">${pa.totalCorrect || 0} <span class="text-[10px] text-slate-500 font-normal">PA</span></div>
+            <div class="text-amber-400 font-mono font-black text-sm">${playerA.totalCorrect || 0} <span class="text-[10px] text-slate-500 font-normal">${escapeHtml(shortA)}</span></div>
             <div class="text-slate-600 font-black text-xs">vs</div>
-            <div class="text-teal-400 font-mono font-black text-sm">${samy.totalCorrect || 0} <span class="text-[10px] text-slate-500 font-normal">SB</span></div>
+            <div class="text-teal-400 font-mono font-black text-sm">${playerB.totalCorrect || 0} <span class="text-[10px] text-slate-500 font-normal">${escapeHtml(shortB)}</span></div>
           </div>
         </div>
 
@@ -4344,9 +4409,9 @@ function renderLeaderboardBody(list, currentSort) {
             <span class="text-[10px] font-mono px-1.5 py-0.2 rounded ${badgesLead.cls}">${badgesLead.text}</span>
           </div>
           <div class="mt-2 flex items-baseline justify-between">
-            <div class="text-amber-400 font-mono font-black text-sm">${pa.unlockedBadgesCount || 0} <span class="text-[10px] text-slate-500 font-normal">PA</span></div>
+            <div class="text-amber-400 font-mono font-black text-sm">${playerA.unlockedBadgesCount || 0} <span class="text-[10px] text-slate-500 font-normal">${escapeHtml(shortA)}</span></div>
             <div class="text-slate-600 font-black text-xs">vs</div>
-            <div class="text-teal-400 font-mono font-black text-sm">${samy.unlockedBadgesCount || 0} <span class="text-[10px] text-slate-500 font-normal">SB</span></div>
+            <div class="text-teal-400 font-mono font-black text-sm">${playerB.unlockedBadgesCount || 0} <span class="text-[10px] text-slate-500 font-normal">${escapeHtml(shortB)}</span></div>
           </div>
         </div>
 
@@ -4357,9 +4422,9 @@ function renderLeaderboardBody(list, currentSort) {
             <span class="text-[10px] font-mono px-1.5 py-0.2 rounded ${createdLead.cls}">${createdLead.text}</span>
           </div>
           <div class="mt-2 flex items-baseline justify-between">
-            <div class="text-amber-400 font-mono font-black text-sm">${pa.createdQuestions || 0} <span class="text-[10px] text-slate-500 font-normal">PA</span></div>
+            <div class="text-amber-400 font-mono font-black text-sm">${playerA.createdQuestions || 0} <span class="text-[10px] text-slate-500 font-normal">${escapeHtml(shortA)}</span></div>
             <div class="text-slate-600 font-black text-xs">vs</div>
-            <div class="text-teal-400 font-mono font-black text-sm">${samy.createdQuestions || 0} <span class="text-[10px] text-slate-500 font-normal">SB</span></div>
+            <div class="text-teal-400 font-mono font-black text-sm">${playerB.createdQuestions || 0} <span class="text-[10px] text-slate-500 font-normal">${escapeHtml(shortB)}</span></div>
           </div>
         </div>
       </div>
@@ -4570,6 +4635,29 @@ function renderLeaderboardBody(list, currentSort) {
   }
 }
 
+function computeLeaderboardList(accountsMap) {
+  const questionsByAuthor = {};
+  (state.questions || []).forEach(q => {
+    const aut = getQuestionAuthorEmail(q);
+    questionsByAuthor[aut] = (questionsByAuthor[aut] || 0) + 1;
+  });
+
+  return Array.from(accountsMap.values()).map(acc => {
+    const qCount = questionsByAuthor[acc.email] || 0;
+    const lvlInfo = calculatePlayerLevel(acc.xp || 0);
+    const docInfo = getQuestionAuthorDisplayName(acc.email);
+    const dName = acc.name || docInfo.name;
+    return {
+      ...acc,
+      name: dName,
+      createdQuestions: qCount,
+      level: lvlInfo.level,
+      tierName: lvlInfo.tierName,
+      tierBadge: lvlInfo.tierBadge
+    };
+  });
+}
+
 async function renderLeaderboard(forceRefresh = false) {
   const container = document.getElementById('trophies-leaderboard-container');
   if (!container) return;
@@ -4602,12 +4690,7 @@ async function renderLeaderboard(forceRefresh = false) {
           </button>
         </div>
       </div>
-      <div id="leaderboard-body" class="space-y-6">
-        <div class="p-8 text-center text-slate-400">
-          <div class="inline-block animate-spin rounded-full h-7 w-7 border-t-2 border-b-2 border-indigo-500 mb-2"></div>
-          <p class="text-xs">Chargement des données de l'équipe...</p>
-        </div>
-      </div>
+      <div id="leaderboard-body" class="space-y-6"></div>
     `;
     if (window.lucide) lucide.createIcons();
   }
@@ -4650,7 +4733,7 @@ async function renderLeaderboard(forceRefresh = false) {
     unlockedBadgesCount: (samyLocalStats && samyLocalStats.unlockedBadges) ? Object.keys(samyLocalStats.unlockedBadges).length : 0
   });
 
-  // 2. Profils connus en local
+  // 2. Profils connus en local (collègues invités)
   try {
     const known = JSON.parse(localStorage.getItem('pathosorus_known_colleagues') || '[]');
     if (Array.isArray(known)) {
@@ -4659,15 +4742,20 @@ async function renderLeaderboard(forceRefresh = false) {
           const em = c.email.trim().toLowerCase();
           const docInfo = getQuestionAuthorDisplayName(em);
           if (!accountsMap.has(em)) {
+            let colleagueLocalStats = null;
+            try {
+              const r = localStorage.getItem(getUserStatsStorageKey(em));
+              if (r) colleagueLocalStats = JSON.parse(r);
+            } catch(e) {}
             accountsMap.set(em, {
               email: em,
               name: c.name || docInfo.name,
               role: c.role || 'reader',
-              xp: 0,
-              streak: 1,
-              totalCorrect: 0,
+              xp: (colleagueLocalStats && typeof colleagueLocalStats.xp === 'number') ? colleagueLocalStats.xp : 0,
+              streak: (colleagueLocalStats && typeof colleagueLocalStats.streak === 'number') ? colleagueLocalStats.streak : 1,
+              totalCorrect: (colleagueLocalStats && typeof colleagueLocalStats.totalCorrect === 'number') ? colleagueLocalStats.totalCorrect : 0,
               createdQuestions: 0,
-              unlockedBadgesCount: 0
+              unlockedBadgesCount: (colleagueLocalStats && colleagueLocalStats.unlockedBadges) ? Object.keys(colleagueLocalStats.unlockedBadges).length : 0
             });
           }
         }
@@ -4675,68 +4763,7 @@ async function renderLeaderboard(forceRefresh = false) {
     }
   } catch (e) {}
 
-  // 3. Lire Supabase custom_tags (avec double canal garanti : client Supabase + fallback direct REST)
-  let allTags = [];
-  if (supabaseClient) {
-    try {
-      const res = await supabaseClient.from('custom_tags').select('*');
-      if (res && res.data && Array.isArray(res.data)) {
-        allTags = res.data;
-      }
-    } catch(e) {}
-  }
-  if (!allTags || allTags.length === 0) {
-    try {
-      const { url, key } = getSupabaseCredentials();
-      if (url && key) {
-        const resp = await fetch(`${url}/rest/v1/custom_tags?select=*`, {
-          headers: { apikey: key, Authorization: `Bearer ${key}` }
-        });
-        const json = await resp.json();
-        if (Array.isArray(json)) allTags = json;
-      }
-    } catch(e) {}
-  }
-
-  // Traiter tous les tags USTATS de l'équipe
-  if (Array.isArray(allTags)) {
-    allTags.forEach(t => {
-      if (t && t.name && t.name.startsWith('USTATS:')) {
-        try {
-          const parts = t.name.split(':', 2);
-          const rawJson = t.name.substring(parts[0].length + parts[1].length + 2);
-          const em = parts[1].trim().toLowerCase();
-          const st = JSON.parse(rawJson);
-          const existing = accountsMap.get(em) || {};
-          const docInfo = getQuestionAuthorDisplayName(em);
-          let tagBadgesCount = 0;
-          if (st.unlockedBadges && typeof st.unlockedBadges === 'object') {
-            tagBadgesCount = Object.keys(st.unlockedBadges).length;
-          } else if (typeof st.unlockedBadgesCount === 'number') {
-            tagBadgesCount = st.unlockedBadgesCount;
-          }
-
-          // Mettre en cache machine pour garantir une réactivité immédiate sans réseau
-          try {
-            localStorage.setItem(getUserStatsStorageKey(em), JSON.stringify(st));
-          } catch(e) {}
-
-          accountsMap.set(em, {
-            ...existing,
-            email: em,
-            name: existing.name || docInfo.name || (em === 'padoreau85@gmail.com' ? 'Dr Pierre-Alain Doreau' : (em === 'belhadef.samy@gmail.com' ? 'Dr Samy Belhadef' : em.split('@')[0])),
-            role: (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com') ? 'creator' : (existing.role || 'reader'),
-            xp: (typeof st.xp === 'number') ? st.xp : (existing.xp || 0),
-            streak: (typeof st.streak === 'number') ? st.streak : (existing.streak || 1),
-            totalCorrect: (typeof st.totalCorrect === 'number') ? st.totalCorrect : (existing.totalCorrect || 0),
-            unlockedBadgesCount: (typeof tagBadgesCount === 'number') ? tagBadgesCount : (existing.unlockedBadgesCount || 0)
-          });
-        } catch(e) {}
-      }
-    });
-  }
-
-  // 4. Injecter les données temps réel du compte connecté
+  // 3. Injecter les données temps réel du compte connecté
   if (state.currentUser && state.currentUser.email) {
     const curEmail = state.currentUser.email.trim().toLowerCase();
     const docInfo = getQuestionAuthorDisplayName(curEmail);
@@ -4756,36 +4783,106 @@ async function renderLeaderboard(forceRefresh = false) {
     });
   }
 
-  // 5. Compter les questions créées dans state.questions
-  const questionsByAuthor = {};
-  (state.questions || []).forEach(q => {
-    const aut = getQuestionAuthorEmail(q);
-    questionsByAuthor[aut] = (questionsByAuthor[aut] || 0) + 1;
-  });
+  // 4. RENDU IMMÉDIAT (0 ms, AUCUN SPINNER BLOQUANT)
+  const initialList = computeLeaderboardList(accountsMap);
+  state.lastLeaderboardAccounts = initialList;
+  const initialSorted = sortLeaderboardAccounts(initialList, currentSort);
+  renderLeaderboardBody(initialSorted, currentSort);
 
-  const list = Array.from(accountsMap.values()).map(acc => {
-    const qCount = questionsByAuthor[acc.email] || 0;
-    const lvlInfo = calculatePlayerLevel(acc.xp || 0);
-    const docInfo = getQuestionAuthorDisplayName(acc.email);
-    const dName = acc.name || docInfo.name;
-    return {
-      ...acc,
-      name: dName,
-      createdQuestions: qCount,
-      level: lvlInfo.level,
-      tierName: lvlInfo.tierName,
-      tierBadge: lvlInfo.tierBadge
-    };
-  });
+  // 5. Synchronisation Cloud en tâche de fond (silencieuse, fluide et non-bloquante)
+  (async () => {
+    try {
+      let allTags = [];
+      if (supabaseClient) {
+        try {
+          const res = await supabaseClient.from('custom_tags').select('*');
+          if (res && res.data && Array.isArray(res.data)) {
+            allTags = res.data;
+          }
+        } catch(e) {}
+      }
+      if (!allTags || allTags.length === 0) {
+        try {
+          const { url, key } = getSupabaseCredentials();
+          if (url && key) {
+            const resp = await fetch(`${url}/rest/v1/custom_tags?select=*`, {
+              headers: { apikey: key, Authorization: `Bearer ${key}` }
+            });
+            const json = await resp.json();
+            if (Array.isArray(json)) allTags = json;
+          }
+        } catch(e) {}
+      }
 
-  // Mettre en cache pour tri instantané sans latence
-  state.lastLeaderboardAccounts = list;
+      if (Array.isArray(allTags) && allTags.length > 0) {
+        let hasChanges = false;
+        allTags.forEach(t => {
+          if (t && t.name && t.name.startsWith('USTATS:')) {
+            try {
+              const parts = t.name.split(':', 2);
+              const rawJson = t.name.substring(parts[0].length + parts[1].length + 2);
+              const em = parts[1].trim().toLowerCase();
+              const st = JSON.parse(rawJson);
+              const existing = accountsMap.get(em) || {};
+              const docInfo = getQuestionAuthorDisplayName(em);
+              let tagBadgesCount = 0;
+              if (st.unlockedBadges && typeof st.unlockedBadges === 'object') {
+                tagBadgesCount = Object.keys(st.unlockedBadges).length;
+              } else if (typeof st.unlockedBadgesCount === 'number') {
+                tagBadgesCount = st.unlockedBadgesCount;
+              }
 
-  // Tri actif
-  const sorted = sortLeaderboardAccounts(list, currentSort);
+              // Sauvegarder en cache local par profil
+              try {
+                localStorage.setItem(getUserStatsStorageKey(em), JSON.stringify(st));
+              } catch(e) {}
 
-  // Rendu UI
-  renderLeaderboardBody(sorted, currentSort);
+              accountsMap.set(em, {
+                ...existing,
+                email: em,
+                name: existing.name || docInfo.name,
+                role: (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com') ? 'creator' : (existing.role || 'reader'),
+                xp: (typeof st.xp === 'number') ? st.xp : (existing.xp || 0),
+                streak: (typeof st.streak === 'number') ? st.streak : (existing.streak || 1),
+                totalCorrect: (typeof st.totalCorrect === 'number') ? st.totalCorrect : (existing.totalCorrect || 0),
+                unlockedBadgesCount: (typeof tagBadgesCount === 'number') ? tagBadgesCount : (existing.unlockedBadgesCount || 0)
+              });
+              hasChanges = true;
+            } catch(e) {}
+          }
+        });
+
+        if (hasChanges) {
+          // Re-injecter la session connectée si présente
+          if (state.currentUser && state.currentUser.email) {
+            const curEmail = state.currentUser.email.trim().toLowerCase();
+            const docInfo = getQuestionAuthorDisplayName(curEmail);
+            const selfBadgesCount = (state.stats && state.stats.unlockedBadges) ? Object.keys(state.stats.unlockedBadges).length : 0;
+            const existing = accountsMap.get(curEmail) || {};
+
+            accountsMap.set(curEmail, {
+              ...existing,
+              email: curEmail,
+              name: (accountsMap.get(curEmail)?.name) || docInfo.name,
+              role: 'creator',
+              xp: (typeof state.stats.xp === 'number') ? state.stats.xp : (existing.xp || 0),
+              streak: (typeof state.stats.streak === 'number') ? state.stats.streak : (existing.streak || 1),
+              totalCorrect: (typeof state.stats.totalCorrect === 'number') ? state.stats.totalCorrect : (existing.totalCorrect || 0),
+              unlockedBadgesCount: selfBadgesCount,
+              isSelf: true
+            });
+          }
+
+          const updatedList = computeLeaderboardList(accountsMap);
+          state.lastLeaderboardAccounts = updatedList;
+          const updatedSorted = sortLeaderboardAccounts(updatedList, state.leaderboardSortBy || 'xp');
+          renderLeaderboardBody(updatedSorted, state.leaderboardSortBy || 'xp');
+        }
+      }
+    } catch(bgErr) {
+      console.warn("Sync arrière-plan leaderboard:", bgErr);
+    }
+  })();
 }
 window.renderLeaderboard = renderLeaderboard;
 
@@ -5432,8 +5529,15 @@ function getQuestionAuthorDisplayName(q) {
     return { email: '', name: 'Banque PathoSorus', short: 'Banque' };
   }
   const prefix = email.split('@')[0];
-  const capitalized = prefix.charAt(0).toUpperCase() + prefix.slice(1);
-  return { email, name: `Dr ${capitalized}`, short: capitalized };
+  const parts = prefix.split(/[._-]/).filter(Boolean);
+  const formatted = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
+  const lastName = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+  const capitalizedLast = lastName.charAt(0).toUpperCase() + lastName.slice(1).toLowerCase();
+  return {
+    email,
+    name: `Dr ${formatted || capitalizedLast}`,
+    short: `Dr ${capitalizedLast}`
+  };
 }
 
 function getKnownAuthorsList() {
