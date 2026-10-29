@@ -995,25 +995,6 @@ function loadUserStatsForAccount(email = null) {
     if (raw) loaded = JSON.parse(raw);
   } catch(e) {}
 
-  // Filet de sécurité automatique pour rétablir Samy à ses vrais points légitimes (15 XP, 2 questions)
-  if (em === 'belhadef.samy@gmail.com' && loaded && typeof loaded.xp === 'number' && loaded.xp > 20) {
-    loaded = {
-      ...getDefaultStats(),
-      xp: 15,
-      creatorXp: 0,
-      streak: 1,
-      lastActiveDate: new Date().toISOString().split('T')[0],
-      totalAnswered: 2,
-      totalCorrect: 2,
-      completedCategories: [],
-      unlockedBadges: {},
-      badgeHistory: {}
-    };
-    try {
-      localStorage.setItem(key, JSON.stringify(loaded));
-    } catch(e) {}
-  }
-
   if (loaded && typeof loaded === 'object') {
     state.stats = {
       ...getDefaultStats(),
@@ -1512,20 +1493,6 @@ function handleAuthLogout() {
     if (previousEmail && supabaseClient) {
       try {
         let statsToPush = previousStats;
-        if (previousEmail === 'belhadef.samy@gmail.com' && statsToPush && statsToPush.xp > 20) {
-          statsToPush = {
-            ...getDefaultStats(),
-            xp: 15,
-            creatorXp: 0,
-            streak: 1,
-            lastActiveDate: '2026-10-29',
-            totalAnswered: 2,
-            totalCorrect: 2,
-            completedCategories: [],
-            unlockedBadges: {},
-            badgeHistory: {}
-          };
-        }
         const tagName = `USTATS:${previousEmail}:${JSON.stringify(statsToPush)}`;
         await supabaseClient.from('custom_tags').upsert({ name: tagName }, { onConflict: 'name' });
         await supabaseClient.from('custom_tags').delete().ilike('name', `USTATS:${previousEmail}:%`).neq('name', tagName);
@@ -3264,28 +3231,6 @@ function initApp() {
     }
   });
 
-  // Filet de sécurité rétroactif : assainir immédiatement le cache local de Samy s'il a été pollué
-  try {
-    const samyKey = getUserStatsStorageKey('belhadef.samy@gmail.com');
-    const rawSamy = localStorage.getItem(samyKey);
-    if (rawSamy) {
-      const parsedSamy = JSON.parse(rawSamy);
-      if (parsedSamy && typeof parsedSamy.xp === 'number' && parsedSamy.xp > 20) {
-        localStorage.setItem(samyKey, JSON.stringify({
-          xp: 15,
-          creatorXp: 0,
-          streak: 1,
-          lastActiveDate: '2026-10-29',
-          totalAnswered: 2,
-          totalCorrect: 2,
-          completedCategories: [],
-          unlockedBadges: {},
-          badgeHistory: {}
-        }));
-      }
-    }
-  } catch(e) {}
-
   // Restaurer immédiatement la progression locale des révisions STRICTEMENT propre au profil
   try {
     const userStorageKey = getUserProgressStorageKey();
@@ -4767,9 +4712,9 @@ async function renderLeaderboard(forceRefresh = false) {
     unlockedBadgesCount: (paLocalStats && paLocalStats.unlockedBadges) ? Object.keys(paLocalStats.unlockedBadges).length : 0
   });
 
-  const samyXp = (samyLocalStats && typeof samyLocalStats.xp === 'number' && samyLocalStats.xp <= 20) ? samyLocalStats.xp : 15;
-  const samyCorrect = (samyLocalStats && typeof samyLocalStats.totalCorrect === 'number' && samyLocalStats.totalCorrect <= 5) ? samyLocalStats.totalCorrect : 2;
-  const samyBadges = (samyLocalStats && samyLocalStats.unlockedBadges && samyLocalStats.xp <= 20) ? Object.keys(samyLocalStats.unlockedBadges).length : 0;
+  const samyXp = (samyLocalStats && typeof samyLocalStats.xp === 'number') ? samyLocalStats.xp : 0;
+  const samyCorrect = (samyLocalStats && typeof samyLocalStats.totalCorrect === 'number') ? samyLocalStats.totalCorrect : 0;
+  const samyBadges = (samyLocalStats && samyLocalStats.unlockedBadges) ? Object.keys(samyLocalStats.unlockedBadges).length : 0;
 
   accountsMap.set('belhadef.samy@gmail.com', {
     email: 'belhadef.samy@gmail.com',
