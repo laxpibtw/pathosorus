@@ -1554,7 +1554,7 @@
 
       <div class="space-y-3 pt-2">
         <!-- Carte Pierre-Alain -->
-        <button type="button" onclick="selectActiveProfile('padoreau85@gmail.com')" class="w-full p-4 rounded-2xl bg-slate-950 hover:bg-slate-800/80 border border-teal-500/30 hover:border-teal-400 text-left transition flex items-center justify-between group">
+        <button type="button" onclick="promptLoginForProfile('padoreau85@gmail.com')" class="w-full p-4 rounded-2xl bg-slate-950 hover:bg-slate-800/80 border border-teal-500/30 hover:border-teal-400 text-left transition flex items-center justify-between group">
           <div class="flex items-center space-x-3.5">
             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center text-white font-extrabold text-sm shadow-md">
               PA
@@ -1567,11 +1567,14 @@
               <div class="text-[11px] text-slate-400 font-mono">padoreau85@gmail.com</div>
             </div>
           </div>
-          <i data-lucide="arrow-right" class="w-4 h-4 text-slate-500 group-hover:text-teal-400 group-hover:translate-x-0.5 transition"></i>
+          <div class="flex items-center space-x-1 text-teal-400 text-xs font-semibold">
+            <span>Connexion</span>
+            <i data-lucide="arrow-right" class="w-4 h-4 group-hover:translate-x-0.5 transition"></i>
+          </div>
         </button>
 
         <!-- Carte Samy -->
-        <button type="button" onclick="selectActiveProfile('belhadef.samy@gmail.com')" class="w-full p-4 rounded-2xl bg-slate-950 hover:bg-slate-800/80 border border-indigo-500/30 hover:border-indigo-400 text-left transition flex items-center justify-between group">
+        <button type="button" onclick="promptLoginForProfile('belhadef.samy@gmail.com')" class="w-full p-4 rounded-2xl bg-slate-950 hover:bg-slate-800/80 border border-indigo-500/30 hover:border-indigo-400 text-left transition flex items-center justify-between group">
           <div class="flex items-center space-x-3.5">
             <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-sky-600 flex items-center justify-center text-white font-extrabold text-sm shadow-md">
               SB
@@ -1584,12 +1587,15 @@
               <div class="text-[11px] text-slate-400 font-mono">belhadef.samy@gmail.com</div>
             </div>
           </div>
-          <i data-lucide="arrow-right" class="w-4 h-4 text-slate-500 group-hover:text-indigo-400 group-hover:translate-x-0.5 transition"></i>
+          <div class="flex items-center space-x-1 text-indigo-400 text-xs font-semibold">
+            <span>Connexion</span>
+            <i data-lucide="arrow-right" class="w-4 h-4 group-hover:translate-x-0.5 transition"></i>
+          </div>
         </button>
       </div>
 
       <div class="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
-        <span>Changement instantané sans mot de passe</span>
+        <span>Authentification officielle Supabase</span>
         <button type="button" onclick="closeProfileSwitcherModal(); openAuthModal();" class="text-teal-400 hover:underline">Autre compte...</button>
       </div>
     </div>
@@ -2193,6 +2199,6 @@
 
   <!-- Scripts -->
   <script src="seed_data.js?v=20261029_2100"></script>
-  <script src="app.js?v=20261029_2200"></script>
+  <script src="app.js?v=20261029_2215"></script>
 </body>
 </html>

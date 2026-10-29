@@ -1160,6 +1160,19 @@ function closeProfileSwitcherModal() {
 }
 window.closeProfileSwitcherModal = closeProfileSwitcherModal;
 
+function promptLoginForProfile(email) {
+  closeProfileSwitcherModal();
+  openAuthModal();
+  const emailInput = document.getElementById('auth-input-email');
+  const passInput = document.getElementById('auth-input-password');
+  if (emailInput && email) emailInput.value = email;
+  if (passInput) {
+    passInput.value = '';
+    setTimeout(() => passInput.focus(), 100);
+  }
+}
+window.promptLoginForProfile = promptLoginForProfile;
+
 async function selectActiveProfile(email) {
   if (!email) return;
   const norm = email.trim().toLowerCase();
@@ -1482,54 +1495,51 @@ async function handleAuthLoginSubmit(e) {
   const isAuthorizedCreator = AUTHORIZED_CREATOR_EMAILS.has(normalizedEmail);
 
   try {
-    // 1. Initialiser immédiatement l'utilisateur localement (0ms, jamais de blocage UI)
-    const authUser = {
-      id: 'usr_' + normalizedEmail.replace(/[^a-z0-9]/gi, '_'),
-      email: normalizedEmail,
-      user_metadata: { role: isAuthorizedCreator ? 'creator' : 'reader' }
-    };
+    if (!supabaseClient) {
+      throw new Error("Connexion Supabase non initialisée.");
+    }
 
-    state.currentUser = authUser;
-    state.currentRole = isAuthorizedCreator ? 'creator' : 'reader';
+    // 1. Authentification officielle Supabase avec mot de passe
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
+      email: normalizedEmail,
+      password: password
+    });
+
+    if (error) {
+      let msg = error.message;
+      if (msg.toLowerCase().includes("invalid login credentials")) {
+        msg = "Adresse e-mail ou mot de passe incorrect.";
+      } else if (msg.toLowerCase().includes("email not confirmed")) {
+        msg = "E-mail non confirmé. Veuillez activer 'Auto Confirm' dans Supabase.";
+      }
+      throw new Error(msg);
+    }
+
+    if (!data || !data.user) {
+      throw new Error("Échec de connexion Supabase.");
+    }
+
+    // 2. Connexion réussie avec vrai compte et UUID Supabase
+    state.currentUser = data.user;
     localStorage.removeItem('pathosorus_explicit_logout');
     localStorage.setItem('pathosorus_current_email', normalizedEmail);
 
-    // 2. Mettre à jour l'interface immédiatement et fermer la modale
+    // 3. Charger le rôle, insérer/mettre à jour dans public.profiles avec l'UUID officiel
+    await fetchCurrentUserRole();
+    checkDailyStreak();
+    await fetchSupabaseData(true);
+    checkDailyStreak();
+
+    // 4. Fermer la modale et mettre à jour l'interface
     closeAuthModal();
     updateUserRoleUI();
-    switchTab('play');
-    const playGuest = document.getElementById('play-view-guest');
-    const playAuth = document.getElementById('play-view-authenticated');
-    if (playGuest) playGuest.classList.add('hidden');
-    if (playAuth) playAuth.classList.remove('hidden');
+    updateTopBar();
+    renderSpacedRepetitionDashboard();
+    renderBank();
+    renderTrophiesView();
 
-    showToast(`Bienvenue ${normalizedEmail} ! Connecté avec succès.`, "success");
-
-    // 3. Tâche de fond non-bloquante : session Supabase, profil, streak et synchronisation des questions
-    (async () => {
-      if (supabaseClient && password) {
-        try {
-          const { data, error } = await supabaseClient.auth.signInWithPassword({
-            email: normalizedEmail,
-            password: password
-          });
-          if (!error && data && data.user) {
-            state.currentUser = data.user;
-          }
-        } catch (authErr) {
-          console.warn("Supabase auth (non-bloquant):", authErr);
-        }
-      }
-
-      await fetchCurrentUserRole();
-      checkDailyStreak();
-      await fetchSupabaseData(true);
-      checkDailyStreak();
-      await syncLocalProgressToCloud();
-      renderSpacedRepetitionDashboard();
-      updateTopBar();
-      if (window.lucide) lucide.createIcons();
-    })().catch(err => console.warn("Sync background login:", err));
+    const isAuthorizedCreator = (state.currentRole === 'creator');
+    showToast(`Bienvenue ${isAuthorizedCreator ? (normalizedEmail === 'padoreau85@gmail.com' ? 'Dr Pierre-Alain Doreau' : 'Dr Samy Belhadef') : normalizedEmail} ! Connecté avec succès.`, "success");
 
   } catch (err) {
     console.error("Erreur connexion:", err);
