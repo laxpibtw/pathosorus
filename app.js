@@ -157,6 +157,16 @@ function isAuthorizedToDelete(email = null) {
 }
 window.isAuthorizedToDelete = isAuthorizedToDelete;
 
+function getProfileDisplayName(email) {
+  if (!email) return 'Choisir Profil';
+  const norm = email.trim().toLowerCase();
+  if (norm === 'padoreau85@gmail.com') return 'Pierre-Alain Doreau';
+  if (norm === 'belhadef.samy@gmail.com') return 'Samy Belhadef';
+  const p = norm.split('@')[0];
+  return p.charAt(0).toUpperCase() + p.slice(1);
+}
+window.getProfileDisplayName = getProfileDisplayName;
+
 function getActiveUser() {
   if (state.currentUser && state.currentUser.email) {
     return state.currentUser;
@@ -165,15 +175,15 @@ function getActiveUser() {
   if (explicitLogout) {
     return null;
   }
-  // Par défaut sur tous les postes de travail (Mac 1, Mac 2 et collègues), session active avec droits complets de rédaction
-  const savedEmail = localStorage.getItem('pathosorus_current_email') || 'padoreau85@gmail.com';
+  // Récupérer le compte enregistré explicitement sur cet appareil
+  const savedEmail = localStorage.getItem('pathosorus_current_email');
   if (savedEmail && savedEmail.trim()) {
     const email = savedEmail.trim().toLowerCase();
     return {
       id: 'usr_' + email.replace(/[^a-z0-9]/gi, '_'),
       email: email,
       user_metadata: {
-        role: 'creator' // Tous les comptes possèdent les droits complets d'enregistrement et de rédaction comme le Master
+        role: 'creator' // Tous les comptes possèdent les droits complets d'enregistrement et de rédaction
       }
     };
   }
@@ -182,7 +192,7 @@ function getActiveUser() {
 
 function getCurrentUserEmail() {
   const u = getActiveUser();
-  return u ? u.email : '';
+  return (u && u.email) ? u.email.trim().toLowerCase() : '';
 }
 
 function isCreator() {
@@ -704,25 +714,13 @@ async function syncUserStatsTagToCloud() {
 async function syncLocalProgressToCloud() {
   if (!supabaseClient || !state.currentUser) return;
   try {
-    // 1. Mettre à jour directement les questions sur Supabase (accessible clé anon sans blocage RLS)
+    // La table collective questions ne doit JAMAIS être polluée par la progression personnelle
+    // La progression personnelle de chaque utilisateur va exclusivement dans UPROG:email et user_progress
     const questionsToSync = (state.questions || []).filter(q => 
       q && q.id && (q.mastered || q.flagged || (q.stats && (q.stats.seen > 0 || q.stats.lastReviewed)))
     );
 
-    if (questionsToSync.length > 0) {
-      for (let i = 0; i < questionsToSync.length; i += 5) {
-        const chunk = questionsToSync.slice(i, i + 5);
-        await Promise.all(chunk.map(q => 
-          supabaseClient.from('questions').update({
-            stats: q.stats,
-            mastered: Boolean(q.mastered),
-            flagged: Boolean(q.flagged)
-          }).eq('id', q.id)
-        ));
-      }
-    }
-
-    // 2. Synchroniser les tags UPROG et USTATS dans custom_tags (garantie multi-Mac instantanée)
+    // 1. Synchroniser les tags UPROG et USTATS dans custom_tags (garantie multi-Mac instantanée isolée par profil)
     await syncUserProgressTagToCloud();
     await syncUserStatsTagToCloud();
 
@@ -1076,13 +1074,128 @@ async function fetchCurrentUserRole() {
 }
 
 // --- CLÉS DE STOCKAGE ET PROGRESSION ISOLÉES PAR COMPTE UTILISATEUR ---
-function getUserProgressStorageKey() {
-  const email = getCurrentUserEmail();
-  if (email) {
-    return 'pathosorus_user_progress_' + email.replace(/[^a-z0-9]/gi, '_');
-  }
-  return 'pathosorus_user_progress_guest';
+function getDefaultStats() {
+  return {
+    xp: 0,
+    creatorXp: 0,
+    streak: 1,
+    lastActiveDate: new Date().toISOString().split('T')[0],
+    totalAnswered: 0,
+    totalCorrect: 0,
+    completedCategories: [],
+    unlockedBadges: {},
+    badgeHistory: {}
+  };
 }
+
+function getUserStatsStorageKey(email = null) {
+  const em = (email || getCurrentUserEmail() || 'guest').trim().toLowerCase();
+  return 'pathosorus_stats_' + em.replace(/[^a-z0-9]/gi, '_');
+}
+
+function loadUserStatsForAccount(email = null) {
+  const em = (email || getCurrentUserEmail() || 'guest').trim().toLowerCase();
+  const key = getUserStatsStorageKey(em);
+  let loaded = null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) loaded = JSON.parse(raw);
+  } catch(e) {}
+
+  if (loaded && typeof loaded === 'object') {
+    state.stats = {
+      ...getDefaultStats(),
+      ...loaded
+    };
+  } else {
+    state.stats = getDefaultStats();
+  }
+}
+window.loadUserStatsForAccount = loadUserStatsForAccount;
+
+function getUserProgressStorageKey(email = null) {
+  const em = (email || getCurrentUserEmail() || 'guest').trim().toLowerCase();
+  return 'pathosorus_user_progress_' + em.replace(/[^a-z0-9]/gi, '_');
+}
+
+function loadUserProgressForAccount(email = null) {
+  resetInMemoryUserProgress();
+  const em = (email || getCurrentUserEmail() || 'guest').trim().toLowerCase();
+  const storageKey = getUserProgressStorageKey(em);
+  try {
+    const rawProg = localStorage.getItem(storageKey);
+    if (rawProg) {
+      const prog = JSON.parse(rawProg);
+      state.userProgress = prog;
+      (state.questions || []).forEach(q => {
+        if (!q || !q.id) return;
+        if (prog[q.id]) {
+          q.stats = Object.assign(getDefaultQuestionStats(), prog[q.id].stats || {});
+          if (typeof prog[q.id].mastered !== 'undefined') q.mastered = Boolean(prog[q.id].mastered);
+          if (typeof prog[q.id].flagged !== 'undefined') q.flagged = Boolean(prog[q.id].flagged);
+        }
+      });
+    }
+  } catch(e) {}
+}
+window.loadUserProgressForAccount = loadUserProgressForAccount;
+
+function openProfileSwitcherModal() {
+  const modal = document.getElementById('modal-profile-switcher');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    if (window.lucide) lucide.createIcons();
+  }
+}
+window.openProfileSwitcherModal = openProfileSwitcherModal;
+
+function closeProfileSwitcherModal() {
+  const modal = document.getElementById('modal-profile-switcher');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+}
+window.closeProfileSwitcherModal = closeProfileSwitcherModal;
+
+async function selectActiveProfile(email) {
+  if (!email) return;
+  const norm = email.trim().toLowerCase();
+  localStorage.setItem('pathosorus_current_email', norm);
+  localStorage.removeItem('pathosorus_explicit_logout');
+
+  state.currentUser = {
+    id: 'usr_' + norm.replace(/[^a-z0-9]/gi, '_'),
+    email: norm,
+    user_metadata: { role: 'creator' }
+  };
+  state.currentRole = 'creator';
+
+  // 1. Charger les stats et la progression strictement propres à ce compte
+  loadUserStatsForAccount(norm);
+  loadUserProgressForAccount(norm);
+
+  // 2. Mettre à jour l'interface immédiatement
+  updateUserRoleUI();
+  updateTopBar();
+  renderSpacedRepetitionDashboard();
+  renderTrophiesView();
+  renderBank();
+
+  // 3. Fermer la modale
+  closeProfileSwitcherModal();
+
+  showToast(`Connecté en tant que ${getProfileDisplayName(norm)}`, "success");
+
+  // 4. Synchroniser le Cloud avec ce compte
+  if (supabaseClient) {
+    await fetchSupabaseData(true);
+    // Attribuer à cet auteur les éventuelles questions rédigées localement sur ce poste et les synchroniser
+    autoSyncLocalDataToCloud();
+  }
+}
+window.selectActiveProfile = selectActiveProfile;
 
 function getDefaultQuestionStats() {
   return {
@@ -1123,24 +1236,11 @@ function saveLocalUserProgress(q) {
 }
 
 async function loadUserProgress() {
-  // 1. Restaurer d'abord la progression locale persistante du compte courant
-  const storageKey = getUserProgressStorageKey();
-  try {
-    const rawProg = localStorage.getItem(storageKey);
-    if (rawProg) {
-      const prog = JSON.parse(rawProg);
-      state.questions.forEach(q => {
-        if (prog[q.id]) {
-          if (prog[q.id].stats) q.stats = Object.assign(q.stats || getDefaultQuestionStats(), prog[q.id].stats);
-          if (typeof prog[q.id].mastered !== 'undefined') q.mastered = Boolean(prog[q.id].mastered);
-          if (typeof prog[q.id].flagged !== 'undefined') q.flagged = Boolean(prog[q.id].flagged);
-        }
-      });
-      renderSpacedRepetitionDashboard();
-      renderBank();
-      renderHierarchySelector();
-    }
-  } catch(e) {}
+  const currentEmail = getCurrentUserEmail();
+  loadUserProgressForAccount(currentEmail);
+  renderSpacedRepetitionDashboard();
+  renderBank();
+  renderHierarchySelector();
 
   if (!supabaseClient || !state.currentUser) return;
 
@@ -1189,21 +1289,10 @@ async function dbSaveUserProgress(q) {
 
   if (!supabaseClient) return;
 
-  // 1. Sauvegarde DIRECTE dans la table questions (100% garanti avec la clé anon, sans aucun blocage RLS)
-  try {
-    await supabaseClient.from('questions').update({
-      stats: q.stats || getDefaultQuestionStats(),
-      mastered: Boolean(q.mastered),
-      flagged: Boolean(q.flagged)
-    }).eq('id', q.id);
-  } catch (e) {
-    console.warn("Erreur sauvegarde directe question stats Supabase:", e);
-  }
-
-  // 2. Synchronisation par tag utilisateur UPROG & USTATS (multi-postes instantané sans RLS)
+  // 1. Synchronisation par tag utilisateur UPROG & USTATS (multi-postes instantané sans RLS, strictement isolé par email)
   debouncedSyncUserProgressTagToCloud();
 
-  // 3. Sauvegarde de secours dans la table user_progress si UUID valide
+  // 2. Sauvegarde de secours dans la table user_progress si UUID valide
   if (isValidUUID(state.currentUser.id)) {
     try {
       await supabaseClient.from('user_progress').upsert({
@@ -1226,6 +1315,15 @@ function updateUserRoleUI() {
   const authBtnIcon = document.getElementById('auth-btn-icon');
   const authBtnText = document.getElementById('auth-btn-text');
   const btnAccountsModal = document.getElementById('btn-accounts-modal');
+  const activeProfEl = document.getElementById('active-profile-name');
+
+  if (activeProfEl) {
+    if (state.currentUser && state.currentUser.email) {
+      activeProfEl.textContent = getProfileDisplayName(state.currentUser.email);
+    } else {
+      activeProfEl.textContent = "Choisir Profil";
+    }
+  }
 
   if (state.currentUser) {
     const email = state.currentUser.email || '';
@@ -3223,6 +3321,13 @@ function initApp() {
   initClipboardPasteListener();
 
   if (window.lucide) lucide.createIcons();
+
+  // Si aucun profil n'a encore été choisi sur cet appareil, afficher le sélecteur 1-clic
+  if (!localStorage.getItem('pathosorus_current_email') && !localStorage.getItem('pathosorus_explicit_logout')) {
+    setTimeout(() => {
+      openProfileSwitcherModal();
+    }, 400);
+  }
 }
 
 function saveQuestions() {
@@ -3252,7 +3357,9 @@ function saveCustomTags() {
 }
 
 function saveStats() {
-  localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+  const email = getCurrentUserEmail();
+  const key = getUserStatsStorageKey(email);
+  localStorage.setItem(key, JSON.stringify(state.stats));
   if (state.currentUser && state.currentUser.id) {
     localStorage.setItem(STORAGE_KEY_STATS + '_' + state.currentUser.id, JSON.stringify(state.stats));
     syncStatsToCloud();
