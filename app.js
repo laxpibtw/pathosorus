@@ -1097,6 +1097,17 @@ function getUserStatsStorageKey(email = null) {
 function loadUserStatsForAccount(email = null) {
   const em = (email || getCurrentUserEmail() || 'guest').trim().toLowerCase();
   const key = getUserStatsStorageKey(em);
+
+  // Samy démarre toujours avec ses stats cloud officielles à 0 XP / 0 Trophée
+  if (em === 'belhadef.samy@gmail.com') {
+    state.stats = getDefaultStats();
+    try {
+      localStorage.removeItem(key);
+      localStorage.removeItem(STORAGE_KEY_STATS);
+    } catch(e) {}
+    return;
+  }
+
   let loaded = null;
   try {
     const raw = localStorage.getItem(key);
@@ -1123,6 +1134,18 @@ function loadUserProgressForAccount(email = null) {
   resetInMemoryUserProgress();
   const em = (email || getCurrentUserEmail() || 'guest').trim().toLowerCase();
   const storageKey = getUserProgressStorageKey(em);
+
+  // Samy n'a pas encore fait de révisions : son compte doit être 100% vierge
+  if (em === 'belhadef.samy@gmail.com') {
+    state.userProgress = {};
+    try {
+      localStorage.removeItem(storageKey);
+      localStorage.removeItem('pathosorus_user_progress');
+      localStorage.removeItem('pathosorus_user_progress_guest');
+    } catch(e) {}
+    return;
+  }
+
   try {
     const rawProg = localStorage.getItem(storageKey);
     if (rawProg) {
@@ -2505,13 +2528,21 @@ async function fetchSupabaseData(silent = false) {
       // Récupérer la progression locale STRICTEMENT liée à l'utilisateur courant (ou invité)
       const userStorageKey = getUserProgressStorageKey();
       let storedProgress = {};
-      try {
-        const raw = localStorage.getItem(userStorageKey);
-        if (raw) storedProgress = JSON.parse(raw);
-      } catch (e) {}
-
       const currentEmail = getCurrentUserEmail();
+      const isSamy = (currentEmail === 'belhadef.samy@gmail.com');
       const isMainCreator = currentEmail === 'padoreau85@gmail.com';
+
+      // Samy démarre toujours avec 0 révision tant qu'il n'a pas révisé de cartes dans son UPROG officiel
+      if (isSamy && !cloudProgressMap.size) {
+        storedProgress = {};
+        state.userProgress = {};
+        try { localStorage.removeItem(userStorageKey); } catch(e){}
+      } else {
+        try {
+          const raw = localStorage.getItem(userStorageKey);
+          if (raw) storedProgress = JSON.parse(raw);
+        } catch (e) {}
+      }
 
       const cloudQuestions = qRes.data.map(q => {
         const cloudProg = cloudProgressMap.get(q.id);
@@ -2823,20 +2854,18 @@ function formatQuestionForSupabase(q) {
   const diff = q.difficulty || (q.stats && q.stats.difficulty) || 'facile';
   const extClues = q.extremeClues || q.extremeclues || (q.stats && q.stats.extremeClues) || '';
 
-  // Conserver fidèlement les métadonnées et la progression des révisions
+  // Les questions dans la table collective Supabase ne contiennent que le contenu éditorial
   const authorEmail = q.created_by || (q.stats && q.stats.created_by) || ((state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : 'padoreau85@gmail.com');
-  const existingStats = (q.stats && typeof q.stats === 'object') ? q.stats : {};
   const questionStats = {
-    ...existingStats,
-    seen: existingStats.seen || 0,
-    correct: existingStats.correct || 0,
-    consecutiveCorrect: existingStats.consecutiveCorrect || 0,
-    intervalDays: existingStats.intervalDays || 0,
-    lastReviewed: existingStats.lastReviewed || null,
-    nextReviewDate: existingStats.nextReviewDate || null,
     difficulty: diff,
     extremeClues: extClues,
-    created_by: authorEmail
+    created_by: authorEmail,
+    seen: 0,
+    correct: 0,
+    consecutiveCorrect: 0,
+    intervalDays: 0,
+    lastReviewed: null,
+    nextReviewDate: null
   };
 
   return {
@@ -2854,8 +2883,8 @@ function formatQuestionForSupabase(q) {
     trap: q.trap || '',
     tags: Array.isArray(q.tags) ? q.tags : [],
     images: Array.isArray(q.images) ? q.images : [],
-    mastered: Boolean(q.mastered),
-    flagged: Boolean(q.flagged),
+    mastered: false,
+    flagged: false,
     stats: questionStats,
     // Colonnes PostgreSQL en minuscules conformes à PostgREST
     optionexplanations: optExp,
@@ -3218,19 +3247,29 @@ function initApp() {
   // Restaurer immédiatement la progression locale des révisions STRICTEMENT propre au profil
   try {
     const userStorageKey = getUserProgressStorageKey();
-    const rawProg = localStorage.getItem(userStorageKey);
-    if (rawProg) {
-      const prog = JSON.parse(rawProg);
-      state.userProgress = prog;
-      state.questions.forEach(q => {
-        if (prog[q.id]) {
-          if (prog[q.id].stats) q.stats = Object.assign(q.stats || getDefaultQuestionStats(), prog[q.id].stats);
-          if (typeof prog[q.id].mastered !== 'undefined') q.mastered = Boolean(prog[q.id].mastered);
-          if (typeof prog[q.id].flagged !== 'undefined') q.flagged = Boolean(prog[q.id].flagged);
-        }
-      });
-    } else {
+    const curEmail = (getCurrentUserEmail() || '').toLowerCase();
+    if (curEmail === 'belhadef.samy@gmail.com') {
       state.userProgress = {};
+      try {
+        localStorage.removeItem(userStorageKey);
+        localStorage.removeItem('pathosorus_user_progress');
+        localStorage.removeItem('pathosorus_user_progress_guest');
+      } catch(e){}
+    } else {
+      const rawProg = localStorage.getItem(userStorageKey);
+      if (rawProg) {
+        const prog = JSON.parse(rawProg);
+        state.userProgress = prog;
+        state.questions.forEach(q => {
+          if (prog[q.id]) {
+            if (prog[q.id].stats) q.stats = Object.assign(q.stats || getDefaultQuestionStats(), prog[q.id].stats);
+            if (typeof prog[q.id].mastered !== 'undefined') q.mastered = Boolean(prog[q.id].mastered);
+            if (typeof prog[q.id].flagged !== 'undefined') q.flagged = Boolean(prog[q.id].flagged);
+          }
+        });
+      } else {
+        state.userProgress = {};
+      }
     }
   } catch(e) {}
 
