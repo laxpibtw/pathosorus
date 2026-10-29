@@ -1098,16 +1098,6 @@ function loadUserStatsForAccount(email = null) {
   const em = (email || getCurrentUserEmail() || 'guest').trim().toLowerCase();
   const key = getUserStatsStorageKey(em);
 
-  // Samy démarre toujours avec ses stats cloud officielles à 0 XP / 0 Trophée
-  if (em === 'belhadef.samy@gmail.com') {
-    state.stats = getDefaultStats();
-    try {
-      localStorage.removeItem(key);
-      localStorage.removeItem(STORAGE_KEY_STATS);
-    } catch(e) {}
-    return;
-  }
-
   let loaded = null;
   try {
     const raw = localStorage.getItem(key);
@@ -1134,17 +1124,6 @@ function loadUserProgressForAccount(email = null) {
   resetInMemoryUserProgress();
   const em = (email || getCurrentUserEmail() || 'guest').trim().toLowerCase();
   const storageKey = getUserProgressStorageKey(em);
-
-  // Samy n'a pas encore fait de révisions : son compte doit être 100% vierge
-  if (em === 'belhadef.samy@gmail.com') {
-    state.userProgress = {};
-    try {
-      localStorage.removeItem(storageKey);
-      localStorage.removeItem('pathosorus_user_progress');
-      localStorage.removeItem('pathosorus_user_progress_guest');
-    } catch(e) {}
-    return;
-  }
 
   try {
     const rawProg = localStorage.getItem(storageKey);
@@ -1524,18 +1503,28 @@ async function handleAuthLoginSubmit(e) {
   }
 }
 
-function handleAuthLogout() {
+async function handleAuthLogout() {
   if (!confirm("Voulez-vous vous déconnecter de PathoSorus ?")) return;
 
   const previousUser = state.currentUser;
 
-  // 1. Déconnexion locale INSTANTANÉE (0 ms, aucun blocage UI)
+  // 1. Sauvegarde et synchronisation Cloud prioritaire pour l'utilisateur sortant
+  if (previousUser && supabaseClient) {
+    try {
+      await syncUserStatsTagToCloud();
+      await syncUserProgressTagToCloud();
+    } catch (e) {
+      console.warn("Erreur flush cloud logout:", e);
+    }
+  }
+
+  // 2. Déconnexion locale INSTANTANÉE (0 ms, aucun blocage UI)
   localStorage.setItem('pathosorus_explicit_logout', 'true');
   localStorage.removeItem('pathosorus_current_email');
   state.currentUser = null;
   state.currentRole = 'reader';
 
-  // 2. Réinitialiser les statistiques vers un profil visiteur propre
+  // 3. Réinitialiser les statistiques vers un profil visiteur propre
   state.stats = {
     xp: 0,
     creatorXp: 0,
@@ -1549,7 +1538,7 @@ function handleAuthLogout() {
   };
   localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
 
-  // 3. Basculer immédiatement l'interface utilisateur (0 ms)
+  // 4. Basculer immédiatement l'interface utilisateur
   closeAuthModal();
   updateUserRoleUI();
   updateTopBar();
@@ -1565,23 +1554,14 @@ function handleAuthLogout() {
   showToast("Vous avez été déconnecté avec succès.", "info");
   if (window.lucide) lucide.createIcons();
 
-  // 4. Synchronisation finale et signOut Supabase en tâche de fond (non-bloquant)
-  (async () => {
-    if (previousUser) {
-      try {
-        await syncLocalProgressToCloud();
-      } catch (e) {
-        console.warn("Sync background logout:", e);
-      }
+  // 5. Déconnexion Supabase auth
+  if (supabaseClient) {
+    try {
+      await supabaseClient.auth.signOut();
+    } catch (e) {
+      console.warn("Erreur signOut:", e);
     }
-    if (supabaseClient) {
-      try {
-        await supabaseClient.auth.signOut();
-      } catch (e) {
-        console.warn("Erreur signOut:", e);
-      }
-    }
-  })().catch(() => {});
+  }
 }
 
 async function handleMasterAdminSignUp() {
@@ -2528,21 +2508,13 @@ async function fetchSupabaseData(silent = false) {
       // Récupérer la progression locale STRICTEMENT liée à l'utilisateur courant (ou invité)
       const userStorageKey = getUserProgressStorageKey();
       let storedProgress = {};
-      const currentEmail = getCurrentUserEmail();
-      const isSamy = (currentEmail === 'belhadef.samy@gmail.com');
-      const isMainCreator = currentEmail === 'padoreau85@gmail.com';
+      try {
+        const raw = localStorage.getItem(userStorageKey);
+        if (raw) storedProgress = JSON.parse(raw);
+      } catch (e) {}
 
-      // Samy démarre toujours avec 0 révision tant qu'il n'a pas révisé de cartes dans son UPROG officiel
-      if (isSamy && !cloudProgressMap.size) {
-        storedProgress = {};
-        state.userProgress = {};
-        try { localStorage.removeItem(userStorageKey); } catch(e){}
-      } else {
-        try {
-          const raw = localStorage.getItem(userStorageKey);
-          if (raw) storedProgress = JSON.parse(raw);
-        } catch (e) {}
-      }
+      const currentEmail = getCurrentUserEmail();
+      const isMainCreator = currentEmail === 'padoreau85@gmail.com';
 
       const cloudQuestions = qRes.data.map(q => {
         const cloudProg = cloudProgressMap.get(q.id);
@@ -3247,29 +3219,19 @@ function initApp() {
   // Restaurer immédiatement la progression locale des révisions STRICTEMENT propre au profil
   try {
     const userStorageKey = getUserProgressStorageKey();
-    const curEmail = (getCurrentUserEmail() || '').toLowerCase();
-    if (curEmail === 'belhadef.samy@gmail.com') {
-      state.userProgress = {};
-      try {
-        localStorage.removeItem(userStorageKey);
-        localStorage.removeItem('pathosorus_user_progress');
-        localStorage.removeItem('pathosorus_user_progress_guest');
-      } catch(e){}
+    const rawProg = localStorage.getItem(userStorageKey);
+    if (rawProg) {
+      const prog = JSON.parse(rawProg);
+      state.userProgress = prog;
+      state.questions.forEach(q => {
+        if (prog[q.id]) {
+          if (prog[q.id].stats) q.stats = Object.assign(q.stats || getDefaultQuestionStats(), prog[q.id].stats);
+          if (typeof prog[q.id].mastered !== 'undefined') q.mastered = Boolean(prog[q.id].mastered);
+          if (typeof prog[q.id].flagged !== 'undefined') q.flagged = Boolean(prog[q.id].flagged);
+        }
+      });
     } else {
-      const rawProg = localStorage.getItem(userStorageKey);
-      if (rawProg) {
-        const prog = JSON.parse(rawProg);
-        state.userProgress = prog;
-        state.questions.forEach(q => {
-          if (prog[q.id]) {
-            if (prog[q.id].stats) q.stats = Object.assign(q.stats || getDefaultQuestionStats(), prog[q.id].stats);
-            if (typeof prog[q.id].mastered !== 'undefined') q.mastered = Boolean(prog[q.id].mastered);
-            if (typeof prog[q.id].flagged !== 'undefined') q.flagged = Boolean(prog[q.id].flagged);
-          }
-        });
-      } else {
-        state.userProgress = {};
-      }
+      state.userProgress = {};
     }
   } catch(e) {}
 
@@ -3295,33 +3257,8 @@ function initApp() {
     state.lesionNotes = {};
   }
 
-  // Migration propre : réinitialisation des caches locaux pollués pour garantir XP=0 et Trophées=0
-  const RESET_STATS_FLAG = 'pathosorus_reset_xp_trophies_v20261029_clean_v4';
-  if (!localStorage.getItem(RESET_STATS_FLAG)) {
-    localStorage.setItem(RESET_STATS_FLAG, 'true');
-    localStorage.removeItem(STORAGE_KEY_STATS);
-    localStorage.removeItem('pathosorus_user_progress');
-    localStorage.removeItem('pathosorus_user_progress_guest');
-    localStorage.removeItem('pathosorus_stats_guest');
-
-    const curEmail = (getCurrentUserEmail() || '').toLowerCase();
-    // Samy ou compte non-master repart avec un profil 100% vierge localement
-    if (curEmail === 'belhadef.samy@gmail.com') {
-      localStorage.removeItem('pathosorus_stats_belhadef_samy_gmail_com');
-      localStorage.removeItem('pathosorus_user_progress_belhadef_samy_gmail_com');
-      state.stats = getDefaultStats();
-      state.userProgress = {};
-      (state.questions || []).forEach(q => {
-        q.mastered = false;
-        q.flagged = false;
-        q.stats = getDefaultQuestionStats();
-      });
-    } else {
-      loadUserStatsForAccount(curEmail);
-    }
-  } else {
-    loadUserStatsForAccount(getCurrentUserEmail());
-  }
+  // Chargement des statistiques de l'utilisateur actif
+  loadUserStatsForAccount(getCurrentUserEmail());
 
   state.statementTemplates = getSavedStatementTemplates();
   saveStatementTemplates();
@@ -3380,8 +3317,10 @@ function saveStats() {
   const email = getCurrentUserEmail();
   const key = getUserStatsStorageKey(email);
   localStorage.setItem(key, JSON.stringify(state.stats));
-  if (state.currentUser && state.currentUser.id) {
-    localStorage.setItem(STORAGE_KEY_STATS + '_' + state.currentUser.id, JSON.stringify(state.stats));
+  if (state.currentUser) {
+    if (state.currentUser.id) {
+      localStorage.setItem(STORAGE_KEY_STATS + '_' + state.currentUser.id, JSON.stringify(state.stats));
+    }
     syncStatsToCloud();
   }
   updateTopBar();
@@ -3500,11 +3439,9 @@ function getQuestionXp(q) {
 }
 
 function getTrophyXpReward(b) {
-  if (b && typeof b.xpReward === 'number') return b.xpReward;
-  if (b && b.tier === 'platinum') return 100;
-  if (b && b.tier === 'gold') return 50;
-  if (b && b.tier === 'silver') return 25;
-  return 10; // Bronze par défaut (+10 pts)
+  // Les trophées sont des distinctions d'honneur et de prestige pures (0 XP).
+  // L'XP est gagnée exclusivement en répondant aux questions et cas d'entraînement.
+  return 0;
 }
 
 function calculatePlayerLevel(xp) {
@@ -3965,9 +3902,7 @@ function checkAndUnlockBadges() {
         if (!state.stats.badgeHistory) state.stats.badgeHistory = {};
         state.stats.badgeHistory[b.id] = { unlocked: true, unlockedAt: Date.now() };
         newlyUnlocked = true;
-        const reward = getTrophyXpReward(b);
-        state.stats.xp = (state.stats.xp || 0) + reward;
-        showRewardToast(`🏆 Trophée Débloqué : "${b.name}" (+${reward} XP) !`, 'award');
+        showRewardToast(`🏆 Trophée d'Honneur Débloqué : "${b.name}" !`, 'award');
       }
     }
   });
@@ -4184,225 +4119,220 @@ function switchTrophiesSubtab(subtab = 'trophies') {
 }
 window.switchTrophiesSubtab = switchTrophiesSubtab;
 
+function sortLeaderboardAccounts(accounts, sort) {
+  const list = [...(accounts || [])];
+  if (sort === 'correct') {
+    list.sort((a, b) => (b.totalCorrect || 0) - (a.totalCorrect || 0) || (b.xp || 0) - (a.xp || 0));
+  } else if (sort === 'streak') {
+    list.sort((a, b) => (b.streak || 0) - (a.streak || 0) || (b.xp || 0) - (a.xp || 0));
+  } else if (sort === 'badges') {
+    list.sort((a, b) => (b.unlockedBadgesCount || 0) - (a.unlockedBadgesCount || 0) || (b.xp || 0) - (a.xp || 0));
+  } else {
+    // 'xp' par défaut
+    list.sort((a, b) => (b.xp || 0) - (a.xp || 0) || (b.totalCorrect || 0) - (a.totalCorrect || 0));
+  }
+  return list;
+}
+
+function updateLeaderboardSortButtons(currentSort) {
+  const sorts = ['xp', 'correct', 'badges', 'streak'];
+  sorts.forEach(s => {
+    const btn = document.getElementById(`btn-lb-sort-${s}`);
+    if (btn) {
+      if (s === currentSort) {
+        btn.className = "px-3 py-1.5 rounded-xl text-xs font-bold transition bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400/50";
+      } else {
+        btn.className = "px-3 py-1.5 rounded-xl text-xs font-bold transition bg-slate-950 text-slate-400 hover:text-white border border-slate-800";
+      }
+    }
+  });
+}
+
 function setLeaderboardSort(sort) {
   state.leaderboardSortBy = sort;
-  renderLeaderboard();
+  updateLeaderboardSortButtons(sort);
+
+  if (state.lastLeaderboardAccounts && state.lastLeaderboardAccounts.length > 0) {
+    const sorted = sortLeaderboardAccounts(state.lastLeaderboardAccounts, sort);
+    renderLeaderboardBody(sorted, sort);
+  } else {
+    renderLeaderboard(true);
+  }
 }
 window.setLeaderboardSort = setLeaderboardSort;
 
-async function renderLeaderboard() {
-  const container = document.getElementById('trophies-leaderboard-container');
-  if (!container) return;
-
-  const currentSort = state.leaderboardSortBy || 'xp';
-
-  container.innerHTML = `
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-md">
-      <div class="flex items-center space-x-3">
-        <div class="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center font-bold shrink-0">
-          <i data-lucide="trending-up" class="w-5 h-5"></i>
-        </div>
-        <div>
-          <h3 class="font-bold text-sm sm:text-base text-white">Classement Général de l'Équipe</h3>
-          <p class="text-xs text-slate-400">Avancement individuel, révisions et contributions des confrères en direct.</p>
-        </div>
-      </div>
-      <div class="flex flex-wrap items-center gap-2">
-        <div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
-          <button onclick="setLeaderboardSort('xp')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'xp' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🏆 Par XP Joueur</button>
-          <button onclick="setLeaderboardSort('correct')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'correct' ? 'bg-teal-600 text-white shadow-sm' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">✅ Par Réussites</button>
-          <button onclick="setLeaderboardSort('streak')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'streak' ? 'bg-amber-600 text-white shadow-sm' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🔥 Par Série (Jours)</button>
-        </div>
-        <button onclick="renderLeaderboard()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center space-x-1.5 transition" title="Actualiser le classement depuis Supabase">
-          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
-          <span>Actualiser</span>
-        </button>
-      </div>
-    </div>
-    <div id="leaderboard-body" class="space-y-6">
-      <div class="p-8 text-center text-slate-400">
-        <div class="inline-block animate-spin rounded-full h-7 w-7 border-t-2 border-b-2 border-indigo-500 mb-2"></div>
-        <p class="text-xs">Chargement des données de l'équipe...</p>
-      </div>
-    </div>
-  `;
-  if (window.lucide) lucide.createIcons();
-
-  const accountsMap = new Map();
-
-  // 1. Profils connus en local
+async function refreshLeaderboard() {
+  const icon = document.getElementById('lb-refresh-icon');
+  if (icon) icon.classList.add('animate-spin');
   try {
-    const known = JSON.parse(localStorage.getItem('pathosorus_known_colleagues') || '[]');
-    if (Array.isArray(known)) {
-      known.forEach(c => {
-        if (c && c.email) {
-          const em = c.email.trim().toLowerCase();
-          accountsMap.set(em, {
-            email: em,
-            name: c.name || getQuestionAuthorDisplayName({ created_by: em }).name,
-            role: c.role || (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com' ? 'creator' : 'reader'),
-            xp: 0,
-            streak: 1,
-            totalCorrect: 0,
-            createdQuestions: 0,
-            unlockedBadgesCount: 0
-          });
-        }
-      });
-    }
-  } catch (e) {}
-
-  // 2. Toujours inclure Pierre-Alain et Samy
-  if (!accountsMap.has('padoreau85@gmail.com')) {
-    accountsMap.set('padoreau85@gmail.com', {
-      email: 'padoreau85@gmail.com',
-      name: 'Pierre-Alain Doreau',
-      role: 'creator',
-      xp: 0,
-      streak: 1,
-      totalCorrect: 0,
-      createdQuestions: 0,
-      unlockedBadgesCount: 0
-    });
+    await renderLeaderboard(true);
+    showToast("Classement actualisé en direct !", "success");
+  } catch (e) {
+    console.warn("Erreur actualisation classement:", e);
+  } finally {
+    if (icon) icon.classList.remove('animate-spin');
   }
-  if (!accountsMap.has('belhadef.samy@gmail.com')) {
-    accountsMap.set('belhadef.samy@gmail.com', {
-      email: 'belhadef.samy@gmail.com',
-      name: 'Samy Belhadef',
-      role: 'creator',
-      xp: 0,
-      streak: 1,
-      totalCorrect: 0,
-      createdQuestions: 0,
-      unlockedBadgesCount: 0
-    });
-  }
+}
+window.refreshLeaderboard = refreshLeaderboard;
 
-  // 3. Lire Supabase profiles et USTATS (avec timeout de sécurité de 8000ms pour garantir le chargement distant)
-  if (supabaseClient) {
-    try {
-      const fetchPromise = Promise.allSettled([
-        supabaseClient.from('profiles').select('*').limit(50),
-        supabaseClient.from('custom_tags').select('name').like('name', 'USTATS:%')
-      ]);
-      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 8000));
-      const res = await Promise.race([fetchPromise, timeoutPromise]);
-
-      if (res && Array.isArray(res)) {
-        const [profRes, tagRes] = res;
-        if (profRes && profRes.status === 'fulfilled' && Array.isArray(profRes.value.data)) {
-          profRes.value.data.forEach(p => {
-            if (p && p.email) {
-              const em = p.email.trim().toLowerCase();
-              const existing = accountsMap.get(em) || {};
-              const stats = p.stats || {};
-              let profBadgesCount = 0;
-              if (stats.unlockedBadges && typeof stats.unlockedBadges === 'object') {
-                profBadgesCount = Object.keys(stats.unlockedBadges).length;
-              } else if (typeof stats.unlockedBadgesCount === 'number') {
-                profBadgesCount = stats.unlockedBadgesCount;
-              }
-              accountsMap.set(em, {
-                ...existing,
-                id: p.id,
-                email: em,
-                name: existing.name || p.name || em.split('@')[0],
-                role: p.role || existing.role || (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com' ? 'creator' : 'reader'),
-                xp: typeof stats.xp === 'number' ? stats.xp : (existing.xp || 0),
-                streak: typeof stats.streak === 'number' ? stats.streak : (existing.streak || 1),
-                totalCorrect: typeof stats.totalCorrect === 'number' ? stats.totalCorrect : (existing.totalCorrect || 0),
-                unlockedBadgesCount: Math.max(existing.unlockedBadgesCount || 0, profBadgesCount)
-              });
-            }
-          });
-        }
-        if (tagRes && tagRes.status === 'fulfilled' && Array.isArray(tagRes.value.data)) {
-          tagRes.value.data.forEach(t => {
-            if (t.name && t.name.startsWith('USTATS:')) {
-              try {
-                const parts = t.name.split(':', 2);
-                const rawJson = t.name.substring(parts[0].length + parts[1].length + 2);
-                const em = parts[1].trim().toLowerCase();
-                const st = JSON.parse(rawJson);
-                const existing = accountsMap.get(em) || {};
-                let tagBadgesCount = 0;
-                if (st.unlockedBadges && typeof st.unlockedBadges === 'object') {
-                  tagBadgesCount = Object.keys(st.unlockedBadges).length;
-                } else if (typeof st.unlockedBadgesCount === 'number') {
-                  tagBadgesCount = st.unlockedBadgesCount;
-                }
-                accountsMap.set(em, {
-                  ...existing,
-                  email: em,
-                  name: existing.name || (em === 'padoreau85@gmail.com' ? 'Pierre-Alain Doreau' : (em === 'belhadef.samy@gmail.com' ? 'Samy Belhadef' : em.split('@')[0])),
-                  xp: Math.max(existing.xp || 0, st.xp || 0),
-                  streak: Math.max(existing.streak || 1, st.streak || 1),
-                  totalCorrect: Math.max(existing.totalCorrect || 0, st.totalCorrect || 0),
-                  unlockedBadgesCount: Math.max(existing.unlockedBadgesCount || 0, tagBadgesCount)
-                });
-              } catch(e) {}
-            }
-          });
-        }
-      }
-    } catch (e) {
-      console.warn("Erreur chargement leaderboard distant:", e);
-    }
-  }
-
-  // 4. Injecter les données temps réel du compte connecté
-  if (state.currentUser && state.currentUser.email) {
-    const curEmail = state.currentUser.email.trim().toLowerCase();
-    const defaultName = curEmail === 'padoreau85@gmail.com' ? 'Pierre-Alain Doreau' : (curEmail === 'belhadef.samy@gmail.com' ? 'Samy Belhadef' : curEmail.split('@')[0]);
-    const selfBadgesCount = (state.stats && state.stats.unlockedBadges) ? Object.keys(state.stats.unlockedBadges).length : 0;
-
-    accountsMap.set(curEmail, {
-      ...(accountsMap.get(curEmail) || {}),
-      email: curEmail,
-      name: (accountsMap.get(curEmail)?.name) || defaultName,
-      role: isCreator() ? 'creator' : 'reader',
-      xp: state.stats.xp || 0,
-      streak: state.stats.streak || 1,
-      totalCorrect: state.stats.totalCorrect || 0,
-      unlockedBadgesCount: selfBadgesCount,
-      isSelf: true
-    });
-  }
-
-  // 5. Compter les questions créées dans state.questions
-  const questionsByAuthor = {};
-  (state.questions || []).forEach(q => {
-    const aut = getQuestionAuthorEmail(q);
-    questionsByAuthor[aut] = (questionsByAuthor[aut] || 0) + 1;
-  });
-
-  const list = Array.from(accountsMap.values()).map(acc => {
-    const qCount = questionsByAuthor[acc.email] || 0;
-    const lvlInfo = calculatePlayerLevel(acc.xp || 0);
-    const dName = acc.name || (acc.email ? acc.email.split('@')[0] : 'Confrère');
+function getLeadBadge(valA, valB, nameA = 'Dr Doreau', nameB = 'Dr Belhadef') {
+  if (valA > valB) {
     return {
-      ...acc,
-      name: dName,
-      createdQuestions: qCount,
-      level: lvlInfo.level,
-      tierName: lvlInfo.tierName,
-      tierBadge: lvlInfo.tierBadge
+      text: `👑 ${nameA} (+${valA - valB})`,
+      cls: 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
     };
-  });
-
-  // Tri
-  if (currentSort === 'correct') {
-    list.sort((a, b) => (b.totalCorrect || 0) - (a.totalCorrect || 0) || (b.xp || 0) - (a.xp || 0));
-  } else if (currentSort === 'streak') {
-    list.sort((a, b) => (b.streak || 0) - (a.streak || 0) || (b.xp || 0) - (a.xp || 0));
-  } else {
-    list.sort((a, b) => (b.xp || 0) - (a.xp || 0) || (b.totalCorrect || 0) - (a.totalCorrect || 0));
+  } else if (valB > valA) {
+    return {
+      text: `👑 ${nameB} (+${valB - valA})`,
+      cls: 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+    };
   }
+  return {
+    text: '🤝 Égalité',
+    cls: 'bg-slate-800 text-slate-400 border border-slate-700'
+  };
+}
 
+function renderLeaderboardBody(list, currentSort) {
   const bodyEl = document.getElementById('leaderboard-body');
   if (!bodyEl) return;
 
-  // Podium (Top 3)
+  // 1. Détecter Dr Pierre-Alain Doreau et Dr Samy Belhadef pour le duel comparatif
+  const pa = list.find(a => a.email === 'padoreau85@gmail.com') || {
+    name: 'Dr Pierre-Alain Doreau',
+    email: 'padoreau85@gmail.com',
+    xp: 0,
+    totalCorrect: 0,
+    unlockedBadgesCount: 0,
+    createdQuestions: 0,
+    streak: 1,
+    level: 1,
+    tierName: 'Interne Novice'
+  };
+
+  const samy = list.find(a => a.email === 'belhadef.samy@gmail.com') || {
+    name: 'Dr Samy Belhadef',
+    email: 'belhadef.samy@gmail.com',
+    xp: 0,
+    totalCorrect: 0,
+    unlockedBadgesCount: 0,
+    createdQuestions: 0,
+    streak: 1,
+    level: 1,
+    tierName: 'Interne Novice'
+  };
+
+  const totalDuelXp = (pa.xp || 0) + (samy.xp || 0);
+  let paPercent = 50;
+  let samyPercent = 50;
+  if (totalDuelXp > 0) {
+    paPercent = Math.round(((pa.xp || 0) / totalDuelXp) * 100);
+    samyPercent = 100 - paPercent;
+  }
+
+  const xpLead = getLeadBadge(pa.xp || 0, samy.xp || 0);
+  const correctLead = getLeadBadge(pa.totalCorrect || 0, samy.totalCorrect || 0);
+  const badgesLead = getLeadBadge(pa.unlockedBadgesCount || 0, samy.unlockedBadgesCount || 0);
+  const createdLead = getLeadBadge(pa.createdQuestions || 0, samy.createdQuestions || 0);
+
+  // Carte Duel Médical
+  const headToHeadHtml = `
+    <div class="bg-gradient-to-br from-slate-900 via-indigo-950/20 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 shadow-2xl relative overflow-hidden">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-500/20 pb-4 mb-4">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex items-center justify-center font-bold text-lg shadow-sm">
+            🔬
+          </div>
+          <div>
+            <h3 class="font-black text-base text-white flex items-center space-x-2">
+              <span>Duel Confraternel & Avancement Comparatif</span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">Direct</span>
+            </h3>
+            <p class="text-xs text-slate-400">Dr Pierre-Alain Doreau (Master) vs Dr Samy Belhadef (Confrère) • Points acquis aux révisions</p>
+          </div>
+        </div>
+        <div class="text-right">
+          <span class="text-[11px] font-semibold text-slate-400">Total XP cumulée :</span>
+          <span class="text-xs font-mono font-black text-indigo-300 ml-1.5">${totalDuelXp} XP</span>
+        </div>
+      </div>
+
+      <!-- Barre de progression comparative -->
+      <div class="space-y-1.5 mb-5">
+        <div class="flex justify-between items-center text-xs font-mono">
+          <span class="font-bold text-amber-300 flex items-center space-x-1.5">
+            <span>Dr Pierre-Alain Doreau</span>
+            <span class="text-[10px] text-amber-400/90 font-black">(${pa.xp} XP - ${paPercent}%)</span>
+          </span>
+          <span class="font-bold text-teal-300 flex items-center space-x-1.5">
+            <span class="text-[10px] text-teal-400/90 font-black">(${samyPercent}% - ${samy.xp} XP)</span>
+            <span>Dr Samy Belhadef</span>
+          </span>
+        </div>
+        <div class="w-full h-3 rounded-full bg-slate-950 overflow-hidden flex p-0.5 border border-slate-800">
+          <div class="h-full bg-gradient-to-r from-amber-500 to-amber-400 rounded-l-full transition-all duration-500" style="width: ${paPercent}%"></div>
+          <div class="h-full bg-gradient-to-r from-teal-400 to-emerald-400 rounded-r-full transition-all duration-500" style="width: ${samyPercent}%"></div>
+        </div>
+      </div>
+
+      <!-- 4 Statistiques Clés en face à face -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <!-- XP Joueur -->
+        <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-slate-400 text-[11px]">
+            <span class="font-semibold">⚡ XP Révisions</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded ${xpLead.cls}">${xpLead.text}</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div class="text-amber-400 font-mono font-black text-sm">${pa.xp} <span class="text-[10px] text-slate-500 font-normal">PA</span></div>
+            <div class="text-slate-600 font-black text-xs">vs</div>
+            <div class="text-teal-400 font-mono font-black text-sm">${samy.xp} <span class="text-[10px] text-slate-500 font-normal">SB</span></div>
+          </div>
+        </div>
+
+        <!-- Questions Réussies -->
+        <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-slate-400 text-[11px]">
+            <span class="font-semibold">✅ Réussies</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded ${correctLead.cls}">${correctLead.text}</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div class="text-amber-400 font-mono font-black text-sm">${pa.totalCorrect || 0} <span class="text-[10px] text-slate-500 font-normal">PA</span></div>
+            <div class="text-slate-600 font-black text-xs">vs</div>
+            <div class="text-teal-400 font-mono font-black text-sm">${samy.totalCorrect || 0} <span class="text-[10px] text-slate-500 font-normal">SB</span></div>
+          </div>
+        </div>
+
+        <!-- Trophées d'Honneur -->
+        <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-slate-400 text-[11px]">
+            <span class="font-semibold">🏆 Trophées</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded ${badgesLead.cls}">${badgesLead.text}</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div class="text-amber-400 font-mono font-black text-sm">${pa.unlockedBadgesCount || 0} <span class="text-[10px] text-slate-500 font-normal">PA</span></div>
+            <div class="text-slate-600 font-black text-xs">vs</div>
+            <div class="text-teal-400 font-mono font-black text-sm">${samy.unlockedBadgesCount || 0} <span class="text-[10px] text-slate-500 font-normal">SB</span></div>
+          </div>
+        </div>
+
+        <!-- Questions Rédigées -->
+        <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-slate-400 text-[11px]">
+            <span class="font-semibold">✍️ Rédaction</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded ${createdLead.cls}">${createdLead.text}</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div class="text-amber-400 font-mono font-black text-sm">${pa.createdQuestions || 0} <span class="text-[10px] text-slate-500 font-normal">PA</span></div>
+            <div class="text-slate-600 font-black text-xs">vs</div>
+            <div class="text-teal-400 font-mono font-black text-sm">${samy.createdQuestions || 0} <span class="text-[10px] text-slate-500 font-normal">SB</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // 2. Podium (Top 3)
   const top1 = list[0];
   const top2 = list[1];
   const top3 = list[2];
@@ -4430,11 +4360,15 @@ async function renderLeaderboard() {
               <span class="text-[10px] text-slate-500">XP</span>
             </div>
             <div>
+              <span class="font-black text-amber-400 font-mono block">${top2.unlockedBadgesCount || 0}</span>
+              <span class="text-[10px] text-slate-500">Trophées</span>
+            </div>
+            <div>
               <span class="font-black text-teal-300 font-mono block">${top2.totalCorrect || 0}</span>
               <span class="text-[10px] text-slate-500">Réussies</span>
             </div>
             <div>
-              <span class="font-black text-amber-400 font-mono block">${top2.streak}j</span>
+              <span class="font-black text-amber-300 font-mono block">${top2.streak}j</span>
               <span class="text-[10px] text-slate-500">Série</span>
             </div>
           </div>
@@ -4459,6 +4393,10 @@ async function renderLeaderboard() {
             <div>
               <span class="font-black text-lg text-amber-400 font-mono block">${top1.xp}</span>
               <span class="text-[10px] text-amber-200/60 font-semibold">XP Totale</span>
+            </div>
+            <div>
+              <span class="font-black text-lg text-amber-300 font-mono block">${top1.unlockedBadgesCount || 0}</span>
+              <span class="text-[10px] text-amber-200/60 font-semibold">Trophées</span>
             </div>
             <div>
               <span class="font-black text-lg text-teal-300 font-mono block">${top1.totalCorrect || 0}</span>
@@ -4491,6 +4429,10 @@ async function renderLeaderboard() {
               <span class="text-[10px] text-slate-500">XP</span>
             </div>
             <div>
+              <span class="font-black text-amber-400 font-mono block">${top3.unlockedBadgesCount || 0}</span>
+              <span class="text-[10px] text-slate-500">Trophées</span>
+            </div>
+            <div>
               <span class="font-black text-teal-300 font-mono block">${top3.totalCorrect || 0}</span>
               <span class="text-[10px] text-slate-500">Réussies</span>
             </div>
@@ -4505,14 +4447,14 @@ async function renderLeaderboard() {
     `;
   }
 
-  // Tableau complet
+  // 3. Tableau complet
   const tableRowsHtml = list.map((u, idx) => {
     const isSelf = !!u.isSelf;
     const rank = idx + 1;
     let medal = rank === 1 ? '🥇' : (rank === 2 ? '🥈' : (rank === 3 ? '🥉' : `#${rank}`));
     const isCreatorRole = u.role === 'creator' || u.email === 'padoreau85@gmail.com' || u.email === 'belhadef.samy@gmail.com';
     const displayName = u.name || (u.email ? u.email.split('@')[0] : 'Confrère');
-    const initial = (displayName.charAt(0) || 'P').toUpperCase();
+    const initial = (displayName.replace(/^Dr\s+/i, '').charAt(0) || 'P').toUpperCase();
 
     return `
       <tr class="border-b border-slate-800/80 ${isSelf ? 'bg-indigo-950/20 hover:bg-indigo-950/30 font-bold' : 'hover:bg-slate-900/60'} transition">
@@ -4548,13 +4490,13 @@ async function renderLeaderboard() {
         <td class="py-3 px-3.5 text-right font-mono font-black text-xs text-white">
           ${u.xp} <span class="text-[10px] text-indigo-400 font-bold">XP</span>
         </td>
-        <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-amber-400">
+        <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-amber-400 cursor-pointer hover:underline" onclick="setLeaderboardSort('badges')">
           🏆 ${u.unlockedBadgesCount || 0}
         </td>
-        <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-teal-300">
+        <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-teal-300 cursor-pointer hover:underline" onclick="setLeaderboardSort('correct')">
           ✅ ${u.totalCorrect || 0}
         </td>
-        <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-slate-300">
+        <td class="py-3 px-3.5 text-center font-mono font-bold text-xs text-slate-300 cursor-pointer hover:underline" onclick="setLeaderboardSort('streak')">
           🔥 ${u.streak || 1}j
         </td>
       </tr>
@@ -4562,6 +4504,8 @@ async function renderLeaderboard() {
   }).join('');
 
   bodyEl.innerHTML = `
+    ${headToHeadHtml}
+
     ${podiumHtml}
 
     <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
@@ -4574,7 +4518,7 @@ async function renderLeaderboard() {
               <th class="py-3 px-3.5">Rôle</th>
               <th class="py-3 px-3.5">Niveau Joueur</th>
               <th class="py-3 px-3.5 text-right cursor-pointer hover:text-white" onclick="setLeaderboardSort('xp')">XP Totale ↕</th>
-              <th class="py-3 px-3.5 text-center">Trophées</th>
+              <th class="py-3 px-3.5 text-center cursor-pointer hover:text-white" onclick="setLeaderboardSort('badges')">Trophées ↕</th>
               <th class="py-3 px-3.5 text-center cursor-pointer hover:text-white" onclick="setLeaderboardSort('correct')">Questions Réussies ↕</th>
               <th class="py-3 px-3.5 text-center cursor-pointer hover:text-white" onclick="setLeaderboardSort('streak')">Série ↕</th>
             </tr>
@@ -4590,6 +4534,223 @@ async function renderLeaderboard() {
   if (window.lucide && typeof window.lucide.createIcons === 'function') {
     window.lucide.createIcons();
   }
+}
+
+async function renderLeaderboard(forceRefresh = false) {
+  const container = document.getElementById('trophies-leaderboard-container');
+  if (!container) return;
+
+  const currentSort = state.leaderboardSortBy || 'xp';
+
+  // Si le squelette de la vue n'est pas encore présent ou refresh forcé
+  if (!document.getElementById('leaderboard-body') || forceRefresh) {
+    container.innerHTML = `
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-md">
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center font-bold shrink-0">
+            <i data-lucide="trending-up" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-sm sm:text-base text-white">Classement Général & Duel Médical</h3>
+            <p class="text-xs text-slate-400">Avancement individuel, révisions espacées et comparaisons directes en direct.</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+            <button id="btn-lb-sort-xp" onclick="setLeaderboardSort('xp')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'xp' ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400/50' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🏆 Par XP Joueur</button>
+            <button id="btn-lb-sort-correct" onclick="setLeaderboardSort('correct')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'correct' ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400/50' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">✅ Par Réussites</button>
+            <button id="btn-lb-sort-badges" onclick="setLeaderboardSort('badges')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'badges' ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400/50' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🏅 Par Trophées</button>
+            <button id="btn-lb-sort-streak" onclick="setLeaderboardSort('streak')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'streak' ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400/50' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🔥 Par Série</button>
+          </div>
+          <button onclick="refreshLeaderboard()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center space-x-1.5 transition shadow-sm" title="Actualiser le classement depuis Supabase">
+            <i id="lb-refresh-icon" data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+            <span>Actualiser</span>
+          </button>
+        </div>
+      </div>
+      <div id="leaderboard-body" class="space-y-6">
+        <div class="p-8 text-center text-slate-400">
+          <div class="inline-block animate-spin rounded-full h-7 w-7 border-t-2 border-b-2 border-indigo-500 mb-2"></div>
+          <p class="text-xs">Chargement des données de l'équipe...</p>
+        </div>
+      </div>
+    `;
+    if (window.lucide) lucide.createIcons();
+  }
+
+  const accountsMap = new Map();
+
+  // 1. Toujours initialiser Pierre-Alain et Samy avec leurs vrais noms de confrères
+  accountsMap.set('padoreau85@gmail.com', {
+    email: 'padoreau85@gmail.com',
+    name: 'Dr Pierre-Alain Doreau',
+    role: 'creator',
+    xp: 0,
+    streak: 1,
+    totalCorrect: 0,
+    createdQuestions: 0,
+    unlockedBadgesCount: 0
+  });
+
+  accountsMap.set('belhadef.samy@gmail.com', {
+    email: 'belhadef.samy@gmail.com',
+    name: 'Dr Samy Belhadef',
+    role: 'creator',
+    xp: 0,
+    streak: 1,
+    totalCorrect: 0,
+    createdQuestions: 0,
+    unlockedBadgesCount: 0
+  });
+
+  // 2. Profils connus en local
+  try {
+    const known = JSON.parse(localStorage.getItem('pathosorus_known_colleagues') || '[]');
+    if (Array.isArray(known)) {
+      known.forEach(c => {
+        if (c && c.email) {
+          const em = c.email.trim().toLowerCase();
+          const docInfo = getQuestionAuthorDisplayName(em);
+          if (!accountsMap.has(em)) {
+            accountsMap.set(em, {
+              email: em,
+              name: c.name || docInfo.name,
+              role: c.role || 'reader',
+              xp: 0,
+              streak: 1,
+              totalCorrect: 0,
+              createdQuestions: 0,
+              unlockedBadgesCount: 0
+            });
+          }
+        }
+      });
+    }
+  } catch (e) {}
+
+  // 3. Lire Supabase profiles et USTATS (avec timeout de 6000ms)
+  if (supabaseClient) {
+    try {
+      const fetchPromise = Promise.allSettled([
+        supabaseClient.from('profiles').select('*').limit(50),
+        supabaseClient.from('custom_tags').select('name').like('name', 'USTATS:%')
+      ]);
+      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 6000));
+      const res = await Promise.race([fetchPromise, timeoutPromise]);
+
+      if (res && Array.isArray(res)) {
+        const [profRes, tagRes] = res;
+        if (profRes && profRes.status === 'fulfilled' && Array.isArray(profRes.value.data)) {
+          profRes.value.data.forEach(p => {
+            if (p && p.email) {
+              const em = p.email.trim().toLowerCase();
+              const existing = accountsMap.get(em) || {};
+              const docInfo = getQuestionAuthorDisplayName(em);
+              const stats = p.stats || {};
+              let profBadgesCount = 0;
+              if (stats.unlockedBadges && typeof stats.unlockedBadges === 'object') {
+                profBadgesCount = Object.keys(stats.unlockedBadges).length;
+              } else if (typeof stats.unlockedBadgesCount === 'number') {
+                profBadgesCount = stats.unlockedBadgesCount;
+              }
+              accountsMap.set(em, {
+                ...existing,
+                id: p.id,
+                email: em,
+                name: existing.name || docInfo.name || p.name || em.split('@')[0],
+                role: p.role || existing.role || (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com' ? 'creator' : 'reader'),
+                xp: typeof stats.xp === 'number' ? stats.xp : (existing.xp || 0),
+                streak: typeof stats.streak === 'number' ? stats.streak : (existing.streak || 1),
+                totalCorrect: typeof stats.totalCorrect === 'number' ? stats.totalCorrect : (existing.totalCorrect || 0),
+                unlockedBadgesCount: Math.max(existing.unlockedBadgesCount || 0, profBadgesCount)
+              });
+            }
+          });
+        }
+        if (tagRes && tagRes.status === 'fulfilled' && Array.isArray(tagRes.value.data)) {
+          tagRes.value.data.forEach(t => {
+            if (t.name && t.name.startsWith('USTATS:')) {
+              try {
+                const parts = t.name.split(':', 2);
+                const rawJson = t.name.substring(parts[0].length + parts[1].length + 2);
+                const em = parts[1].trim().toLowerCase();
+                const st = JSON.parse(rawJson);
+                const existing = accountsMap.get(em) || {};
+                const docInfo = getQuestionAuthorDisplayName(em);
+                let tagBadgesCount = 0;
+                if (st.unlockedBadges && typeof st.unlockedBadges === 'object') {
+                  tagBadgesCount = Object.keys(st.unlockedBadges).length;
+                } else if (typeof st.unlockedBadgesCount === 'number') {
+                  tagBadgesCount = st.unlockedBadgesCount;
+                }
+                accountsMap.set(em, {
+                  ...existing,
+                  email: em,
+                  name: existing.name || docInfo.name || (em === 'padoreau85@gmail.com' ? 'Dr Pierre-Alain Doreau' : (em === 'belhadef.samy@gmail.com' ? 'Dr Samy Belhadef' : em.split('@')[0])),
+                  xp: Math.max(existing.xp || 0, st.xp || 0),
+                  streak: Math.max(existing.streak || 1, st.streak || 1),
+                  totalCorrect: Math.max(existing.totalCorrect || 0, st.totalCorrect || 0),
+                  unlockedBadgesCount: Math.max(existing.unlockedBadgesCount || 0, tagBadgesCount)
+                });
+              } catch(e) {}
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("Erreur chargement leaderboard distant:", e);
+    }
+  }
+
+  // 4. Injecter les données temps réel du compte connecté
+  if (state.currentUser && state.currentUser.email) {
+    const curEmail = state.currentUser.email.trim().toLowerCase();
+    const docInfo = getQuestionAuthorDisplayName(curEmail);
+    const selfBadgesCount = (state.stats && state.stats.unlockedBadges) ? Object.keys(state.stats.unlockedBadges).length : 0;
+
+    accountsMap.set(curEmail, {
+      ...(accountsMap.get(curEmail) || {}),
+      email: curEmail,
+      name: (accountsMap.get(curEmail)?.name) || docInfo.name,
+      role: isCreator() ? 'creator' : 'reader',
+      xp: state.stats.xp || 0,
+      streak: state.stats.streak || 1,
+      totalCorrect: state.stats.totalCorrect || 0,
+      unlockedBadgesCount: selfBadgesCount,
+      isSelf: true
+    });
+  }
+
+  // 5. Compter les questions créées dans state.questions
+  const questionsByAuthor = {};
+  (state.questions || []).forEach(q => {
+    const aut = getQuestionAuthorEmail(q);
+    questionsByAuthor[aut] = (questionsByAuthor[aut] || 0) + 1;
+  });
+
+  const list = Array.from(accountsMap.values()).map(acc => {
+    const qCount = questionsByAuthor[acc.email] || 0;
+    const lvlInfo = calculatePlayerLevel(acc.xp || 0);
+    const docInfo = getQuestionAuthorDisplayName(acc.email);
+    const dName = acc.name || docInfo.name;
+    return {
+      ...acc,
+      name: dName,
+      createdQuestions: qCount,
+      level: lvlInfo.level,
+      tierName: lvlInfo.tierName,
+      tierBadge: lvlInfo.tierBadge
+    };
+  });
+
+  // Mettre en cache pour tri instantané sans latence
+  state.lastLeaderboardAccounts = list;
+
+  // Tri actif
+  const sorted = sortLeaderboardAccounts(list, currentSort);
+
+  // Rendu UI
+  renderLeaderboardBody(sorted, currentSort);
 }
 window.renderLeaderboard = renderLeaderboard;
 
@@ -4753,7 +4914,7 @@ function renderTrophiesGrid() {
               ${(b.icon && b.icon.length > 2) ? `<i data-lucide="${b.icon}" class="w-5 h-5"></i>` : `<span class="text-xl">${b.icon || '🏆'}</span>`}
             </div>
             <div>
-              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold border border-amber-500/20 block w-fit">+${getTrophyXpReward(b)} XP</span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold border border-amber-500/20 block w-fit">🏆 Trophée d'Honneur</span>
             </div>
           </div>
 
@@ -5220,7 +5381,24 @@ function getQuestionAuthorEmail(q) {
 }
 
 function getQuestionAuthorDisplayName(q) {
-  return { email: '', name: 'Banque', short: 'Banque' };
+  let email = '';
+  if (typeof q === 'string') {
+    email = q.trim().toLowerCase();
+  } else if (q) {
+    email = (q.created_by || (q.stats && q.stats.created_by) || q.email || '').trim().toLowerCase();
+  }
+  if (email === 'padoreau85@gmail.com') {
+    return { email, name: 'Dr Pierre-Alain Doreau', short: 'Dr Doreau' };
+  }
+  if (email === 'belhadef.samy@gmail.com') {
+    return { email, name: 'Dr Samy Belhadef', short: 'Dr Belhadef' };
+  }
+  if (!email || email === 'banque' || email === 'guest') {
+    return { email: '', name: 'Banque PathoSorus', short: 'Banque' };
+  }
+  const prefix = email.split('@')[0];
+  const capitalized = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+  return { email, name: `Dr ${capitalized}`, short: capitalized };
 }
 
 function getKnownAuthorsList() {
