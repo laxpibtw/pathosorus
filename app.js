@@ -586,8 +586,11 @@ async function initAuth() {
     if (session && session.user) {
       state.currentUser = session.user;
       if (session.user.email) {
-        localStorage.setItem('pathosorus_current_email', session.user.email.trim().toLowerCase());
+        const em = session.user.email.trim().toLowerCase();
+        localStorage.setItem('pathosorus_current_email', em);
         localStorage.removeItem('pathosorus_explicit_logout');
+        loadUserStatsForAccount(em);
+        loadUserProgressForAccount(em);
       }
       await fetchCurrentUserRole();
       checkDailyStreak();
@@ -595,6 +598,11 @@ async function initAuth() {
       const active = getActiveUser();
       if (active) {
         state.currentUser = active;
+        if (active.email) {
+          const em = active.email.trim().toLowerCase();
+          loadUserStatsForAccount(em);
+          loadUserProgressForAccount(em);
+        }
         await fetchCurrentUserRole();
         checkDailyStreak();
       } else {
@@ -614,8 +622,11 @@ async function initAuth() {
       if (session && session.user) {
         state.currentUser = session.user;
         if (session.user.email) {
-          localStorage.setItem('pathosorus_current_email', session.user.email.trim().toLowerCase());
+          const em = session.user.email.trim().toLowerCase();
+          localStorage.setItem('pathosorus_current_email', em);
           localStorage.removeItem('pathosorus_explicit_logout');
+          loadUserStatsForAccount(em);
+          loadUserProgressForAccount(em);
         }
         await fetchCurrentUserRole();
         checkDailyStreak();
@@ -626,6 +637,8 @@ async function initAuth() {
         if (explicitLogout) {
           state.currentUser = null;
           state.currentRole = 'reader';
+          state.stats = getDefaultStats();
+          resetInMemoryUserProgress();
           localStorage.removeItem('pathosorus_current_email');
           updateTopBar();
           renderSpacedRepetitionDashboard();
@@ -679,8 +692,8 @@ async function syncUserProgressTagToCloud() {
     const payload = JSON.stringify(compactMap);
     const tagName = `UPROG:${email}:${payload}`;
 
-    await supabaseClient.from('custom_tags').delete().ilike('name', `UPROG:${email}:%`);
-    await supabaseClient.from('custom_tags').insert({ name: tagName });
+    await supabaseClient.from('custom_tags').upsert({ name: tagName }, { onConflict: 'name' });
+    await supabaseClient.from('custom_tags').delete().ilike('name', `UPROG:${email}:%`).neq('name', tagName);
   } catch (err) {
     console.warn("Erreur syncUserProgressTagToCloud:", err);
   }
@@ -704,8 +717,8 @@ async function syncUserStatsTagToCloud() {
     };
     const tagName = `USTATS:${email}:${JSON.stringify(statsPayload)}`;
 
-    await supabaseClient.from('custom_tags').delete().ilike('name', `USTATS:${email}:%`);
-    await supabaseClient.from('custom_tags').insert({ name: tagName });
+    await supabaseClient.from('custom_tags').upsert({ name: tagName }, { onConflict: 'name' });
+    await supabaseClient.from('custom_tags').delete().ilike('name', `USTATS:${email}:%`).neq('name', tagName);
   } catch (err) {
     console.warn("Erreur syncUserStatsTagToCloud:", err);
   }
@@ -1453,6 +1466,10 @@ async function handleAuthLoginSubmit(e) {
     localStorage.removeItem('pathosorus_explicit_logout');
     localStorage.setItem('pathosorus_current_email', normalizedEmail);
 
+    // 2bis. Isolation stricte en mémoire : purger tout résidu avant de charger le compte
+    state.stats = getDefaultStats();
+    resetInMemoryUserProgress();
+
     // 3. Charger immédiatement les données locales de cet utilisateur (0 ms)
     loadUserStatsForAccount(normalizedEmail);
     loadUserProgressForAccount(normalizedEmail);
@@ -1503,19 +1520,18 @@ async function handleAuthLoginSubmit(e) {
   }
 }
 
-async function handleAuthLogout() {
+function handleAuthLogout() {
   if (!confirm("Voulez-vous vous déconnecter de PathoSorus ?")) return;
 
   const previousUser = state.currentUser;
+  const previousEmail = (previousUser && previousUser.email) ? previousUser.email.trim().toLowerCase() : getCurrentUserEmail();
+  const previousStats = state.stats ? { ...state.stats } : getDefaultStats();
 
-  // 1. Sauvegarde et synchronisation Cloud prioritaire pour l'utilisateur sortant
-  if (previousUser && supabaseClient) {
+  // 1. Sauvegarde locale immédiate de l'utilisateur sortant
+  if (previousEmail) {
     try {
-      await syncUserStatsTagToCloud();
-      await syncUserProgressTagToCloud();
-    } catch (e) {
-      console.warn("Erreur flush cloud logout:", e);
-    }
+      localStorage.setItem(getUserStatsStorageKey(previousEmail), JSON.stringify(previousStats));
+    } catch(e) {}
   }
 
   // 2. Déconnexion locale INSTANTANÉE (0 ms, aucun blocage UI)
@@ -1524,21 +1540,14 @@ async function handleAuthLogout() {
   state.currentUser = null;
   state.currentRole = 'reader';
 
-  // 3. Réinitialiser les statistiques vers un profil visiteur propre
-  state.stats = {
-    xp: 0,
-    creatorXp: 0,
-    streak: 1,
-    lastActiveDate: new Date().toISOString().split('T')[0],
-    totalAnswered: 0,
-    totalCorrect: 0,
-    completedCategories: [],
-    unlockedBadges: {},
-    badgeHistory: {}
-  };
-  localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+  // 3. Réinitialiser les statistiques vers un profil visiteur propre (0 XP en mémoire)
+  state.stats = getDefaultStats();
+  resetInMemoryUserProgress();
+  try {
+    localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+  } catch(e) {}
 
-  // 4. Basculer immédiatement l'interface utilisateur
+  // 4. Basculer immédiatement l'interface utilisateur (0 ms de latence)
   closeAuthModal();
   updateUserRoleUI();
   updateTopBar();
@@ -1554,14 +1563,21 @@ async function handleAuthLogout() {
   showToast("Vous avez été déconnecté avec succès.", "info");
   if (window.lucide) lucide.createIcons();
 
-  // 5. Déconnexion Supabase auth
-  if (supabaseClient) {
-    try {
-      await supabaseClient.auth.signOut();
-    } catch (e) {
-      console.warn("Erreur signOut:", e);
+  // 5. Synchronisation Cloud sortante et signOut Supabase en tâche de fond complètement détachée
+  (async () => {
+    if (previousEmail && supabaseClient) {
+      try {
+        const tagName = `USTATS:${previousEmail}:${JSON.stringify(previousStats)}`;
+        await supabaseClient.from('custom_tags').upsert({ name: tagName }, { onConflict: 'name' });
+        await supabaseClient.from('custom_tags').delete().ilike('name', `USTATS:${previousEmail}:%`).neq('name', tagName);
+      } catch(e) {}
     }
-  }
+    if (supabaseClient) {
+      try {
+        await supabaseClient.auth.signOut();
+      } catch (e) {}
+    }
+  })().catch(() => {});
 }
 
 async function handleMasterAdminSignUp() {
@@ -2440,6 +2456,24 @@ async function fetchSupabaseData(silent = false) {
         }
       }
 
+      // Mettre en cache local les stats de chaque confrère (Pierre-Alain, Samy...)
+      if (tRes && tRes.data && Array.isArray(tRes.data)) {
+        tRes.data.forEach(t => {
+          if (t && t.name && t.name.startsWith('USTATS:')) {
+            try {
+              const parts = t.name.split(':', 2);
+              const raw = t.name.substring(parts[0].length + parts[1].length + 2);
+              const em = parts[1].trim().toLowerCase();
+              const parsed = JSON.parse(raw);
+              if (parsed && typeof parsed === 'object') {
+                const k = getUserStatsStorageKey(em);
+                localStorage.setItem(k, JSON.stringify(parsed));
+              }
+            } catch(e) {}
+          }
+        });
+      }
+
       const uStatsTag = tRes.data.find(t => t.name && t.name.startsWith(`USTATS:${currentEmail}:`));
       if (uStatsTag) {
         try {
@@ -2447,7 +2481,7 @@ async function fetchSupabaseData(silent = false) {
           const parsedStats = JSON.parse(raw);
           if (parsedStats && typeof parsedStats === 'object') {
             state.stats = {
-              ...state.stats,
+              ...getDefaultStats(),
               ...parsedStats,
               xp: typeof parsedStats.xp === 'number' ? parsedStats.xp : (state.stats.xp || 0),
               creatorXp: typeof parsedStats.creatorXp === 'number' ? parsedStats.creatorXp : (state.stats.creatorXp || 0),
@@ -4580,27 +4614,40 @@ async function renderLeaderboard(forceRefresh = false) {
 
   const accountsMap = new Map();
 
-  // 1. Toujours initialiser Pierre-Alain et Samy avec leurs vrais noms de confrères
+  // 1. Initialiser immédiatement avec les données locales de chaque confrère (0 ms de latence)
+  const paKey = getUserStatsStorageKey('padoreau85@gmail.com');
+  const samyKey = getUserStatsStorageKey('belhadef.samy@gmail.com');
+  let paLocalStats = null;
+  let samyLocalStats = null;
+  try {
+    const raw = localStorage.getItem(paKey);
+    if (raw) paLocalStats = JSON.parse(raw);
+  } catch(e) {}
+  try {
+    const raw = localStorage.getItem(samyKey);
+    if (raw) samyLocalStats = JSON.parse(raw);
+  } catch(e) {}
+
   accountsMap.set('padoreau85@gmail.com', {
     email: 'padoreau85@gmail.com',
     name: 'Dr Pierre-Alain Doreau',
     role: 'creator',
-    xp: 0,
-    streak: 1,
-    totalCorrect: 0,
+    xp: (paLocalStats && typeof paLocalStats.xp === 'number') ? paLocalStats.xp : 0,
+    streak: (paLocalStats && typeof paLocalStats.streak === 'number') ? paLocalStats.streak : 1,
+    totalCorrect: (paLocalStats && typeof paLocalStats.totalCorrect === 'number') ? paLocalStats.totalCorrect : 0,
     createdQuestions: 0,
-    unlockedBadgesCount: 0
+    unlockedBadgesCount: (paLocalStats && paLocalStats.unlockedBadges) ? Object.keys(paLocalStats.unlockedBadges).length : 0
   });
 
   accountsMap.set('belhadef.samy@gmail.com', {
     email: 'belhadef.samy@gmail.com',
     name: 'Dr Samy Belhadef',
     role: 'creator',
-    xp: 0,
-    streak: 1,
-    totalCorrect: 0,
+    xp: (samyLocalStats && typeof samyLocalStats.xp === 'number') ? samyLocalStats.xp : 0,
+    streak: (samyLocalStats && typeof samyLocalStats.streak === 'number') ? samyLocalStats.streak : 1,
+    totalCorrect: (samyLocalStats && typeof samyLocalStats.totalCorrect === 'number') ? samyLocalStats.totalCorrect : 0,
     createdQuestions: 0,
-    unlockedBadgesCount: 0
+    unlockedBadgesCount: (samyLocalStats && samyLocalStats.unlockedBadges) ? Object.keys(samyLocalStats.unlockedBadges).length : 0
   });
 
   // 2. Profils connus en local
@@ -4628,78 +4675,65 @@ async function renderLeaderboard(forceRefresh = false) {
     }
   } catch (e) {}
 
-  // 3. Lire Supabase profiles et USTATS (avec timeout de 6000ms)
+  // 3. Lire Supabase custom_tags (avec double canal garanti : client Supabase + fallback direct REST)
+  let allTags = [];
   if (supabaseClient) {
     try {
-      const fetchPromise = Promise.allSettled([
-        supabaseClient.from('profiles').select('*').limit(50),
-        supabaseClient.from('custom_tags').select('name').like('name', 'USTATS:%')
-      ]);
-      const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 6000));
-      const res = await Promise.race([fetchPromise, timeoutPromise]);
-
-      if (res && Array.isArray(res)) {
-        const [profRes, tagRes] = res;
-        if (profRes && profRes.status === 'fulfilled' && Array.isArray(profRes.value.data)) {
-          profRes.value.data.forEach(p => {
-            if (p && p.email) {
-              const em = p.email.trim().toLowerCase();
-              const existing = accountsMap.get(em) || {};
-              const docInfo = getQuestionAuthorDisplayName(em);
-              const stats = p.stats || {};
-              let profBadgesCount = 0;
-              if (stats.unlockedBadges && typeof stats.unlockedBadges === 'object') {
-                profBadgesCount = Object.keys(stats.unlockedBadges).length;
-              } else if (typeof stats.unlockedBadgesCount === 'number') {
-                profBadgesCount = stats.unlockedBadgesCount;
-              }
-              accountsMap.set(em, {
-                ...existing,
-                id: p.id,
-                email: em,
-                name: existing.name || docInfo.name || p.name || em.split('@')[0],
-                role: p.role || existing.role || (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com' ? 'creator' : 'reader'),
-                xp: typeof stats.xp === 'number' ? stats.xp : (existing.xp || 0),
-                streak: typeof stats.streak === 'number' ? stats.streak : (existing.streak || 1),
-                totalCorrect: typeof stats.totalCorrect === 'number' ? stats.totalCorrect : (existing.totalCorrect || 0),
-                unlockedBadgesCount: Math.max(existing.unlockedBadgesCount || 0, profBadgesCount)
-              });
-            }
-          });
-        }
-        if (tagRes && tagRes.status === 'fulfilled' && Array.isArray(tagRes.value.data)) {
-          tagRes.value.data.forEach(t => {
-            if (t.name && t.name.startsWith('USTATS:')) {
-              try {
-                const parts = t.name.split(':', 2);
-                const rawJson = t.name.substring(parts[0].length + parts[1].length + 2);
-                const em = parts[1].trim().toLowerCase();
-                const st = JSON.parse(rawJson);
-                const existing = accountsMap.get(em) || {};
-                const docInfo = getQuestionAuthorDisplayName(em);
-                let tagBadgesCount = 0;
-                if (st.unlockedBadges && typeof st.unlockedBadges === 'object') {
-                  tagBadgesCount = Object.keys(st.unlockedBadges).length;
-                } else if (typeof st.unlockedBadgesCount === 'number') {
-                  tagBadgesCount = st.unlockedBadgesCount;
-                }
-                accountsMap.set(em, {
-                  ...existing,
-                  email: em,
-                  name: existing.name || docInfo.name || (em === 'padoreau85@gmail.com' ? 'Dr Pierre-Alain Doreau' : (em === 'belhadef.samy@gmail.com' ? 'Dr Samy Belhadef' : em.split('@')[0])),
-                  xp: Math.max(existing.xp || 0, st.xp || 0),
-                  streak: Math.max(existing.streak || 1, st.streak || 1),
-                  totalCorrect: Math.max(existing.totalCorrect || 0, st.totalCorrect || 0),
-                  unlockedBadgesCount: Math.max(existing.unlockedBadgesCount || 0, tagBadgesCount)
-                });
-              } catch(e) {}
-            }
-          });
-        }
+      const res = await supabaseClient.from('custom_tags').select('*');
+      if (res && res.data && Array.isArray(res.data)) {
+        allTags = res.data;
       }
-    } catch (e) {
-      console.warn("Erreur chargement leaderboard distant:", e);
-    }
+    } catch(e) {}
+  }
+  if (!allTags || allTags.length === 0) {
+    try {
+      const { url, key } = getSupabaseCredentials();
+      if (url && key) {
+        const resp = await fetch(`${url}/rest/v1/custom_tags?select=*`, {
+          headers: { apikey: key, Authorization: `Bearer ${key}` }
+        });
+        const json = await resp.json();
+        if (Array.isArray(json)) allTags = json;
+      }
+    } catch(e) {}
+  }
+
+  // Traiter tous les tags USTATS de l'équipe
+  if (Array.isArray(allTags)) {
+    allTags.forEach(t => {
+      if (t && t.name && t.name.startsWith('USTATS:')) {
+        try {
+          const parts = t.name.split(':', 2);
+          const rawJson = t.name.substring(parts[0].length + parts[1].length + 2);
+          const em = parts[1].trim().toLowerCase();
+          const st = JSON.parse(rawJson);
+          const existing = accountsMap.get(em) || {};
+          const docInfo = getQuestionAuthorDisplayName(em);
+          let tagBadgesCount = 0;
+          if (st.unlockedBadges && typeof st.unlockedBadges === 'object') {
+            tagBadgesCount = Object.keys(st.unlockedBadges).length;
+          } else if (typeof st.unlockedBadgesCount === 'number') {
+            tagBadgesCount = st.unlockedBadgesCount;
+          }
+
+          // Mettre en cache machine pour garantir une réactivité immédiate sans réseau
+          try {
+            localStorage.setItem(getUserStatsStorageKey(em), JSON.stringify(st));
+          } catch(e) {}
+
+          accountsMap.set(em, {
+            ...existing,
+            email: em,
+            name: existing.name || docInfo.name || (em === 'padoreau85@gmail.com' ? 'Dr Pierre-Alain Doreau' : (em === 'belhadef.samy@gmail.com' ? 'Dr Samy Belhadef' : em.split('@')[0])),
+            role: (em === 'padoreau85@gmail.com' || em === 'belhadef.samy@gmail.com') ? 'creator' : (existing.role || 'reader'),
+            xp: (typeof st.xp === 'number') ? st.xp : (existing.xp || 0),
+            streak: (typeof st.streak === 'number') ? st.streak : (existing.streak || 1),
+            totalCorrect: (typeof st.totalCorrect === 'number') ? st.totalCorrect : (existing.totalCorrect || 0),
+            unlockedBadgesCount: (typeof tagBadgesCount === 'number') ? tagBadgesCount : (existing.unlockedBadgesCount || 0)
+          });
+        } catch(e) {}
+      }
+    });
   }
 
   // 4. Injecter les données temps réel du compte connecté
@@ -4707,15 +4741,16 @@ async function renderLeaderboard(forceRefresh = false) {
     const curEmail = state.currentUser.email.trim().toLowerCase();
     const docInfo = getQuestionAuthorDisplayName(curEmail);
     const selfBadgesCount = (state.stats && state.stats.unlockedBadges) ? Object.keys(state.stats.unlockedBadges).length : 0;
+    const existing = accountsMap.get(curEmail) || {};
 
     accountsMap.set(curEmail, {
-      ...(accountsMap.get(curEmail) || {}),
+      ...existing,
       email: curEmail,
       name: (accountsMap.get(curEmail)?.name) || docInfo.name,
-      role: isCreator() ? 'creator' : 'reader',
-      xp: state.stats.xp || 0,
-      streak: state.stats.streak || 1,
-      totalCorrect: state.stats.totalCorrect || 0,
+      role: 'creator',
+      xp: (typeof state.stats.xp === 'number') ? state.stats.xp : (existing.xp || 0),
+      streak: (typeof state.stats.streak === 'number') ? state.stats.streak : (existing.streak || 1),
+      totalCorrect: (typeof state.stats.totalCorrect === 'number') ? state.stats.totalCorrect : (existing.totalCorrect || 0),
       unlockedBadgesCount: selfBadgesCount,
       isSelf: true
     });
