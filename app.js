@@ -110,7 +110,7 @@ let state = {
     xp: 0,
     creatorXp: 0,
     streak: 1,
-    lastActiveDate: new Date().toISOString().split('T')[0],
+    lastActiveDate: getLocalDateString(),
     totalAnswered: 0,
     totalCorrect: 0,
     completedCategories: [],
@@ -971,7 +971,7 @@ function getDefaultStats() {
     xp: 0,
     creatorXp: 0,
     streak: 1,
-    lastActiveDate: new Date().toISOString().split('T')[0],
+    lastActiveDate: getLocalDateString(),
     totalAnswered: 0,
     totalCorrect: 0,
     completedCategories: [],
@@ -995,13 +995,19 @@ function loadUserStatsForAccount(email = null) {
     if (raw) loaded = JSON.parse(raw);
   } catch(e) {}
 
+  const activeDate = localStorage.getItem('pathosorus_last_active_' + em) || getLocalDateString();
+
   if (loaded && typeof loaded === 'object') {
     state.stats = {
       ...getDefaultStats(),
-      ...loaded
+      ...loaded,
+      lastActiveDate: activeDate
     };
   } else {
-    state.stats = getDefaultStats();
+    state.stats = {
+      ...getDefaultStats(),
+      lastActiveDate: activeDate
+    };
   }
 }
 window.loadUserStatsForAccount = loadUserStatsForAccount;
@@ -2372,8 +2378,10 @@ async function fetchSupabaseData(silent = false) {
 
         if (dbUserStats) {
           hasSqlStats = true;
+          const preservedLastActive = (state.stats && state.stats.lastActiveDate) || localStorage.getItem('pathosorus_last_active_' + currentEmail) || getLocalDateString();
           state.stats = {
             ...getDefaultStats(),
+            lastActiveDate: preservedLastActive,
             xp: typeof dbUserStats.xp === 'number' ? dbUserStats.xp : 0,
             creatorXp: (state.stats && state.stats.creatorXp) || 0,
             streak: typeof dbUserStats.streak === 'number' ? dbUserStats.streak : 1,
@@ -2383,6 +2391,7 @@ async function fetchSupabaseData(silent = false) {
             completedCategories: dbUserStats.completed_categories || []
           };
           localStorage.setItem(getUserStatsStorageKey(currentEmail), JSON.stringify(state.stats));
+          localStorage.setItem('pathosorus_last_active_' + currentEmail, preservedLastActive);
           localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
         }
 
@@ -3351,6 +3360,10 @@ function saveCustomTags() {
 function saveStats() {
   const email = getCurrentUserEmail();
   const key = getUserStatsStorageKey(email);
+  if (state.stats) {
+    if (!state.stats.lastActiveDate) state.stats.lastActiveDate = getLocalDateString();
+    localStorage.setItem('pathosorus_last_active_' + email, state.stats.lastActiveDate);
+  }
   localStorage.setItem(key, JSON.stringify(state.stats));
   if (state.currentUser) {
     if (state.currentUser.id) {
@@ -3591,21 +3604,42 @@ function getCreatorStats() {
   };
 }
 
+const _checkedStreakTodayForUser = {};
+
 function checkDailyStreak() {
   if (!state.currentUser) return;
+  const email = getCurrentUserEmail();
+  if (!email) return;
 
   const today = getLocalDateString();
-  const rawLast = state.stats.lastActiveDate;
-  const lastActive = rawLast ? rawLast.split('T')[0] : '';
 
-  if (!lastActive) {
-    state.stats.streak = Math.max(1, state.stats.streak || 1);
-    state.stats.lastActiveDate = today;
-    saveStats();
+  // Guard 1 : Ne vérifier qu'une seule fois par jour pour ce compte dans cette session
+  if (_checkedStreakTodayForUser[email] === today) {
     return;
   }
 
+  // Guard 2 : Vérifier la dernière date enregistrée
+  const keyActive = 'pathosorus_last_active_' + email;
+  const rawLast = localStorage.getItem(keyActive) || (state.stats && state.stats.lastActiveDate) || '';
+  const lastActive = rawLast ? rawLast.split('T')[0] : '';
+
+  // Si c'est déjà aujourd'hui, marquer la session et quitter immédiatement sans toucher au streak
   if (lastActive === today) {
+    _checkedStreakTodayForUser[email] = today;
+    if (state.stats) state.stats.lastActiveDate = today;
+    localStorage.setItem(keyActive, today);
+    return;
+  }
+
+  // Si premier lancement / pas d'historique connu : initialiser à aujourd'hui SANS incrémenter
+  if (!lastActive) {
+    _checkedStreakTodayForUser[email] = today;
+    if (state.stats) {
+      state.stats.lastActiveDate = today;
+      state.stats.streak = Math.max(1, state.stats.streak || 1);
+    }
+    localStorage.setItem(keyActive, today);
+    saveStats();
     return;
   }
 
@@ -3616,16 +3650,24 @@ function checkDailyStreak() {
   const diffTime = dToday.getTime() - dLast.getTime();
   const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
+  // Marquer immédiatement que c'est traité aujourd'hui pour ne jamais rejouer dans cette session
+  _checkedStreakTodayForUser[email] = today;
+  localStorage.setItem(keyActive, today);
+  if (state.stats) state.stats.lastActiveDate = today;
+
+  if (diffDays <= 0) {
+    return;
+  }
+
   if (diffDays === 1) {
     state.stats.streak = (state.stats.streak || 0) + 1;
-    state.stats.lastActiveDate = today;
     state.stats.xp = (state.stats.xp || 0) + 10;
     showRewardToast(`🔥 Connexion consécutive : ${state.stats.streak} jours actifs (+10 XP) !`, 'flame');
+    saveStats();
   } else if (diffDays > 1) {
     state.stats.streak = 1;
-    state.stats.lastActiveDate = today;
+    saveStats();
   }
-  saveStats();
 }
 
 function showRewardToast(message, icon = 'trophy') {
