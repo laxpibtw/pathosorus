@@ -1141,75 +1141,6 @@ function loadUserProgressForAccount(email = null) {
 }
 window.loadUserProgressForAccount = loadUserProgressForAccount;
 
-function openProfileSwitcherModal() {
-  const modal = document.getElementById('modal-profile-switcher');
-  if (modal) {
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
-    if (window.lucide) lucide.createIcons();
-  }
-}
-window.openProfileSwitcherModal = openProfileSwitcherModal;
-
-function closeProfileSwitcherModal() {
-  const modal = document.getElementById('modal-profile-switcher');
-  if (modal) {
-    modal.classList.add('hidden');
-    modal.classList.remove('flex');
-  }
-}
-window.closeProfileSwitcherModal = closeProfileSwitcherModal;
-
-function promptLoginForProfile(email) {
-  closeProfileSwitcherModal();
-  openAuthModal();
-  const emailInput = document.getElementById('auth-input-email');
-  const passInput = document.getElementById('auth-input-password');
-  if (emailInput && email) emailInput.value = email;
-  if (passInput) {
-    passInput.value = '';
-    setTimeout(() => passInput.focus(), 100);
-  }
-}
-window.promptLoginForProfile = promptLoginForProfile;
-
-async function selectActiveProfile(email) {
-  if (!email) return;
-  const norm = email.trim().toLowerCase();
-  localStorage.setItem('pathosorus_current_email', norm);
-  localStorage.removeItem('pathosorus_explicit_logout');
-
-  state.currentUser = {
-    id: 'usr_' + norm.replace(/[^a-z0-9]/gi, '_'),
-    email: norm,
-    user_metadata: { role: 'creator' }
-  };
-  state.currentRole = 'creator';
-
-  // 1. Charger les stats et la progression strictement propres à ce compte
-  loadUserStatsForAccount(norm);
-  loadUserProgressForAccount(norm);
-
-  // 2. Mettre à jour l'interface immédiatement
-  updateUserRoleUI();
-  updateTopBar();
-  renderSpacedRepetitionDashboard();
-  renderTrophiesView();
-  renderBank();
-
-  // 3. Fermer la modale
-  closeProfileSwitcherModal();
-
-  showToast(`Connecté en tant que ${getProfileDisplayName(norm)}`, "success");
-
-  // 4. Synchroniser le Cloud avec ce compte
-  if (supabaseClient) {
-    await fetchSupabaseData(true);
-    // Attribuer à cet auteur les éventuelles questions rédigées localement sur ce poste et les synchroniser
-    autoSyncLocalDataToCloud();
-  }
-}
-window.selectActiveProfile = selectActiveProfile;
 
 function getDefaultQuestionStats() {
   return {
@@ -1329,19 +1260,14 @@ function updateUserRoleUI() {
   const authBtnIcon = document.getElementById('auth-btn-icon');
   const authBtnText = document.getElementById('auth-btn-text');
   const btnAccountsModal = document.getElementById('btn-accounts-modal');
-  const activeProfEl = document.getElementById('active-profile-name');
-
-  if (activeProfEl) {
-    if (state.currentUser && state.currentUser.email) {
-      activeProfEl.textContent = getProfileDisplayName(state.currentUser.email);
-    } else {
-      activeProfEl.textContent = "Choisir Profil";
-    }
-  }
 
   if (state.currentUser) {
-    const email = state.currentUser.email || '';
+    const email = (state.currentUser.email || '').trim().toLowerCase();
     const emailPrefix = email.split('@')[0];
+    const displayName = (email === 'padoreau85@gmail.com')
+      ? 'Dr Pierre-Alain Doreau'
+      : ((email === 'belhadef.samy@gmail.com') ? 'Dr Samy Belhadef' : emailPrefix);
+
     if (authBtnIcon) authBtnIcon.setAttribute('data-lucide', 'log-out');
     if (authBtnText) authBtnText.textContent = "Déconnexion";
     if (btnAuthToggle) {
@@ -1349,10 +1275,10 @@ function updateUserRoleUI() {
       btnAuthToggle.className = "px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 transition border border-slate-800 hover:border-rose-500/40 flex items-center space-x-1.5 shadow-sm";
     }
 
-    if (isCreator()) {
+    if (state.currentRole === 'creator') {
       if (roleBadge) roleBadge.className = "flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-teal-500/20 to-indigo-500/20 border border-teal-500/40 text-teal-300 shadow-sm";
       if (roleDot) roleDot.className = "w-2 h-2 rounded-full bg-teal-400 animate-pulse";
-      if (roleText) roleText.textContent = `${emailPrefix} (Créateur 🦖)`;
+      if (roleText) roleText.textContent = `${displayName} (Créateur 🦖)`;
       if (btnAccountsModal) {
         btnAccountsModal.classList.remove('hidden');
         btnAccountsModal.classList.add('flex');
@@ -1360,7 +1286,7 @@ function updateUserRoleUI() {
     } else {
       if (roleBadge) roleBadge.className = "flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-sky-500/10 border border-sky-500/30 text-sky-300";
       if (roleDot) roleDot.className = "w-2 h-2 rounded-full bg-sky-400";
-      if (roleText) roleText.textContent = `${emailPrefix} (Lecteur 📖)`;
+      if (roleText) roleText.textContent = `${displayName} (Lecteur 📖)`;
       if (btnAccountsModal) {
         btnAccountsModal.classList.add('hidden');
         btnAccountsModal.classList.remove('flex');
@@ -3355,12 +3281,6 @@ function initApp() {
 
   if (window.lucide) lucide.createIcons();
 
-  // Si aucun profil n'a encore été choisi sur cet appareil, afficher le sélecteur 1-clic
-  if (!localStorage.getItem('pathosorus_current_email') && !localStorage.getItem('pathosorus_explicit_logout')) {
-    setTimeout(() => {
-      openProfileSwitcherModal();
-    }, 400);
-  }
 }
 
 function saveQuestions() {

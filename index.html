@@ -147,12 +147,6 @@
           <span class="hidden sm:inline">App Apple</span>
         </button>
 
-        <!-- Sélecteur Profil Actif 1-Clic -->
-        <button id="btn-profile-switcher" onclick="openProfileSwitcherModal()" class="px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-900/90 hover:bg-slate-800 border border-teal-500/40 text-teal-300 flex items-center space-x-1.5 shadow-sm transition" title="Changer d'utilisateur sur cet appareil">
-          <span class="w-2 h-2 rounded-full bg-teal-400"></span>
-          <span id="active-profile-name">Profil...</span>
-          <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>
-        </button>
 
         <!-- Bouton Synchronisation Instantanée Cloud -->
         <button id="btn-quick-sync" onclick="syncCloudNow()" class="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-teal-500/15 text-teal-300 hover:text-white transition border border-slate-800 hover:border-teal-500/40 flex items-center space-x-1 sm:space-x-1.5 shadow-sm" title="Synchroniser immédiatement avec la base Cloud">
@@ -1534,72 +1528,6 @@
     </div>
   </div>
 
-  <!-- ================= MODAL SÉLECTEUR DE PROFIL ACTIF (1-CLIC) ================= -->
-  <div id="modal-profile-switcher" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4" onclick="if (event.target === this) closeProfileSwitcherModal()">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-5">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-teal-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-teal-500/20">
-            <i data-lucide="user-check" class="w-5 h-5 text-white"></i>
-          </div>
-          <div>
-            <h3 class="font-extrabold text-base text-white">Qui utilise cet appareil ?</h3>
-            <p class="text-xs text-slate-400">Sélectionnez votre profil pour isoler vos révisions & questions</p>
-          </div>
-        </div>
-        <button onclick="closeProfileSwitcherModal()" class="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition">
-          <i data-lucide="x" class="w-5 h-5"></i>
-        </button>
-      </div>
-
-      <div class="space-y-3 pt-2">
-        <!-- Carte Pierre-Alain -->
-        <button type="button" onclick="promptLoginForProfile('padoreau85@gmail.com')" class="w-full p-4 rounded-2xl bg-slate-950 hover:bg-slate-800/80 border border-teal-500/30 hover:border-teal-400 text-left transition flex items-center justify-between group">
-          <div class="flex items-center space-x-3.5">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center text-white font-extrabold text-sm shadow-md">
-              PA
-            </div>
-            <div>
-              <div class="font-bold text-sm text-white flex items-center space-x-1.5">
-                <span>Pierre-Alain Doreau</span>
-                <span class="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-extrabold border border-amber-500/40">Master</span>
-              </div>
-              <div class="text-[11px] text-slate-400 font-mono">padoreau85@gmail.com</div>
-            </div>
-          </div>
-          <div class="flex items-center space-x-1 text-teal-400 text-xs font-semibold">
-            <span>Connexion</span>
-            <i data-lucide="arrow-right" class="w-4 h-4 group-hover:translate-x-0.5 transition"></i>
-          </div>
-        </button>
-
-        <!-- Carte Samy -->
-        <button type="button" onclick="promptLoginForProfile('belhadef.samy@gmail.com')" class="w-full p-4 rounded-2xl bg-slate-950 hover:bg-slate-800/80 border border-indigo-500/30 hover:border-indigo-400 text-left transition flex items-center justify-between group">
-          <div class="flex items-center space-x-3.5">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-sky-600 flex items-center justify-center text-white font-extrabold text-sm shadow-md">
-              SB
-            </div>
-            <div>
-              <div class="font-bold text-sm text-white flex items-center space-x-1.5">
-                <span>Samy Belhadef</span>
-                <span class="text-[9px] px-1.5 py-0.2 rounded-full bg-indigo-500/20 text-indigo-300 font-extrabold border border-indigo-500/40">Créateur</span>
-              </div>
-              <div class="text-[11px] text-slate-400 font-mono">belhadef.samy@gmail.com</div>
-            </div>
-          </div>
-          <div class="flex items-center space-x-1 text-indigo-400 text-xs font-semibold">
-            <span>Connexion</span>
-            <i data-lucide="arrow-right" class="w-4 h-4 group-hover:translate-x-0.5 transition"></i>
-          </div>
-        </button>
-      </div>
-
-      <div class="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
-        <span>Authentification officielle Supabase</span>
-        <button type="button" onclick="closeProfileSwitcherModal(); openAuthModal();" class="text-teal-400 hover:underline">Autre compte...</button>
-      </div>
-    </div>
-  </div>
 
   <!-- ================= MODAL AUTHENTIFICATION (CONNEXION) ================= -->
   <div id="modal-auth" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
@@ -2199,6 +2127,6 @@
 
   <!-- Scripts -->
   <script src="seed_data.js?v=20261029_2100"></script>
-  <script src="app.js?v=20261029_2215"></script>
+  <script src="app.js?v=20261029_2245"></script>
 </body>
 </html>
