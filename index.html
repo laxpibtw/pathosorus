@@ -220,7 +220,7 @@
             </div>
             <h3 class="text-base font-bold text-white">Répétition Espacée Intelligente</h3>
             <p class="text-xs text-slate-400 leading-relaxed">
-              Choisissez votre délai à chaque question (Demain, Dans 3 jours, Dans 1 semaine ou 1 mois). Vos cartes échues sont calculées au jour le jour pour ancrer vos réflexes en mémoire longue.
+              Choisissez votre délai à chaque question (Demain, Dans 3 jours, Dans 1 ou 2 semaines, ou 1 mois). Vos cartes échues sont calculées au jour le jour pour ancrer vos réflexes en mémoire longue.
             </p>
           </div>
 
@@ -291,7 +291,7 @@
               Choisissez quand revoir chaque question.
             </h1>
             <p class="mt-2 text-xs sm:text-sm text-slate-300 leading-relaxed">
-              À chaque réponse, définissez votre intervalle (<strong>Demain</strong>, <strong>Dans 3 jours</strong>, <strong>Dans 1 semaine</strong> ou <strong>Dans 1 mois</strong>). Le système calcule automatiquement vos cartes échues au jour le jour.
+              À chaque réponse, définissez votre intervalle (<strong>Demain</strong>, <strong>Dans 3 jours</strong>, <strong>Dans 1 sem.</strong>, <strong>Dans 2 sem.</strong> ou <strong>Dans 1 mois</strong>). Le système calcule automatiquement vos cartes échues au jour le jour.
             </p>
           </div>
         </div>
@@ -640,7 +640,7 @@
               <span class="text-[11px] text-slate-400">Un clic planifie et passe à la suite</span>
             </div>
 
-            <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
               <button type="button" onclick="chooseReviewInterval(0)" class="p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-bold transition flex flex-col items-center">
                 <span>Aujourd'hui</span>
                 <span class="text-[10px] text-rose-400/80 font-mono">&lt; 1 jour</span>
@@ -657,7 +657,11 @@
                 <span>Dans 1 sem.</span>
                 <span class="text-[10px] text-teal-400/80 font-mono">+7 jours</span>
               </button>
-              <button type="button" onclick="chooseReviewInterval(30)" class="p-2.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 text-xs font-bold transition flex flex-col items-center col-span-2 sm:col-span-1">
+              <button type="button" onclick="chooseReviewInterval(14)" class="p-2.5 rounded-xl bg-violet-500/10 hover:bg-violet-500/25 text-violet-300 border border-violet-500/30 text-xs font-bold transition flex flex-col items-center">
+                <span>Dans 2 sem.</span>
+                <span class="text-[10px] text-violet-400/80 font-mono">+14 jours</span>
+              </button>
+              <button type="button" onclick="chooseReviewInterval(30)" class="p-2.5 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 text-xs font-bold transition flex flex-col items-center">
                 <span>Dans 1 mois</span>
                 <span class="text-[10px] text-indigo-400/80 font-mono">+30 jours</span>
               </button>

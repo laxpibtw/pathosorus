@@ -6492,6 +6492,7 @@ function chooseReviewInterval(days) {
   playSound('correct');
   nextSessionQuestion();
 }
+window.chooseReviewInterval = chooseReviewInterval;
 
 // --- CLASSIFICATION 3 NIVEAUX ---
 function getHierarchyTree(includeMastered = false, filterMode = null) {
