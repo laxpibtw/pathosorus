@@ -214,6 +214,13 @@ function isLocalEnvironment() {
   return host === 'localhost' || host === '127.0.0.1' || window.location.protocol === 'file:';
 }
 
+function isSystemTag(tag) {
+  if (!tag || typeof tag !== 'string') return true;
+  const t = tag.trim();
+  return t.startsWith('DEL_') || t.startsWith('ROLE_') || t.startsWith('UPROG:') || t.startsWith('USTATS:');
+}
+window.isSystemTag = isSystemTag;
+
 // --- SYNTHÈSE SONORE ---
 function escapeHtml(str) {
   if (!str) return '';
@@ -2847,7 +2854,7 @@ async function fetchSupabaseData(silent = false) {
     if (!tRes.error && tRes.data && tRes.data.length > 0) {
       state.customTags = tRes.data
         .map(t => t.name)
-        .filter(n => n && !n.startsWith('ROLE_') && !n.startsWith('UPROG:') && !n.startsWith('USTATS:') && !n.startsWith('DEL_') && !deletedTagNames.has(n));
+        .filter(n => n && !isSystemTag(n) && !deletedTagNames.has(n));
       localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(state.customTags));
     }
 
@@ -2864,6 +2871,11 @@ async function fetchSupabaseData(silent = false) {
         }
       });
     }
+
+    // Purge de sécurité Cloud du tag orphelin DEL_Q:q_1793038429119
+    try {
+      supabaseClient.from('custom_tags').delete().eq('name', 'DEL_Q:q_1793038429119');
+    } catch(e) {}
 
     // Récupérer les trophées personnalisés s'ils existent sur Supabase
     try {
@@ -3396,13 +3408,20 @@ function initApp() {
   state.cases = storedCases ? JSON.parse(storedCases) : [];
 
   const storedTags = localStorage.getItem(STORAGE_KEY_TAGS);
-  state.customTags = storedTags ? JSON.parse(storedTags) : ["Lame", "HES", "IHC", "BiologieMoléculaire", "PiègeClone"];
+  let parsedTags = storedTags ? JSON.parse(storedTags) : ["Lame", "HES", "IHC", "BiologieMoléculaire", "PiègeClone"];
+  state.customTags = (Array.isArray(parsedTags) ? parsedTags : []).filter(t => !isSystemTag(t));
   if (!state.customTags.some(t => String(t).trim().toLowerCase() === 'lame')) {
     state.customTags.unshift('Lame');
-    saveCustomTags();
-  } else if (!storedTags) {
-    saveCustomTags();
   }
+  saveCustomTags();
+
+  // Purge de sécurité de tout faux tag système sur les questions et cas en cache local
+  (state.questions || []).forEach(q => {
+    if (q && q.tags && Array.isArray(q.tags)) q.tags = q.tags.filter(t => !isSystemTag(t));
+  });
+  (state.cases || []).forEach(c => {
+    if (c && c.tags && Array.isArray(c.tags)) c.tags = c.tags.filter(t => !isSystemTag(t));
+  });
 
   const storedCustomBadges = localStorage.getItem('pathosorus_custom_badges');
   state.customBadges = storedCustomBadges ? JSON.parse(storedCustomBadges) : [];
@@ -3473,6 +3492,7 @@ function saveCases() {
 }
 
 function saveCustomTags() {
+  state.customTags = (state.customTags || []).filter(t => !isSystemTag(t));
   localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(state.customTags));
   renderTagsCloud();
   renderEditorTagsSelector();
@@ -6647,10 +6667,16 @@ function renderHierarchySelector() {
   html += `
     <div>
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
-          <span class="w-5 h-5 rounded-full bg-teal-500/20 text-teal-400 flex items-center justify-center text-[10px] font-mono">1</span>
-          <span>Choisissez l'Organe :</span>
-        </span>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
+            <span class="w-5 h-5 rounded-full bg-teal-500/20 text-teal-400 flex items-center justify-center text-[10px] font-mono">1</span>
+            <span>Choisissez l'Organe :</span>
+          </span>
+          <select id="play-organ-dropdown-select" onchange="if(this.value) selectOrganForPlay(this.value)" class="px-3 py-1.5 rounded-xl bg-slate-950 border border-teal-500/40 hover:border-teal-400 text-teal-300 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-teal-500 transition cursor-pointer" title="Menu dépliant : choisir un organe">
+            <option value="">Sélectionner un organe...</option>
+            ${organs.map(org => `<option value="${escapeHtml(org)}" ${state.playHierarchy.selectedOrgan === org ? 'selected' : ''}>${escapeHtml(org)} (${tree[org].count})</option>`).join('')}
+          </select>
+        </div>
         ${state.playHierarchy.selectedOrgan ? `
           <div class="flex flex-wrap items-center gap-1.5">
             ${isCreator() ? `
@@ -6697,10 +6723,16 @@ function renderHierarchySelector() {
     html += `
       <div class="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <span class="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
-            <span class="w-5 h-5 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-mono">2</span>
-            <span>Sous-organe / Catégorie dans <em>${escapeHtml(state.playHierarchy.selectedOrgan)}</em> :</span>
-          </span>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
+              <span class="w-5 h-5 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center text-[10px] font-mono">2</span>
+              <span>Sous-organe / Catégorie dans <em>${escapeHtml(state.playHierarchy.selectedOrgan)}</em> :</span>
+            </span>
+            <select id="play-category-dropdown-select" onchange="if(this.value) selectCategoryForPlay(this.value)" class="px-3 py-1.5 rounded-xl bg-slate-950 border border-sky-500/40 hover:border-sky-400 text-sky-300 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-sky-500 transition cursor-pointer" title="Menu dépliant : choisir une catégorie">
+              <option value="">Sélectionner une catégorie...</option>
+              ${categories.map(cat => `<option value="${escapeHtml(cat)}" ${state.playHierarchy.selectedCategory === cat ? 'selected' : ''}>${escapeHtml(cat)} (${orgObj.categories[cat].count})</option>`).join('')}
+            </select>
+          </div>
           ${state.playHierarchy.selectedCategory ? `
             <div class="flex flex-wrap items-center gap-1.5">
               ${isCreator() ? `
@@ -11181,7 +11213,7 @@ function renderTagsCloud() {
   const container = document.getElementById('home-tags-container');
   if (!container) return;
 
-  const visibleTags = (state.customTags || []).filter(t => t && !t.startsWith('ROLE_') && !t.startsWith('UPROG:') && !t.startsWith('USTATS:'));
+  const visibleTags = (state.customTags || []).filter(t => !isSystemTag(t));
 
   if (visibleTags.length === 0) {
     container.innerHTML = '<span class="text-xs text-slate-500 italic">Aucun tag créé.</span>';
@@ -11209,7 +11241,7 @@ function renderTagsCloud() {
 
 function createNewGlobalTag(tagName) {
   const clean = tagName.trim().replace(/^#/, '');
-  if (!clean) return;
+  if (!clean || isSystemTag(clean)) return;
   if (!state.customTags.includes(clean)) {
     state.customTags.push(clean);
     saveCustomTags();
@@ -11960,6 +11992,20 @@ function selectBankCategory(cat) {
   renderBank();
 }
 
+function toggleBankOrgansExpanded() {
+  state.bankOrgansExpanded = !state.bankOrgansExpanded;
+  localStorage.setItem('pathosorus_bank_organs_expanded', String(state.bankOrgansExpanded));
+  renderBank();
+}
+window.toggleBankOrgansExpanded = toggleBankOrgansExpanded;
+
+function toggleBankCategoriesExpanded() {
+  state.bankCategoriesExpanded = !state.bankCategoriesExpanded;
+  localStorage.setItem('pathosorus_bank_categories_expanded', String(state.bankCategoriesExpanded));
+  renderBank();
+}
+window.toggleBankCategoriesExpanded = toggleBankCategoriesExpanded;
+
 function onBankOrganSelectChange() {
   const organSelect = document.getElementById('bank-filter-organ');
   if (organSelect) {
@@ -12509,16 +12555,43 @@ function renderBank() {
     let navHtml = '';
 
     // --- NIVEAU 1 : ONGLETS DES ORGANES ---
+    if (typeof state.bankOrgansExpanded === 'undefined') {
+      const stored = localStorage.getItem('pathosorus_bank_organs_expanded');
+      state.bankOrgansExpanded = stored !== null ? (stored === 'true') : true; // Déplié par défaut
+    }
+    const isOrgExpanded = Boolean(state.bankOrgansExpanded);
+
+    if (typeof state.bankCategoriesExpanded === 'undefined') {
+      const storedCat = localStorage.getItem('pathosorus_bank_categories_expanded');
+      state.bankCategoriesExpanded = storedCat !== null ? (storedCat === 'true') : true;
+    }
+    const isCatExpanded = Boolean(state.bankCategoriesExpanded);
+
     const totalCountAll = baseFilteredQ.length + baseFilteredCases.length;
     navHtml += `
-      <div class="bg-slate-900 border border-slate-800 p-3 sm:p-4 rounded-2xl space-y-2.5 shadow-md">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div class="flex items-center space-x-2">
+      <div class="bg-slate-900 border border-slate-800 p-3.5 sm:p-4 rounded-2xl space-y-3 shadow-md">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+          <div class="flex flex-wrap items-center gap-2">
             <span class="w-5 h-5 rounded-lg bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center text-[10px] font-mono font-bold">1</span>
             <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">Onglet Organe :</span>
+
+            <!-- Menu Dépliant / Déroulant des Organes -->
+            <select id="bank-organ-dropdown-select" onchange="selectBankOrgan(this.value)" class="px-3 py-1.5 rounded-xl bg-slate-950 border border-teal-500/40 hover:border-teal-400 text-teal-300 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-teal-500 transition shadow-inner cursor-pointer" title="Menu dépliant : choisir un organe parmi tous les organes disponibles">
+              <option value="all" ${state.bankSelectedOrgan === 'all' ? 'selected' : ''}>🌐 Tous les organes (${totalCountAll})</option>
+              ${availableOrgans.map(org => {
+                const count = organMap[org].questions.length + organMap[org].cases.length;
+                return `<option value="${escapeHtml(org)}" ${state.bankSelectedOrgan === org ? 'selected' : ''}>${escapeHtml(org)} (${count})</option>`;
+              }).join('')}
+            </select>
+
+            <!-- Bouton Déplier / Replier la grille des organes -->
+            <button type="button" onclick="toggleBankOrgansExpanded()" class="px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-semibold flex items-center space-x-1.5 transition shadow-sm" title="${isOrgExpanded ? 'Replier en défilement horizontal' : 'Déplier tous les organes en grille complète'}">
+              <i data-lucide="${isOrgExpanded ? 'chevron-up' : 'chevron-down'}" class="w-3.5 h-3.5 text-teal-400"></i>
+              <span>${isOrgExpanded ? 'Replier' : `Déplier tous les organes (${availableOrgans.length})`}</span>
+            </button>
           </div>
           ${state.bankSelectedOrgan !== 'all' ? `
-            <div class="flex flex-wrap items-center gap-1.5">
+            <div class="flex flex-wrap items-center gap-1.5 self-start md:self-auto">
               ${isCreator() ? `
                 <button onclick="createQuestionForOrgan('${escapeJsString(state.bankSelectedOrgan)}')" class="px-2.5 py-1 rounded-xl bg-teal-600/20 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold transition flex items-center space-x-1 shadow-sm" title="Créer une nouvelle question dans cet organe">
                   <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-teal-400"></i>
@@ -12536,7 +12609,7 @@ function renderBank() {
             </div>
           ` : ''}
         </div>
-        <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin touch-scroll-x">
+        <div class="${isOrgExpanded ? 'flex flex-wrap gap-2 max-h-96 overflow-y-auto p-0.5' : 'flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin touch-scroll-x'}">
           <button onclick="selectBankOrgan('all')" class="px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 shrink-0 transition ${
             state.bankSelectedOrgan === 'all'
               ? 'bg-teal-600 text-white shadow-lg shadow-teal-500/30 border border-teal-400'
@@ -12597,15 +12670,32 @@ function renderBank() {
         : orgGroup.questions.length;
 
       navHtml += `
-        <div class="bg-slate-900/90 border border-slate-800/80 p-3.5 sm:p-4 rounded-2xl space-y-2.5 shadow-md">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div class="flex items-center space-x-2">
+        <div class="bg-slate-900/90 border border-slate-800/80 p-3.5 sm:p-4 rounded-2xl space-y-3 shadow-md">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+            <div class="flex flex-wrap items-center gap-2">
               <span class="w-5 h-5 rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center text-[10px] font-mono font-bold">2</span>
               <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">
                 Sous-onglets Catégories <span class="text-slate-400 font-normal lowercase">dans ${escapeHtml(state.bankSelectedOrgan)}</span> :
               </span>
+
+              <!-- Menu Dépliant / Déroulant des Catégories -->
+              <select id="bank-category-dropdown-select" onchange="selectBankCategory(this.value)" class="px-3 py-1.5 rounded-xl bg-slate-950 border border-sky-500/40 hover:border-sky-400 text-sky-300 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-sky-500 transition shadow-inner cursor-pointer" title="Menu dépliant : choisir une catégorie">
+                <option value="all" ${curCat === 'all' ? 'selected' : ''}>📑 Toutes les catégories (${orgGroup.questions.length + orgGroup.cases.length})</option>
+                ${availableCats.map(cat => {
+                  const count = categoryMap[cat].questions.length + categoryMap[cat].cases.length;
+                  return `<option value="${escapeHtml(cat)}" ${curCat === cat ? 'selected' : ''}>${escapeHtml(cat)} (${count})</option>`;
+                }).join('')}
+              </select>
+
+              <!-- Bouton Déplier / Replier les catégories si plus de 2 catégories -->
+              ${availableCats.length > 2 ? `
+                <button type="button" onclick="toggleBankCategoriesExpanded()" class="px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-semibold flex items-center space-x-1.5 transition shadow-sm" title="${isCatExpanded ? 'Replier en ligne défilante' : 'Déplier toutes les catégories en grille'}">
+                  <i data-lucide="${isCatExpanded ? 'chevron-up' : 'chevron-down'}" class="w-3.5 h-3.5 text-sky-400"></i>
+                  <span>${isCatExpanded ? 'Replier' : `Déplier (${availableCats.length})`}</span>
+                </button>
+              ` : ''}
             </div>
-            <div class="flex flex-wrap items-center gap-1.5 self-start sm:self-auto">
+            <div class="flex flex-wrap items-center gap-1.5 self-start md:self-auto">
               ${curCat !== 'all' ? `
                 ${isCreator() ? `
                   <button onclick="createQuestionForCategory('${escapeJsString(state.bankSelectedOrgan)}', '${escapeJsString(curCat)}')" class="px-2.5 py-1.5 rounded-xl bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30 text-xs font-bold transition flex items-center space-x-1 shadow-sm shadow-sky-500/10" title="Créer une nouvelle question dans cette catégorie">
@@ -12635,7 +12725,7 @@ function renderBank() {
               `}
             </div>
           </div>
-          <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+          <div class="${isCatExpanded ? 'flex flex-wrap gap-2 max-h-80 overflow-y-auto p-0.5' : 'flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin'}">
             <button onclick="selectBankCategory('all')" class="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-2 shrink-0 transition ${
               curCat === 'all'
                 ? 'bg-sky-600 text-white shadow-md shadow-sky-500/30 border border-sky-400'
