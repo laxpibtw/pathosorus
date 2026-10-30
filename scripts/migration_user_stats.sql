@@ -14,6 +14,8 @@ create table if not exists public.user_stats (
   total_answered integer not null default 0,
   unlocked_badges jsonb not null default '{}'::jsonb,
   completed_categories jsonb not null default '[]'::jsonb,
+  equipped_title text default '',
+  trophy_custom_names jsonb default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
 

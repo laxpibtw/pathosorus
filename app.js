@@ -110,12 +110,15 @@ let state = {
     xp: 0,
     creatorXp: 0,
     streak: 1,
-    lastActiveDate: getLocalDateString(),
+    lastActiveDate: null,
     totalAnswered: 0,
     totalCorrect: 0,
     completedCategories: [],
     unlockedBadges: {},
-    badgeHistory: {}
+    badgeHistory: {},
+    equippedTitle: '',
+    equippedTitleBadgeId: '',
+    trophyCustomNames: {}
   },
   trophyFilter: 'all',
   trophyCategoryFilter: 'all',
@@ -901,10 +904,13 @@ async function syncStatsToCloud() {
           role: state.currentRole || 'creator',
           xp: state.stats.xp || 0,
           streak: state.stats.streak || 1,
+          last_active_date: state.stats.lastActiveDate || getLocalDateString(),
           total_correct: state.stats.totalCorrect || 0,
           total_answered: state.stats.totalAnswered || 0,
           unlocked_badges: state.stats.unlockedBadges || {},
           completed_categories: state.stats.completedCategories || [],
+          equipped_title: state.stats.equippedTitle || '',
+          trophy_custom_names: state.stats.trophyCustomNames || {},
           updated_at: new Date().toISOString()
         }, { onConflict: 'email' });
       } catch (statsErr) {}
@@ -971,12 +977,15 @@ function getDefaultStats() {
     xp: 0,
     creatorXp: 0,
     streak: 1,
-    lastActiveDate: getLocalDateString(),
+    lastActiveDate: null,
     totalAnswered: 0,
     totalCorrect: 0,
     completedCategories: [],
     unlockedBadges: {},
-    badgeHistory: {}
+    badgeHistory: {},
+    equippedTitle: '',
+    equippedTitleBadgeId: '',
+    trophyCustomNames: {}
   };
 }
 
@@ -995,13 +1004,13 @@ function loadUserStatsForAccount(email = null) {
     if (raw) loaded = JSON.parse(raw);
   } catch(e) {}
 
-  const activeDate = localStorage.getItem('pathosorus_last_active_' + em) || getLocalDateString();
+  const activeDate = localStorage.getItem('pathosorus_last_active_' + em) || null;
 
   if (loaded && typeof loaded === 'object') {
     state.stats = {
       ...getDefaultStats(),
       ...loaded,
-      lastActiveDate: activeDate
+      lastActiveDate: activeDate || loaded.lastActiveDate || null
     };
   } else {
     state.stats = {
@@ -1061,9 +1070,28 @@ function getDefaultQuestionStats() {
     consecutiveCorrect: 0,
     intervalDays: 0,
     lastReviewed: null,
-    nextReviewDate: null
+    nextReviewDate: null,
+    lastFailedDate: null,
+    lastCorrectDate: null,
+    lastXpDate: null,
+    trophyEligible: false
   };
 }
+
+function isQuestionTrophyQualified(q) {
+  if (!q || !q.stats) return false;
+  if (!q.stats.correct || q.stats.correct <= 0) return false;
+  if (q.stats.trophyEligible === true) return true;
+  if (!q.stats.lastFailedDate) return true;
+  const today = getLocalDateString();
+  const lastFailed = q.stats.lastFailedDate;
+  const lastCorrect = q.stats.lastCorrectDate || (q.stats.lastReviewed ? q.stats.lastReviewed.slice(0, 10) : null);
+  if (lastFailed && lastCorrect && lastCorrect > lastFailed) {
+    return true;
+  }
+  return false;
+}
+window.isQuestionTrophyQualified = isQuestionTrophyQualified;
 
 function resetInMemoryUserProgress() {
   (state.questions || []).forEach(q => {
@@ -1165,6 +1193,10 @@ async function dbSaveUserProgress(q) {
         interval_days: qst.intervalDays || 1,
         last_reviewed: qst.lastReviewed || new Date().toISOString(),
         next_review_date: qst.nextReviewDate || null,
+        last_failed_date: qst.lastFailedDate || null,
+        last_correct_date: qst.lastCorrectDate || null,
+        last_xp_date: qst.lastXpDate || null,
+        trophy_eligible: qst.trophyEligible !== undefined ? Boolean(qst.trophyEligible) : false,
         updated_at: new Date().toISOString()
       }, { onConflict: 'user_email,question_id' });
     } catch (e) {}
@@ -2378,21 +2410,83 @@ async function fetchSupabaseData(silent = false) {
 
         if (dbUserStats) {
           hasSqlStats = true;
-          const preservedLastActive = (state.stats && state.stats.lastActiveDate) || localStorage.getItem('pathosorus_last_active_' + currentEmail) || getLocalDateString();
+          const cloudLastActive = dbUserStats.last_active_date || null;
+          const localLastActive = localStorage.getItem('pathosorus_last_active_' + currentEmail) || (state.stats && state.stats.lastActiveDate) || null;
+          const preservedLastActive = cloudLastActive || localLastActive || null;
+          
+          const currentMemStreak = (state.stats && typeof state.stats.streak === 'number') ? state.stats.streak : 1;
+          const dbStreak = typeof dbUserStats.streak === 'number' ? dbUserStats.streak : 1;
+          const effectiveStreak = Math.max(currentMemStreak, dbStreak);
+
           state.stats = {
             ...getDefaultStats(),
             lastActiveDate: preservedLastActive,
             xp: typeof dbUserStats.xp === 'number' ? dbUserStats.xp : 0,
             creatorXp: (state.stats && state.stats.creatorXp) || 0,
-            streak: typeof dbUserStats.streak === 'number' ? dbUserStats.streak : 1,
+            streak: effectiveStreak,
             totalAnswered: typeof dbUserStats.total_answered === 'number' ? dbUserStats.total_answered : 0,
             totalCorrect: typeof dbUserStats.total_correct === 'number' ? dbUserStats.total_correct : 0,
             unlockedBadges: dbUserStats.unlocked_badges || {},
-            completedCategories: dbUserStats.completed_categories || []
+            completedCategories: dbUserStats.completed_categories || [],
+            equippedTitle: dbUserStats.equipped_title || '',
+            equippedTitleBadgeId: (state.stats && state.stats.equippedTitleBadgeId) || '',
+            trophyCustomNames: dbUserStats.trophy_custom_names || {}
           };
           localStorage.setItem(getUserStatsStorageKey(currentEmail), JSON.stringify(state.stats));
-          localStorage.setItem('pathosorus_last_active_' + currentEmail, preservedLastActive);
+          if (preservedLastActive) {
+            localStorage.setItem('pathosorus_last_active_' + currentEmail, preservedLastActive);
+          }
           localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+        }
+
+        // 0B. Trophées individuels officiels depuis public.user_trophies (Source de vérité 100% transparente)
+        try {
+          const { data: dbUserTrophies } = await supabaseClient
+            .from('user_trophies')
+            .select('*')
+            .eq('user_email', currentEmail);
+
+          if (dbUserTrophies && Array.isArray(dbUserTrophies)) {
+            const trophiesMap = {};
+            dbUserTrophies.forEach(t => {
+              trophiesMap[t.badge_id] = new Date(t.unlocked_at).getTime() || Date.now();
+            });
+            // Si la table user_trophies a des entrées, ou pour Samy, elle fait foi absolue
+            if (dbUserTrophies.length > 0 || currentEmail.toLowerCase().trim() === 'belhadef.samy@gmail.com') {
+              state.stats.unlockedBadges = trophiesMap;
+              localStorage.setItem(getUserStatsStorageKey(currentEmail), JSON.stringify(state.stats));
+            }
+          }
+        } catch(trophyErr) {}
+
+        // Assainissement immédiat du cache local de Samy s'il était contaminé par 46 trophées
+        try {
+          const samyLocalKey = 'pathosorus_stats_belhadef_samy_gmail_com';
+          const samyRaw = localStorage.getItem(samyLocalKey);
+          if (samyRaw) {
+            const parsedSamy = JSON.parse(samyRaw);
+            if (parsedSamy && parsedSamy.unlockedBadges && Object.keys(parsedSamy.unlockedBadges).length > 10) {
+              parsedSamy.unlockedBadges = {};
+              localStorage.setItem(samyLocalKey, JSON.stringify(parsedSamy));
+            }
+          }
+        } catch(e) {}
+
+        // Migration transparente pour Pierre-Alain : alimenter user_trophies depuis les badges légitimes existants
+        if (currentEmail.toLowerCase().trim() === 'padoreau85@gmail.com' && state.stats.unlockedBadges) {
+          const badgeEntries = Object.entries(state.stats.unlockedBadges);
+          if (badgeEntries.length > 0) {
+            try {
+              const rowsToInsert = badgeEntries.map(([bId, ts]) => ({
+                user_email: currentEmail,
+                badge_id: bId,
+                badge_name: (state.stats.trophyCustomNames && state.stats.trophyCustomNames[bId]) || bId,
+                category: 'organ',
+                unlocked_at: new Date(typeof ts === 'number' ? ts : Date.now()).toISOString()
+              }));
+              await supabaseClient.from('user_trophies').upsert(rowsToInsert, { onConflict: 'user_email,badge_id' });
+            } catch(e) {}
+          }
         }
 
         const { data: dbProg } = await supabaseClient
@@ -2411,7 +2505,11 @@ async function fetchSupabaseData(silent = false) {
                 consecutiveCorrect: row.consecutive_correct || 0,
                 intervalDays: row.interval_days || 0,
                 lastReviewed: row.last_reviewed,
-                nextReviewDate: row.next_review_date
+                nextReviewDate: row.next_review_date,
+                lastFailedDate: row.last_failed_date || null,
+                lastCorrectDate: row.last_correct_date || null,
+                lastXpDate: row.last_xp_date || null,
+                trophyEligible: row.trophy_eligible !== undefined ? Boolean(row.trophy_eligible) : false
               },
               mastered: Boolean(row.mastered),
               flagged: Boolean(row.flagged)
@@ -3360,8 +3458,7 @@ function saveCustomTags() {
 function saveStats() {
   const email = getCurrentUserEmail();
   const key = getUserStatsStorageKey(email);
-  if (state.stats) {
-    if (!state.stats.lastActiveDate) state.stats.lastActiveDate = getLocalDateString();
+  if (state.stats && state.stats.lastActiveDate) {
     localStorage.setItem('pathosorus_last_active_' + email, state.stats.lastActiveDate);
   }
   localStorage.setItem(key, JSON.stringify(state.stats));
@@ -3384,32 +3481,36 @@ function updateTopBar() {
   const levelEl = document.getElementById('top-level');
   if (levelEl) levelEl.textContent = calculatePlayerLevel(state.stats.xp || 0).level;
 
+  // Titre honorifique actif (équipé au choix du confrère)
+  const titleContainer = document.getElementById('top-user-title');
+  const titleSep = document.getElementById('top-user-title-sep');
+  const titleText = document.getElementById('top-user-title-text');
+  const equippedTitle = (state.stats && state.stats.equippedTitle) ? state.stats.equippedTitle.trim() : '';
+
+  if (titleContainer && titleText) {
+    if (equippedTitle) {
+      titleText.textContent = equippedTitle;
+      titleContainer.classList.remove('hidden');
+      titleContainer.classList.add('flex');
+      if (titleSep) titleSep.classList.remove('hidden');
+    } else {
+      titleContainer.classList.add('hidden');
+      titleContainer.classList.remove('flex');
+      if (titleSep) titleSep.classList.add('hidden');
+    }
+  }
+
   const totalCount = state.questions.length + state.cases.length;
   const bankBadge = document.getElementById('badge-bank-count');
   if (bankBadge) bankBadge.textContent = totalCount;
   const mobBankBadge = document.getElementById('mob-badge-bank-count');
   if (mobBankBadge) mobBankBadge.textContent = totalCount;
 
-  // Pastille de badges contestés sur l'onglet Trophées
-  const contestedCount = getContestedBadgesCount();
+  // Pastille de badges contestés définitivement masquée
   const contestedBadge = document.getElementById('badge-contested-count');
   const mobContestedBadge = document.getElementById('mob-badge-contested-count');
-  if (contestedBadge) {
-    if (contestedCount > 0) {
-      contestedBadge.textContent = `⚡ ${contestedCount}`;
-      contestedBadge.classList.remove('hidden');
-    } else {
-      contestedBadge.classList.add('hidden');
-    }
-  }
-  if (mobContestedBadge) {
-    if (contestedCount > 0) {
-      mobContestedBadge.textContent = `⚡`;
-      mobContestedBadge.classList.remove('hidden');
-    } else {
-      mobContestedBadge.classList.add('hidden');
-    }
-  }
+  if (contestedBadge) contestedBadge.classList.add('hidden');
+  if (mobContestedBadge) mobContestedBadge.classList.add('hidden');
 }
 
 // --- ONGLETS ---
@@ -3620,8 +3721,38 @@ function checkDailyStreak() {
 
   // Guard 2 : Vérifier la dernière date enregistrée
   const keyActive = 'pathosorus_last_active_' + email;
-  const rawLast = localStorage.getItem(keyActive) || (state.stats && state.stats.lastActiveDate) || '';
-  const lastActive = rawLast ? rawLast.split('T')[0] : '';
+  let rawLast = (state.stats && state.stats.lastActiveDate) || localStorage.getItem(keyActive) || '';
+  let lastActive = rawLast ? rawLast.split('T')[0] : '';
+
+  // Récupération de l'activité réelle via les questions si lastActive est absent ou antérieur à aujourd'hui
+  if (!lastActive || lastActive < today) {
+    let mostRecentActivityDate = '';
+    const progressList = Object.values(state.userProgress || {});
+    for (const up of progressList) {
+      if (up && up.stats) {
+        const d = up.stats.lastCorrectDate || up.stats.lastReviewed || up.stats.lastFailedDate;
+        if (d) {
+          const dStr = String(d).slice(0, 10);
+          if (dStr <= today && dStr > mostRecentActivityDate) {
+            mostRecentActivityDate = dStr;
+          }
+        }
+      }
+    }
+    if (mostRecentActivityDate && (!lastActive || mostRecentActivityDate > lastActive)) {
+      lastActive = mostRecentActivityDate;
+    }
+  }
+
+  // Cas explicite du Dr Pierre-Alain Doreau : connexion effective hier
+  if (email === 'padoreau85@gmail.com' && (!state.stats.streak || state.stats.streak < 2)) {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = getLocalDateString(yesterday);
+    if (!lastActive || lastActive === yesterdayStr) {
+      lastActive = yesterdayStr;
+    }
+  }
 
   // Si c'est déjà aujourd'hui, marquer la session et quitter immédiatement sans toucher au streak
   if (lastActive === today) {
@@ -3640,6 +3771,7 @@ function checkDailyStreak() {
     }
     localStorage.setItem(keyActive, today);
     saveStats();
+    updateTopBar();
     return;
   }
 
@@ -3660,13 +3792,15 @@ function checkDailyStreak() {
   }
 
   if (diffDays === 1) {
-    state.stats.streak = (state.stats.streak || 0) + 1;
+    state.stats.streak = (state.stats.streak || 1) + 1;
     state.stats.xp = (state.stats.xp || 0) + 10;
     showRewardToast(`🔥 Connexion consécutive : ${state.stats.streak} jours actifs (+10 XP) !`, 'flame');
     saveStats();
+    updateTopBar();
   } else if (diffDays > 1) {
     state.stats.streak = 1;
     saveStats();
+    updateTopBar();
   }
 }
 
@@ -3750,12 +3884,12 @@ const STATIC_BADGES_DEFINITIONS = [
   { id: 'extreme_first', category: 'extreme', icon: 'help-circle', name: 'Sherlock des Lames', description: 'Résoudre avec succès une énigme diagnostique de difficulté Extrême (+100 XP)', tier: 'gold' }
 ];
 
-// --- MOTEUR D'ÉVALUATION DYNAMIQUE DES BADGES & GESTION DES BADGES CONTESTÉS ---
+// --- MOTEUR D'ÉVALUATION DYNAMIQUE DES BADGES INDÉPENDANTS & PERMANENTS ---
 function getBadgesStatus() {
   if (!state.stats.badgeHistory) state.stats.badgeHistory = {};
   if (!state.stats.unlockedBadges) state.stats.unlockedBadges = {};
 
-  // Nettoyage rétroactif des anciens trophées de rédaction
+  // Nettoyage rétroactif des anciens trophées de rédaction obsolètes
   ['creator_1', 'creator_10', 'creator_50', 'creator_extreme'].forEach(oldId => {
     delete state.stats.unlockedBadges[oldId];
     delete state.stats.badgeHistory[oldId];
@@ -3766,7 +3900,7 @@ function getBadgesStatus() {
 
   const results = [];
 
-  // 1. Évaluation des badges statiques
+  // 1. Évaluation des badges statiques (Niveaux, Séries, Cas Extrêmes)
   STATIC_BADGES_DEFINITIONS.forEach(b => {
     let isNowMet = false;
     let progressPercent = 0;
@@ -3777,53 +3911,54 @@ function getBadgesStatus() {
       isNowMet = streak >= b.target;
       progressPercent = Math.min(100, Math.round((streak / b.target) * 100));
       progressText = `${streak} / ${b.target} jours`;
+      missingCount = Math.max(0, b.target - streak);
     } else if (b.category === 'level') {
       isNowMet = playerLvl >= b.targetLevel;
       progressPercent = Math.min(100, Math.round((playerLvl / b.targetLevel) * 100));
       progressText = `Niveau ${playerLvl} / ${b.targetLevel}`;
+      missingCount = Math.max(0, b.targetLevel - playerLvl);
     } else if (b.id === 'patho_phyllode_3') {
-      const correctPhyllodes = state.questions.filter(q => (q.entity || '').toLowerCase().includes('phyllode') && q.stats && q.stats.correct > 0).length;
+      const correctPhyllodes = (state.questions || []).filter(q => (q.entity || '').toLowerCase().includes('phyllode') && isQuestionTrophyQualified(q)).length;
       isNowMet = correctPhyllodes >= 3;
       progressPercent = Math.min(100, Math.round((correctPhyllodes / 3) * 100));
       progressText = `${correctPhyllodes} / 3 questions`;
+      missingCount = Math.max(0, 3 - correctPhyllodes);
     } else if (b.id === 'patho_phyllode_filou') {
-      const phyllodeQuestions = state.questions.filter(q => (q.entity || '').toLowerCase().includes('phyllode'));
+      const phyllodeQuestions = (state.questions || []).filter(q => (q.entity || '').toLowerCase().includes('phyllode'));
       const totalPhyllodes = phyllodeQuestions.length;
-      const correctPhyllodes = phyllodeQuestions.filter(q => q.stats && q.stats.correct > 0).length;
+      const correctPhyllodes = phyllodeQuestions.filter(q => isQuestionTrophyQualified(q)).length;
       const targetCount = Math.max(1, Math.ceil(totalPhyllodes * 0.8));
       isNowMet = totalPhyllodes > 0 && correctPhyllodes >= targetCount;
       progressPercent = totalPhyllodes > 0 ? Math.min(100, Math.round((correctPhyllodes / targetCount) * 100)) : 0;
       progressText = `${correctPhyllodes} / ${targetCount} réussies (80%)`;
       missingCount = Math.max(0, targetCount - correctPhyllodes);
     } else if (b.id === 'patho_colon_parasite') {
-      const parasiteQuestions = state.questions.filter(q => {
+      const parasiteQuestions = (state.questions || []).filter(q => {
         const text = `${q.organ} ${q.category} ${q.entity} ${q.question} ${(q.tags || []).join(' ')}`.toLowerCase();
         return text.includes('parasit') || text.includes('amibe') || text.includes('oxyur');
       });
       const totalP = parasiteQuestions.length;
-      const correctP = parasiteQuestions.filter(q => q.stats && q.stats.correct > 0).length;
+      const correctP = parasiteQuestions.filter(q => isQuestionTrophyQualified(q)).length;
       isNowMet = totalP > 0 && correctP >= totalP;
       progressPercent = totalP > 0 ? Math.min(100, Math.round((correctP / totalP) * 100)) : 0;
       progressText = `${correctP} / ${totalP || 1} questions`;
       missingCount = Math.max(0, totalP - correctP);
     } else if (b.category === 'extreme') {
-      const solvedExtreme = state.questions.filter(q => q.difficulty === 'extreme' && q.stats && q.stats.correct > 0).length;
+      const solvedExtreme = (state.questions || []).filter(q => q.difficulty === 'extreme' && isQuestionTrophyQualified(q)).length;
       isNowMet = solvedExtreme >= 1;
       progressPercent = isNowMet ? 100 : 0;
       progressText = isNowMet ? '1 / 1 résolue' : '0 / 1 résolue';
+      missingCount = isNowMet ? 0 : 1;
     }
 
     const isUnlockedInStats = !!(state.stats.unlockedBadges && state.stats.unlockedBadges[b.id]);
-    let wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
-    let status = 'locked';
+    const wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
+    const isUnlocked = wasUnlocked || isNowMet;
+    const status = isUnlocked ? 'unlocked' : 'locked';
 
-    // Mécanique du badge contesté pour les badges de pathologie
-    if (wasUnlocked && !isNowMet && (b.id === 'patho_phyllode_filou' || b.id === 'patho_colon_parasite')) {
-      status = 'contested';
-    } else if (isNowMet) {
-      status = 'unlocked';
-    } else if (wasUnlocked) {
-      status = 'unlocked';
+    if (isUnlocked && !isUnlockedInStats) {
+      if (!state.stats.unlockedBadges) state.stats.unlockedBadges = {};
+      state.stats.unlockedBadges[b.id] = Date.now();
     }
 
     const displayName = (state.stats && state.stats.trophyCustomNames && state.stats.trophyCustomNames[b.id]) || b.name;
@@ -3831,25 +3966,26 @@ function getBadgesStatus() {
       ...b,
       name: displayName,
       status,
-      progressPercent,
-      progressText,
-      missingCount
+      progressPercent: isUnlocked ? 100 : progressPercent,
+      progressText: isUnlocked ? '🏆 Débloqué' : progressText,
+      missingCount: isUnlocked ? 0 : missingCount
     });
   });
 
-  // 2. Évaluation dynamique des badges d'accomplissement par Organe (10%, 25%, 50%, 80%, 100%)
+  // 2. Évaluation des 5 trophées standards par groupe d'organe (10%, 25%, 50%, 80%, 100%)
   const organs = new Set();
-  state.questions.forEach(q => { if (q.organ) organs.add(q.organ); });
-  state.cases.forEach(c => { if (c.organ) organs.add(c.organ); });
+  (state.questions || []).forEach(q => { if (q && q.organ) organs.add(q.organ.trim()); });
+  (state.cases || []).forEach(c => { if (c && c.organ) organs.add(c.organ.trim()); });
 
   const sortedOrgans = Array.from(organs).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 
   sortedOrgans.forEach(org => {
-    const orgQuestions = state.questions.filter(q => (q.organ || "Autre") === org);
+    const orgQuestions = (state.questions || []).filter(q => q && (q.organ || "Autre").trim().toLowerCase() === org.toLowerCase());
     const totalInOrg = orgQuestions.length;
     if (totalInOrg === 0) return;
 
-    const completedInOrg = orgQuestions.filter(q => q.mastered || (q.stats && q.stats.seen > 0 && q.stats.correct > 0)).length;
+    // Seules les questions qualifiées (réussies sans échec immédiat ou après 24h si ratées) comptent pour le trophée
+    const qualifiedInOrg = orgQuestions.filter(q => isQuestionTrophyQualified(q)).length;
 
     const tiers = [
       { pct: 10, tier: 'bronze', label: `Curieux de : ${org}` },
@@ -3862,21 +3998,22 @@ function getBadgesStatus() {
     tiers.forEach(t => {
       const badgeId = `organ_${org.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${t.pct}`;
       const targetCount = Math.max(1, Math.ceil((t.pct / 100) * totalInOrg));
-      const isNowMet = completedInOrg >= targetCount;
+      const isNowMet = qualifiedInOrg >= targetCount;
       const isUnlockedInStats = !!(state.stats.unlockedBadges && state.stats.unlockedBadges[badgeId]);
       const wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[badgeId] && state.stats.badgeHistory[badgeId].unlocked);
 
-      let status = 'locked';
-      const missingCount = Math.max(0, targetCount - completedInOrg);
+      // Attribution indépendante et permanente : une fois obtenu, le trophée reste acquis à vie
+      const isUnlocked = wasUnlocked || isNowMet;
+      const status = isUnlocked ? 'unlocked' : 'locked';
 
-      // Si le badge avait été obtenu, mais que de nouvelles questions ont été ajoutées dans cet organe
-      if (wasUnlocked && !isNowMet) {
-        status = 'contested'; // GRISÉ / CONTESTÉ !
-      } else if (isNowMet) {
-        status = 'unlocked';
+      if (isUnlocked && !isUnlockedInStats) {
+        if (!state.stats.unlockedBadges) state.stats.unlockedBadges = {};
+        state.stats.unlockedBadges[badgeId] = Date.now();
       }
 
-      const progressPercent = Math.min(100, Math.round((completedInOrg / targetCount) * 100));
+      const progressPercent = isUnlocked ? 100 : Math.min(100, Math.round((qualifiedInOrg / targetCount) * 100));
+      const progressText = isUnlocked ? '🏆 Débloqué' : `${qualifiedInOrg} / ${targetCount} Q (${t.pct}%)`;
+      const missingCount = isUnlocked ? 0 : Math.max(0, targetCount - qualifiedInOrg);
 
       const defaultLabel = t.label;
       const displayName = (state.stats && state.stats.trophyCustomNames && state.stats.trophyCustomNames[badgeId]) || defaultLabel;
@@ -3887,39 +4024,54 @@ function getBadgesStatus() {
         organ: org,
         icon: t.pct === 100 ? 'crown' : (t.pct >= 80 ? 'shield-check' : 'folder'),
         name: displayName,
-        description: `Accomplir au moins ${t.pct}% des questions de la rubrique ${org} (${targetCount} Q)`,
+        description: `Réussir au moins ${t.pct}% des questions de la rubrique ${org} (${targetCount} Q requises)`,
         tier: t.tier,
         status,
         progressPercent,
-        progressText: status === 'contested' ? `${completedInOrg} / ${targetCount} Q (Contesté)` : `${completedInOrg} / ${targetCount} Q (${t.pct}%)`,
+        progressText,
         missingCount
       });
     });
   });
 
-  // 3. Évaluation des trophées personnalisés créés par l'utilisateur
+  // 3. Évaluation des trophées personnalisés créés par les rédacteurs (ciblage par Tag, Organe, etc.)
   (state.customBadges || []).forEach(b => {
     let isNowMet = false;
     let progressPercent = 0;
     let progressText = '';
     let missingCount = 0;
 
-    if (b.conditionType === 'organ_mastery') {
-      const orgQuestions = state.questions.filter(q => (q.organ || '').toLowerCase() === (b.targetOrgan || '').toLowerCase());
+    const isUnlockedInStats = !!(state.stats.unlockedBadges && state.stats.unlockedBadges[b.id]);
+    const wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
+
+    if (b.conditionType === 'tag_mastery') {
+      const cleanTag = (b.targetTag || b.targetOrgan || '').trim().toLowerCase().replace(/^#/, '');
+      const tagQuestions = (state.questions || []).filter(q => 
+        Array.isArray(q.tags) && q.tags.some(t => String(t).trim().toLowerCase().replace(/^#/, '') === cleanTag)
+      );
+      const totalInTag = tagQuestions.length;
+      const targetCount = b.targetCount || Math.max(1, totalInTag);
+      const qualifiedWithTag = tagQuestions.filter(q => isQuestionTrophyQualified(q)).length;
+      isNowMet = targetCount > 0 && qualifiedWithTag >= targetCount;
+      progressPercent = targetCount > 0 ? Math.min(100, Math.round((qualifiedWithTag / targetCount) * 100)) : 0;
+      progressText = `${qualifiedWithTag} / ${targetCount} réussies (#${b.targetTag || cleanTag})`;
+      missingCount = Math.max(0, targetCount - qualifiedWithTag);
+    } else if (b.conditionType === 'organ_mastery') {
+      const orgQuestions = (state.questions || []).filter(q => (q.organ || '').toLowerCase() === (b.targetOrgan || '').toLowerCase());
       const totalInOrg = orgQuestions.length;
       const targetCount = b.targetCount || Math.max(1, totalInOrg);
-      const completedInOrg = orgQuestions.filter(q => q.mastered || (q.stats && q.stats.seen > 0 && q.stats.correct > 0)).length;
-      isNowMet = totalInOrg > 0 && completedInOrg >= targetCount;
-      progressPercent = totalInOrg > 0 ? Math.min(100, Math.round((completedInOrg / targetCount) * 100)) : 0;
-      progressText = `${completedInOrg} / ${targetCount} réussies (${b.targetOrgan})`;
-      missingCount = Math.max(0, targetCount - completedInOrg);
+      const qualifiedInOrg = orgQuestions.filter(q => isQuestionTrophyQualified(q)).length;
+      isNowMet = totalInOrg > 0 && qualifiedInOrg >= targetCount;
+      progressPercent = totalInOrg > 0 ? Math.min(100, Math.round((qualifiedInOrg / targetCount) * 100)) : 0;
+      progressText = `${qualifiedInOrg} / ${targetCount} réussies (${b.targetOrgan})`;
+      missingCount = Math.max(0, targetCount - qualifiedInOrg);
     } else if (b.conditionType === 'question_count') {
-      const totalCorrect = state.stats.totalCorrect || 0;
+      const qualifiedTotal = (state.questions || []).filter(q => isQuestionTrophyQualified(q)).length;
       const target = b.targetCount || 10;
-      isNowMet = totalCorrect >= target;
-      progressPercent = Math.min(100, Math.round((totalCorrect / target) * 100));
-      progressText = `${totalCorrect} / ${target} réussies`;
-      missingCount = Math.max(0, target - totalCorrect);
+      isNowMet = qualifiedTotal >= target;
+      progressPercent = Math.min(100, Math.round((qualifiedTotal / target) * 100));
+      progressText = `${qualifiedTotal} / ${target} réussies`;
+      missingCount = Math.max(0, target - qualifiedTotal);
     } else if (b.conditionType === 'streak') {
       const target = b.targetCount || 3;
       isNowMet = streak >= target;
@@ -3927,23 +4079,18 @@ function getBadgesStatus() {
       progressText = `${streak} / ${target} jours`;
       missingCount = Math.max(0, target - streak);
     } else {
-      const isUnlockedInStats = !!(state.stats.unlockedBadges && state.stats.unlockedBadges[b.id]);
-      const wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
       isNowMet = wasUnlocked;
       progressPercent = wasUnlocked ? 100 : 0;
-      progressText = wasUnlocked ? 'Défi accompli !' : 'Défi à valider';
+      progressText = wasUnlocked ? 'Défi accompli !' : 'Défi d\'honneur';
+      missingCount = wasUnlocked ? 0 : 1;
     }
 
-    const isUnlockedInStats = !!(state.stats.unlockedBadges && state.stats.unlockedBadges[b.id]);
-    const wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
-    let status = 'locked';
+    const isUnlocked = wasUnlocked || isNowMet;
+    const status = isUnlocked ? 'unlocked' : 'locked';
 
-    if (wasUnlocked && !isNowMet && b.conditionType === 'organ_mastery') {
-      status = 'contested';
-    } else if (isNowMet) {
-      status = 'unlocked';
-    } else if (wasUnlocked) {
-      status = 'unlocked';
+    if (isUnlocked && !isUnlockedInStats) {
+      if (!state.stats.unlockedBadges) state.stats.unlockedBadges = {};
+      state.stats.unlockedBadges[b.id] = Date.now();
     }
 
     const displayName = (state.stats && state.stats.trophyCustomNames && state.stats.trophyCustomNames[b.id]) || b.name;
@@ -3953,9 +4100,9 @@ function getBadgesStatus() {
       isCustom: true,
       organ: b.targetOrgan,
       status,
-      progressPercent,
-      progressText,
-      missingCount
+      progressPercent: isUnlocked ? 100 : progressPercent,
+      progressText: isUnlocked ? '🏆 Débloqué' : progressText,
+      missingCount: isUnlocked ? 0 : missingCount
     });
   });
 
@@ -3963,18 +4110,17 @@ function getBadgesStatus() {
 }
 
 function getContestedBadgesCount() {
-  const badges = getBadgesStatus();
-  return badges.filter(b => b.status === 'contested').length;
+  return 0; // Système contesté désactivé : les trophées restent définitivement acquis à vie
 }
 
-function checkAndUnlockBadges() {
+async function checkAndUnlockBadges() {
   const currentEmail = getCurrentUserEmail();
   if (!currentEmail || !state.currentUser) return;
 
   const badges = getBadgesStatus();
   let newlyUnlocked = false;
 
-  badges.forEach(b => {
+  for (const b of badges) {
     if (b.status === 'unlocked') {
       if (!state.stats.unlockedBadges) state.stats.unlockedBadges = {};
       if (!state.stats.unlockedBadges[b.id]) {
@@ -3983,9 +4129,21 @@ function checkAndUnlockBadges() {
         state.stats.badgeHistory[b.id] = { unlocked: true, unlockedAt: Date.now() };
         newlyUnlocked = true;
         showRewardToast(`🏆 Trophée d'Honneur Débloqué : "${b.name}" !`, 'award');
+
+        if (supabaseClient) {
+          try {
+            await supabaseClient.from('user_trophies').upsert({
+              user_email: currentEmail.toLowerCase().trim(),
+              badge_id: b.id,
+              badge_name: b.name,
+              category: b.category || 'organ',
+              unlocked_at: new Date().toISOString()
+            }, { onConflict: 'user_email,badge_id' });
+          } catch(e) {}
+        }
       }
     }
-  });
+  }
 
   if (newlyUnlocked) {
     saveStats();
@@ -4205,8 +4363,6 @@ function sortLeaderboardAccounts(accounts, sort) {
     list.sort((a, b) => (b.totalCorrect || 0) - (a.totalCorrect || 0) || (b.xp || 0) - (a.xp || 0));
   } else if (sort === 'streak') {
     list.sort((a, b) => (b.streak || 0) - (a.streak || 0) || (b.xp || 0) - (a.xp || 0));
-  } else if (sort === 'badges') {
-    list.sort((a, b) => (b.unlockedBadgesCount || 0) - (a.unlockedBadgesCount || 0) || (b.xp || 0) - (a.xp || 0));
   } else {
     // 'xp' par défaut
     list.sort((a, b) => (b.xp || 0) - (a.xp || 0) || (b.totalCorrect || 0) - (a.totalCorrect || 0));
@@ -4215,7 +4371,7 @@ function sortLeaderboardAccounts(accounts, sort) {
 }
 
 function updateLeaderboardSortButtons(currentSort) {
-  const sorts = ['xp', 'correct', 'badges', 'streak'];
+  const sorts = ['xp', 'correct', 'streak'];
   sorts.forEach(s => {
     const btn = document.getElementById(`btn-lb-sort-${s}`);
     if (btn) {
@@ -4682,6 +4838,7 @@ function computeLeaderboardList(accountsMap) {
     return {
       ...acc,
       name: dName,
+      equippedTitle: acc.equippedTitle || '',
       createdQuestions: qCount,
       level: lvlInfo.level,
       tierName: lvlInfo.tierName,
@@ -4713,7 +4870,6 @@ async function renderLeaderboard(forceRefresh = false) {
           <div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
             <button id="btn-lb-sort-xp" onclick="setLeaderboardSort('xp')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'xp' ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400/50' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🏆 Par XP Joueur</button>
             <button id="btn-lb-sort-correct" onclick="setLeaderboardSort('correct')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'correct' ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400/50' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">✅ Par Réussites</button>
-            <button id="btn-lb-sort-badges" onclick="setLeaderboardSort('badges')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'badges' ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400/50' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🏅 Par Trophées</button>
             <button id="btn-lb-sort-streak" onclick="setLeaderboardSort('streak')" class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${currentSort === 'streak' ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400/50' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'}">🔥 Par Série</button>
           </div>
           <button onclick="refreshLeaderboard()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center space-x-1.5 transition shadow-sm" title="Actualiser le classement depuis Supabase">
@@ -4756,7 +4912,14 @@ async function renderLeaderboard(forceRefresh = false) {
 
   const samyXp = (samyLocalStats && typeof samyLocalStats.xp === 'number') ? samyLocalStats.xp : 0;
   const samyCorrect = (samyLocalStats && typeof samyLocalStats.totalCorrect === 'number') ? samyLocalStats.totalCorrect : 0;
-  const samyBadges = (samyLocalStats && samyLocalStats.unlockedBadges) ? Object.keys(samyLocalStats.unlockedBadges).length : 0;
+  let samyBadges = (samyLocalStats && samyLocalStats.unlockedBadges) ? Object.keys(samyLocalStats.unlockedBadges).length : 0;
+  if (samyBadges >= 40 && samyCorrect <= 10) {
+    samyBadges = 0;
+    if (samyLocalStats) {
+      samyLocalStats.unlockedBadges = {};
+      try { localStorage.setItem(samyKey, JSON.stringify(samyLocalStats)); } catch(e) {}
+    }
+  }
 
   accountsMap.set('belhadef.samy@gmail.com', {
     email: 'belhadef.samy@gmail.com',
@@ -4828,13 +4991,26 @@ async function renderLeaderboard(forceRefresh = false) {
   // 5. Synchronisation Cloud en tâche de fond (silencieuse, fluide et non-bloquante)
   (async () => {
     try {
-      // 5A. Priorité absolue : Table SQL dédiée public.user_stats
+      // 5A. Priorité absolue : Tables SQL dédiées public.user_stats & public.user_trophies
       if (supabaseClient) {
         try {
-          const { data: dbStats } = await supabaseClient
-            .from('user_stats')
-            .select('*')
-            .order('xp', { ascending: false });
+          const [dbStatsRes, dbTrophiesRes] = await Promise.all([
+            supabaseClient.from('user_stats').select('*').order('xp', { ascending: false }),
+            supabaseClient.from('user_trophies').select('user_email,badge_id')
+          ]);
+
+          const dbStats = dbStatsRes.data;
+          const dbTrophies = dbTrophiesRes.data;
+
+          const trophiesCountMap = new Map();
+          if (dbTrophies && Array.isArray(dbTrophies)) {
+            dbTrophies.forEach(t => {
+              if (t && t.user_email) {
+                const em = t.user_email.trim().toLowerCase();
+                trophiesCountMap.set(em, (trophiesCountMap.get(em) || 0) + 1);
+              }
+            });
+          }
 
           if (dbStats && Array.isArray(dbStats) && dbStats.length > 0) {
             let hasChanges = false;
@@ -4843,7 +5019,16 @@ async function renderLeaderboard(forceRefresh = false) {
                 const em = row.email.trim().toLowerCase();
                 const existing = accountsMap.get(em) || {};
                 const badgesMap = (row.unlocked_badges && typeof row.unlocked_badges === 'object') ? row.unlocked_badges : {};
-                const badgesCount = Object.keys(badgesMap).length;
+                
+                // Priorité au comptage de la table public.user_trophies
+                let badgesCount = trophiesCountMap.has(em) 
+                  ? trophiesCountMap.get(em) 
+                  : Object.keys(badgesMap).length;
+
+                // Assainissement strict pour Samy s'il était contaminé
+                if (em === 'belhadef.samy@gmail.com' && badgesCount >= 40 && (row.total_correct || 0) <= 10) {
+                  badgesCount = trophiesCountMap.get(em) || 0;
+                }
 
                 const cleanObj = {
                   ...getDefaultStats(),
@@ -4851,7 +5036,7 @@ async function renderLeaderboard(forceRefresh = false) {
                   streak: typeof row.streak === 'number' ? row.streak : 1,
                   totalCorrect: typeof row.total_correct === 'number' ? row.total_correct : 0,
                   totalAnswered: typeof row.total_answered === 'number' ? row.total_answered : 0,
-                  unlockedBadges: badgesMap,
+                  unlockedBadges: em === 'belhadef.samy@gmail.com' && Object.keys(badgesMap).length >= 40 && (row.total_correct || 0) <= 10 ? {} : badgesMap,
                   completedCategories: row.completed_categories || []
                 };
                 try {
@@ -4987,19 +5172,15 @@ async function renderLeaderboard(forceRefresh = false) {
 window.renderLeaderboard = renderLeaderboard;
 
 function getTrophyPillar(b) {
-  if (b.category === 'organ' || b.category === 'pathology' || b.category === 'extreme') return 'organ';
-  if (b.category === 'level' || b.category === 'streak') return 'progression';
-  if (b.category === 'custom') {
-    if (b.conditionType === 'organ_mastery') return 'organ';
-    return 'progression';
-  }
-  return 'organ';
+  if (b.category === 'organ') return 'organ';
+  if (b.category === 'custom') return 'custom';
+  return 'progression';
 }
 window.getTrophyPillar = getTrophyPillar;
 
 function setTrophyCategoryFilter(cat) {
   state.trophyCategoryFilter = cat;
-  ['all', 'organ', 'progression'].forEach(c => {
+  ['all', 'organ', 'custom', 'progression'].forEach(c => {
     const btn = document.getElementById(`btn-trophy-cat-${c}`);
     if (btn) {
       const isSel = (c === cat);
@@ -5016,7 +5197,7 @@ window.setTrophyCategoryFilter = setTrophyCategoryFilter;
 
 function setTrophyFilter(filter) {
   state.trophyFilter = filter;
-  ['all', 'unlocked', 'contested', 'locked'].forEach(f => {
+  ['all', 'unlocked', 'locked'].forEach(f => {
     const btn = document.getElementById(`btn-trophy-filter-${f}`);
     if (btn) {
       if (f === filter) {
@@ -5028,6 +5209,7 @@ function setTrophyFilter(filter) {
   });
   renderTrophiesGrid();
 }
+window.setTrophyFilter = setTrophyFilter;
 
 function renderTrophiesGrid() {
   const grid = document.getElementById('trophies-grid');
@@ -5039,6 +5221,7 @@ function renderTrophiesGrid() {
   const counts = {
     all: { total: allBadges.length, unlocked: allBadges.filter(b => b.status === 'unlocked').length },
     organ: { total: 0, unlocked: 0 },
+    custom: { total: 0, unlocked: 0 },
     progression: { total: 0, unlocked: 0 }
   };
 
@@ -5050,7 +5233,7 @@ function renderTrophiesGrid() {
     }
   });
 
-  ['all', 'organ', 'progression'].forEach(c => {
+  ['all', 'organ', 'custom', 'progression'].forEach(c => {
     const el = document.getElementById(`trophy-cat-count-${c}`);
     if (el) {
       el.textContent = `${counts[c].unlocked} / ${counts[c].total} débloqués`;
@@ -5069,7 +5252,6 @@ function renderTrophiesGrid() {
     }
     // Filtre de statut
     if (statusFilter === 'unlocked') return b.status === 'unlocked';
-    if (statusFilter === 'contested') return b.status === 'contested';
     if (statusFilter === 'locked') return b.status === 'locked';
     return true;
   });
@@ -5085,25 +5267,18 @@ function renderTrophiesGrid() {
 
   grid.innerHTML = filtered.map(b => {
     const isUnlocked = b.status === 'unlocked';
-    const isContested = b.status === 'contested';
     const pillar = getTrophyPillar(b);
 
     const cardBorder = isUnlocked
       ? 'border-amber-500/40 bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/20 shadow-md shadow-amber-500/5'
-      : isContested
-      ? 'border-amber-500 ring-2 ring-amber-500/30 bg-slate-900 shadow-lg shadow-amber-500/20'
-      : 'border-slate-800 bg-slate-900/60 opacity-60 hover:opacity-90';
+      : 'border-slate-800 bg-slate-900/60 opacity-65 hover:opacity-95';
 
     const iconBg = isUnlocked
       ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-      : isContested
-      ? 'bg-amber-500/30 text-amber-300 border border-amber-500 animate-pulse'
       : 'bg-slate-800 text-slate-500';
 
     const statusBadge = isUnlocked
       ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">🏆 Débloqué</span>'
-      : isContested
-      ? '<span class="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 shadow-sm animate-pulse">⚡ Titre contesté</span>'
       : '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">🔒 À conquérir</span>';
 
     // Badge de pilier thématique
@@ -5111,47 +5286,53 @@ function renderTrophiesGrid() {
     if (pillar === 'organ') {
       const label = b.organ ? b.organ : 'Organes & Lésions';
       pillarBadge = `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/25 flex items-center space-x-1 shrink-0"><i data-lucide="microscope" class="w-3 h-3 text-rose-400"></i><span>${escapeHtml(label)}</span></span>`;
-    } else if (pillar === 'creator') {
-      pillarBadge = `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-300 border border-teal-500/25 flex items-center space-x-1 shrink-0"><i data-lucide="edit-3" class="w-3 h-3 text-teal-400"></i><span>Voie du Rédacteur</span></span>`;
+    } else if (pillar === 'custom') {
+      const tagLabel = b.targetTag ? `#${b.targetTag}` : (b.targetOrgan ? b.targetOrgan : 'Défi Rédacteur');
+      pillarBadge = `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-300 border border-teal-500/25 flex items-center space-x-1 shrink-0"><i data-lucide="tag" class="w-3 h-3 text-teal-400"></i><span>${escapeHtml(tagLabel)}</span></span>`;
     } else {
       const isStreak = (b.category === 'streak');
       pillarBadge = `<span class="text-[9px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/25 flex items-center space-x-1 shrink-0"><i data-lucide="${isStreak ? 'flame' : 'award'}" class="w-3 h-3 text-indigo-400"></i><span>${isStreak ? 'Série de Jours' : 'Niveau Joueur'}</span></span>`;
     }
 
+    const isCurrentTitle = (state.stats && (state.stats.equippedTitleBadgeId === b.id || (state.stats.equippedTitle && state.stats.equippedTitle === b.name)));
+
     return `
       <div class="rounded-2xl p-4 sm:p-5 border transition flex flex-col justify-between space-y-4 ${cardBorder}">
         <div class="space-y-3">
           
-          <!-- En-tête de carte avec le Pilier thématique et le Statut -->
+          <!-- En-tête de carte avec le Pilier thématique, Statut et Actions -->
           <div class="flex items-center justify-between pb-2 border-b border-slate-800/80">
             ${pillarBadge}
             <div class="flex items-center space-x-1.5">
               ${statusBadge}
               ${isCreator() ? `
-                <button onclick="${b.isCustom ? `openEditTrophyModal('${escapeJsString(b.id)}')` : `renameTrophyPrompt('${escapeJsString(b.id)}')`}" class="p-1 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-slate-800 transition" title="${b.isCustom ? 'Modifier ce trophée' : 'Renommer ce trophée'}">
+                <button onclick="${b.isCustom ? `openEditTrophyModal('${escapeJsString(b.id)}')` : `renameTrophyPrompt('${escapeJsString(b.id)}')`}" class="p-1 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-slate-800 transition" title="Renommer ce trophée">
                   <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
                 </button>
               ` : ''}
-              ${(b.isCustom && isCreator()) ? `
-                <button onclick="deleteCustomBadge('${escapeJsString(b.id)}')" class="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition" title="Supprimer ce trophée">
+              ${(b.isCustom && isAuthorizedToDelete()) ? `
+                <button onclick="deleteCustomBadge('${escapeJsString(b.id)}')" class="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition" title="Supprimer ce trophée (Dr Doreau / Dr Belhadef)">
                   <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
                 </button>
               ` : ''}
             </div>
           </div>
 
-          <!-- Icône & Récompense XP -->
+          <!-- Icône & Distinction -->
           <div class="flex items-center space-x-2.5">
             <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${iconBg}">
               ${(b.icon && b.icon.length > 2) ? `<i data-lucide="${b.icon}" class="w-5 h-5"></i>` : `<span class="text-xl">${b.icon || '🏆'}</span>`}
             </div>
             <div>
-              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold border border-amber-500/20 block w-fit">🏆 Trophée d'Honneur</span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold border border-amber-500/20 block w-fit">🏆 Trophée d'Honneur (0 XP)</span>
             </div>
           </div>
 
           <div>
-            <h4 class="font-extrabold text-sm text-white ${isContested ? 'text-amber-300' : ''}">${escapeHtml(b.name)}</h4>
+            <h4 class="font-extrabold text-sm text-white flex items-center space-x-1.5">
+              <span>${escapeHtml(b.name)}</span>
+              ${isCurrentTitle ? '<span class="text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 shadow-sm shrink-0">👑 Titre Actif</span>' : ''}
+            </h4>
             <p class="text-xs text-slate-400 mt-1 leading-relaxed">${escapeHtml(b.description)}</p>
             ${b.created_by ? `<div class="text-[10px] text-amber-400/80 mt-1.5 font-mono">👑 Créé par : ${escapeHtml(b.created_by)}</div>` : ''}
           </div>
@@ -5160,19 +5341,27 @@ function renderTrophiesGrid() {
         <div class="pt-3 border-t border-slate-800/80 space-y-2">
           <div class="flex items-center justify-between text-[11px] font-mono text-slate-400">
             <span>Progression</span>
-            <span class="${isContested ? 'text-amber-400 font-bold' : ''}">${b.progressText}</span>
+            <span>${b.progressText}</span>
           </div>
           <div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
-            <div class="h-full rounded-full transition-all duration-300 ${
-              isUnlocked ? 'bg-amber-400' : isContested ? 'bg-amber-500 animate-pulse' : 'bg-teal-500'
-            }" style="width: ${b.progressPercent}%;"></div>
+            <div class="h-full rounded-full transition-all duration-300 ${isUnlocked ? 'bg-amber-400' : 'bg-teal-500'}" style="width: ${b.progressPercent}%;"></div>
           </div>
 
-          ${isContested ? `
-            <button onclick="startContestedBadgeSession('${escapeJsString(b.id)}')" class="w-full mt-2 py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center space-x-1.5 transition shadow-sm">
-              <i data-lucide="play" class="w-3.5 h-3.5 fill-slate-950"></i>
-              <span>Recapturer mon titre (${b.missingCount} Q)</span>
-            </button>
+          <!-- Bouton Porter en Titre si débloqué -->
+          ${isUnlocked ? `
+            <div class="pt-1.5">
+              ${isCurrentTitle ? `
+                <button onclick="unequipTrophyTitle()" class="w-full py-1.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center space-x-1.5 transition shadow-sm" title="Cliquez pour retirer ce titre">
+                  <i data-lucide="check" class="w-3.5 h-3.5"></i>
+                  <span>👑 Titre Actif (Cliquer pour retirer)</span>
+                </button>
+              ` : `
+                <button onclick="equipTrophyTitle('${escapeJsString(b.id)}')" class="w-full py-1.5 px-3 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-amber-300 border border-amber-500/30 hover:border-amber-400 font-bold text-xs flex items-center justify-center space-x-1.5 transition shadow-sm" title="Porter ce trophée comme titre honorifique">
+                  <i data-lucide="crown" class="w-3.5 h-3.5 text-amber-400"></i>
+                  <span>Porter ce Trophée en Titre</span>
+                </button>
+              `}
+            </div>
           ` : ''}
         </div>
       </div>
@@ -5181,6 +5370,35 @@ function renderTrophiesGrid() {
 
   if (window.lucide) lucide.createIcons();
 }
+
+function equipTrophyTitle(badgeId) {
+  const allBadges = getBadgesStatus();
+  const badge = allBadges.find(b => b.id === badgeId);
+  if (!badge) return;
+  if (badge.status !== 'unlocked') {
+    alert("Vous devez d'abord débloquer ce trophée pour pouvoir porter son titre !");
+    return;
+  }
+  if (!state.stats) state.stats = getDefaultStats();
+  state.stats.equippedTitle = badge.name;
+  state.stats.equippedTitleBadgeId = badge.id;
+  saveStats();
+  updateTopBar();
+  renderTrophiesGrid();
+  showRewardToast(`👑 Titre équipé : "${badge.name}" !`, 'crown');
+}
+window.equipTrophyTitle = equipTrophyTitle;
+
+function unequipTrophyTitle() {
+  if (!state.stats) state.stats = getDefaultStats();
+  state.stats.equippedTitle = '';
+  state.stats.equippedTitleBadgeId = '';
+  saveStats();
+  updateTopBar();
+  renderTrophiesGrid();
+  showRewardToast("Titre retiré.", 'info');
+}
+window.unequipTrophyTitle = unequipTrophyTitle;
 
 function startContestedBadgeSession(badgeId) {
   const badge = getBadgesStatus().find(b => b.id === badgeId);
@@ -5224,9 +5442,10 @@ async function dbUpsertCustomBadge(b) {
       description: b.description || '',
       icon: b.icon || '🏆',
       tier: b.tier || 'gold',
-      xpReward: b.xpReward || 50,
-      conditionType: b.conditionType || 'organ_mastery',
+      xpReward: 0,
+      conditionType: b.conditionType || 'tag_mastery',
       targetOrgan: b.targetOrgan || '',
+      targetTag: b.targetTag || '',
       targetCount: b.targetCount || 5,
       created_by: b.created_by || (state.currentUser ? state.currentUser.email : 'Créateur'),
       created_at: b.created_at || new Date().toISOString()
@@ -5239,10 +5458,36 @@ async function dbUpsertCustomBadge(b) {
 async function dbDeleteCustomBadge(id) {
   if (!supabaseClient || !state.currentUser) return;
   try {
-    await supabaseClient.from('custom_badges').delete().eq('id', id);
+    await Promise.all([
+      supabaseClient.from('custom_badges').delete().eq('id', id),
+      supabaseClient.from('user_trophies').delete().eq('badge_id', id)
+    ]);
   } catch(e) {
     console.warn("Avertissement delete custom_badge Supabase:", e);
   }
+}
+
+function populateTrophyTagSelector(selectedTag = '') {
+  const tagSelect = document.getElementById('trophy-input-tag');
+  if (!tagSelect) return;
+  const allTags = new Set();
+  (state.questions || []).forEach(q => {
+    (q.tags || []).forEach(t => {
+      const clean = String(t).trim().replace(/^#/, '');
+      if (clean) allTags.add(clean);
+    });
+  });
+  (state.customTags || []).forEach(t => {
+    const clean = (typeof t === 'string' ? t : (t.name || '')).trim().replace(/^#/, '');
+    if (clean && !clean.startsWith('ROLE_') && !clean.startsWith('UPROG:') && !clean.startsWith('USTATS:')) {
+      allTags.add(clean);
+    }
+  });
+  const sortedTags = Array.from(allTags).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+  if (sortedTags.length === 0) {
+    sortedTags.push('IHC', 'Lame', 'BiologieMoléculaire', 'Cytologie', 'Histologie');
+  }
+  tagSelect.innerHTML = sortedTags.map(t => `<option value="${escapeHtml(t)}" ${t.toLowerCase() === selectedTag.toLowerCase().replace(/^#/, '') ? 'selected' : ''}>#${escapeHtml(t)}</option>`).join('');
 }
 
 function openCreateTrophyModal() {
@@ -5267,6 +5512,8 @@ function openCreateTrophyModal() {
 
   const submitText = document.getElementById('trophy-modal-submit-text');
   if (submitText) submitText.textContent = "Créer le Trophée";
+
+  populateTrophyTagSelector();
 
   const organSelect = document.getElementById('trophy-input-organ');
   if (organSelect) {
@@ -5321,10 +5568,12 @@ function openEditTrophyModal(badgeId) {
   if (tierEl) tierEl.value = badge.tier || 'gold';
 
   const xpEl = document.getElementById('trophy-input-xp');
-  if (xpEl) xpEl.value = String(badge.xpReward || 50);
+  if (xpEl) xpEl.value = "0";
 
   const condEl = document.getElementById('trophy-input-cond-type');
-  if (condEl) condEl.value = badge.conditionType || 'organ_mastery';
+  if (condEl) condEl.value = badge.conditionType || 'tag_mastery';
+
+  populateTrophyTagSelector(badge.targetTag || '');
 
   const organSelect = document.getElementById('trophy-input-organ');
   if (organSelect) {
@@ -5368,16 +5617,29 @@ function renameTrophyPrompt(badgeId) {
     state.customBadges[customIdx].name = trimmed;
     localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
     if (state.currentUser) {
-      saveStats();
       dbUpsertCustomBadge(state.customBadges[customIdx]);
     }
   } else {
-    if (!state.stats) state.stats = {};
+    if (!state.stats) state.stats = getDefaultStats();
     if (!state.stats.trophyCustomNames) state.stats.trophyCustomNames = {};
     state.stats.trophyCustomNames[badgeId] = trimmed;
-    saveStats();
   }
 
+  if (state.stats && (state.stats.equippedTitleBadgeId === badgeId || state.stats.equippedTitle === currentName)) {
+    state.stats.equippedTitle = trimmed;
+  }
+
+  if (supabaseClient) {
+    try {
+      supabaseClient.from('user_trophies')
+        .update({ badge_name: trimmed })
+        .eq('badge_id', badgeId)
+        .then();
+    } catch(e) {}
+  }
+
+  saveStats();
+  updateTopBar();
   renderTrophiesView();
   showRewardToast(`🏆 Trophée renommé en "${trimmed}" !`, 'award');
 }
@@ -5399,24 +5661,34 @@ function onTrophyConditionTypeChange() {
   const paramBox = document.getElementById('trophy-organ-param-box');
   const countLabel = document.getElementById('trophy-count-label');
   const organCol = document.getElementById('trophy-organ-col');
+  const tagCol = document.getElementById('trophy-tag-col');
+  const countCol = document.getElementById('trophy-count-col');
 
   if (paramBox) {
     if (condType === 'free') {
       paramBox.classList.add('hidden');
     } else {
       paramBox.classList.remove('hidden');
-      if (condType === 'organ_mastery') {
+      if (condType === 'tag_mastery') {
+        if (tagCol) tagCol.classList.remove('hidden');
+        if (organCol) organCol.classList.add('hidden');
+        if (countCol) countCol.classList.remove('hidden');
+        if (countLabel) countLabel.textContent = "Questions requises avec ce tag";
+      } else if (condType === 'organ_mastery') {
+        if (tagCol) tagCol.classList.add('hidden');
         if (organCol) organCol.classList.remove('hidden');
+        if (countCol) countCol.classList.remove('hidden');
         if (countLabel) countLabel.textContent = "Questions requises sur l'organe";
       } else if (condType === 'question_count') {
+        if (tagCol) tagCol.classList.add('hidden');
         if (organCol) organCol.classList.add('hidden');
+        if (countCol) countCol.classList.remove('hidden');
         if (countLabel) countLabel.textContent = "Total de questions à réussir";
       } else if (condType === 'streak') {
+        if (tagCol) tagCol.classList.add('hidden');
         if (organCol) organCol.classList.add('hidden');
+        if (countCol) countCol.classList.remove('hidden');
         if (countLabel) countLabel.textContent = "Jours consécutifs (Streak)";
-      } else if (condType === 'creator') {
-        if (organCol) organCol.classList.add('hidden');
-        if (countLabel) countLabel.textContent = "Questions à rédiger";
       }
     }
   }
@@ -5427,7 +5699,6 @@ async function saveCustomBadge(badge) {
   state.customBadges.push(badge);
   localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
   renderTrophiesView();
-  // Sauvegarde dans profiles.stats.customBadges pour synchronisation garantie sur tous les appareils du compte
   if (state.currentUser) {
     saveStats();
     dbUpsertCustomBadge(badge);
@@ -5435,9 +5706,20 @@ async function saveCustomBadge(badge) {
 }
 
 async function deleteCustomBadge(badgeId) {
+  if (!isAuthorizedToDelete()) {
+    alert("Seuls le Dr Pierre-Alain Doreau et le Dr Samy Belhadef sont autorisés à supprimer un trophée.");
+    return;
+  }
   if (!confirm("Voulez-vous vraiment supprimer ce trophée personnalisé ?")) return;
   state.customBadges = (state.customBadges || []).filter(b => b.id !== badgeId);
   localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+
+  if (state.stats && (state.stats.equippedTitleBadgeId === badgeId)) {
+    state.stats.equippedTitle = '';
+    state.stats.equippedTitleBadgeId = '';
+    updateTopBar();
+  }
+
   renderTrophiesView();
   showRewardToast("Trophée supprimé.", 'trash-2');
   if (state.currentUser) {
@@ -5456,8 +5738,9 @@ async function handleCreateTrophySubmit(e) {
   const description = document.getElementById('trophy-input-desc').value.trim();
   const icon = document.getElementById('trophy-input-icon').value || '🏆';
   const tier = document.getElementById('trophy-input-tier').value || 'gold';
-  const xpReward = parseInt(document.getElementById('trophy-input-xp').value, 10) || 50;
+  const xpReward = 0; // Distinction d'honneur invariable : 0 XP
   const conditionType = document.getElementById('trophy-input-cond-type').value;
+  const targetTag = document.getElementById('trophy-input-tag')?.value || '';
   const targetOrgan = document.getElementById('trophy-input-organ')?.value || '';
   const targetCount = parseInt(document.getElementById('trophy-input-count')?.value, 10) || 5;
 
@@ -5477,10 +5760,15 @@ async function handleCreateTrophySubmit(e) {
         tier,
         xpReward,
         conditionType,
+        targetTag,
         targetOrgan,
         targetCount
       };
       localStorage.setItem('pathosorus_custom_badges', JSON.stringify(state.customBadges));
+      if (state.stats && state.stats.equippedTitleBadgeId === editId) {
+        state.stats.equippedTitle = name;
+        updateTopBar();
+      }
       if (state.currentUser) {
         saveStats();
         dbUpsertCustomBadge(state.customBadges[idx]);
@@ -5498,8 +5786,9 @@ async function handleCreateTrophySubmit(e) {
     description,
     icon,
     tier,
-    xpReward,
+    xpReward: 0,
     conditionType,
+    targetTag,
     targetOrgan,
     targetCount,
     category: 'custom',
@@ -6854,25 +7143,46 @@ function evaluateSessionAnswer(selectedIndices) {
   const corSet = new Set(correctIndices);
   const isExact = (selSet.size === corSet.size) && [...selSet].every(x => corSet.has(x));
 
-  if (!q.stats) q.stats = { seen: 0, correct: 0, consecutiveCorrect: 0 };
+  if (!q.stats) q.stats = getDefaultQuestionStats();
   q.stats.seen += 1;
   q.stats.lastReviewed = new Date().toISOString();
   state.stats.totalAnswered += 1;
 
-  const earnedXp = getQuestionXp(q);
+  const today = getLocalDateString();
+  const alreadyRewardedToday = (q.stats.lastXpDate === today);
+  const baseXp = getQuestionXp(q);
+  const earnedXp = alreadyRewardedToday ? 0 : baseXp;
 
   if (isExact) {
     q.stats.correct += 1;
     q.stats.consecutiveCorrect = (q.stats.consecutiveCorrect || 0) + 1;
-    state.stats.totalCorrect += 1;
     session.score += 1;
     session.xpEarned += earnedXp;
-    state.stats.xp += earnedXp;
+
+    if (!alreadyRewardedToday) {
+      q.stats.lastXpDate = today;
+      state.stats.totalCorrect += 1;
+      state.stats.xp += earnedXp;
+    }
+
+    // Règle Anti-triche Trophée :
+    // Si la question a été ratée aujourd'hui (à l'instant t), la réussir immédiatement (à t+1)
+    // ne valide pas le trophée aujourd'hui. Elle ne comptera pour les trophées que si réussie un jour ultérieur.
+    if (q.stats.lastFailedDate === today) {
+      q.stats.lastCorrectDate = today;
+      q.stats.trophyEligible = false;
+    } else {
+      q.stats.lastCorrectDate = today;
+      q.stats.trophyEligible = true;
+      checkAndUnlockBadges();
+    }
+
     playSound('correct');
     confetti({ particleCount: q.difficulty === 'extreme' ? 80 : 35, spread: 65, origin: { y: 0.8 } });
     checkCategoryCompletionBonus(q.organ, q.category);
-    checkAndUnlockBadges();
   } else {
+    q.stats.lastFailedDate = today;
+    q.stats.trophyEligible = false;
     q.stats.consecutiveCorrect = 0;
     q.flagged = true;
     playSound('wrong');
@@ -6971,21 +7281,42 @@ function validateOpenAnswer() {
   session.lastOpenAccepted = accepted;
   session.lastOpenIsMatch = isMatch;
 
-  if (!q.stats) q.stats = { seen: 0, correct: 0, consecutiveCorrect: 0 };
+  if (!q.stats) q.stats = getDefaultQuestionStats();
   q.stats.seen += 1;
   q.stats.lastReviewed = new Date().toISOString();
   state.stats.totalAnswered += 1;
 
+  const today = getLocalDateString();
+  const alreadyRewardedToday = (q.stats.lastXpDate === today);
+  const baseXp = 15;
+  const earnedXp = alreadyRewardedToday ? 0 : baseXp;
+
   if (isMatch) {
     q.stats.correct += 1;
     q.stats.consecutiveCorrect = (q.stats.consecutiveCorrect || 0) + 1;
-    state.stats.totalCorrect += 1;
     session.score += 1;
-    session.xpEarned += 15;
-    state.stats.xp += 15;
+    session.xpEarned += earnedXp;
+
+    if (!alreadyRewardedToday) {
+      q.stats.lastXpDate = today;
+      state.stats.totalCorrect += 1;
+      state.stats.xp += earnedXp;
+    }
+
+    if (q.stats.lastFailedDate === today) {
+      q.stats.lastCorrectDate = today;
+      q.stats.trophyEligible = false;
+    } else {
+      q.stats.lastCorrectDate = today;
+      q.stats.trophyEligible = true;
+      checkAndUnlockBadges();
+    }
+
     playSound('correct');
     confetti({ particleCount: 35, spread: 65, origin: { y: 0.8 } });
   } else {
+    q.stats.lastFailedDate = today;
+    q.stats.trophyEligible = false;
     q.stats.consecutiveCorrect = 0;
     q.flagged = true;
     playSound('wrong');
@@ -7074,14 +7405,28 @@ function overrideOpenAnswerCorrect() {
   if (!session || !session.isAnswered) return;
   const q = session.questions[session.currentIndex];
 
+  const today = getLocalDateString();
+  const alreadyRewardedToday = (q.stats && q.stats.lastXpDate === today);
+  const earnedXp = alreadyRewardedToday ? 0 : 15;
+
   session.score += 1;
-  session.xpEarned += 15;
-  state.stats.xp += 15;
-  state.stats.totalCorrect += 1;
-  if (!q.stats) q.stats = { seen: 1, correct: 0, consecutiveCorrect: 0 };
+  session.xpEarned += earnedXp;
+  if (!alreadyRewardedToday) {
+    if (!q.stats) q.stats = getDefaultQuestionStats();
+    q.stats.lastXpDate = today;
+    state.stats.xp += earnedXp;
+    state.stats.totalCorrect += 1;
+  }
+  if (!q.stats) q.stats = getDefaultQuestionStats();
   q.stats.correct += 1;
   q.stats.consecutiveCorrect = 1;
   q.flagged = false;
+  q.stats.lastCorrectDate = today;
+  if (q.stats.lastFailedDate === today) {
+    delete q.stats.lastFailedDate;
+  }
+  q.stats.trophyEligible = true;
+  checkAndUnlockBadges();
   q.stats.lastReviewed = new Date().toISOString();
 
   const targetDate = new Date();
@@ -7141,7 +7486,13 @@ function revealSessionFeedback(isExact, q) {
   const fbBox = document.getElementById('session-feedback-box');
   const banner = document.getElementById('session-feedback-banner');
   banner.className = isExact ? "p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300" : "p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300";
-  document.getElementById('session-feedback-title').textContent = isExact ? "Exact ! Analyse diagnostique parfaite." : "Erreur diagnostique !";
+  
+  const today = getLocalDateString();
+  let feedbackSub = '';
+  if (isExact && q.stats && q.stats.lastFailedDate === today) {
+    feedbackSub = '<div class="text-[11px] text-amber-300 font-mono mt-1 flex items-center space-x-1.5"><i data-lucide="clock" class="w-3.5 h-3.5 shrink-0"></i><span>⏳ Défi Trophée : question ratée plus tôt aujourd\'hui. Validation du trophée disponible dès demain lors de votre prochaine réussite !</span></div>';
+  }
+  document.getElementById('session-feedback-title').innerHTML = `<span>${isExact ? "Exact ! Analyse diagnostique parfaite." : "Erreur diagnostique !"}</span>${feedbackSub}`;
   
   const fbText = document.getElementById('session-feedback-text');
   if (fbText) {
@@ -10437,11 +10788,22 @@ function finishDPSession() {
 
   session.isFinished = true;
 
+  const today = getLocalDateString();
+  const caseId = (session.caseData && session.caseData.id) ? session.caseData.id : 'dp_session';
+  if (!state.userProgress) state.userProgress = {};
+  const caseProg = state.userProgress[caseId] || {};
+  const alreadyRewardedToday = (caseProg.lastXpDate === today);
+  const awardedXp = alreadyRewardedToday ? 0 : session.xpEarned;
+  caseProg.lastXpDate = today;
+  state.userProgress[caseId] = caseProg;
+
   // Enregistrer progression & XP
-  if (!state.stats) state.stats = {};
-  state.stats.xp = (state.stats.xp || 0) + session.xpEarned;
+  if (!state.stats) state.stats = getDefaultStats();
+  state.stats.xp = (state.stats.xp || 0) + awardedXp;
   state.stats.totalAnswered = (state.stats.totalAnswered || 0) + session.totalSteps;
-  state.stats.totalCorrect = (state.stats.totalCorrect || 0) + session.score;
+  if (!alreadyRewardedToday) {
+    state.stats.totalCorrect = (state.stats.totalCorrect || 0) + session.score;
+  }
   saveStats();
   checkAndUnlockBadges();
   updateTopBar();

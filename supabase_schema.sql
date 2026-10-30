@@ -146,11 +146,16 @@ create table if not exists public.custom_badges (
   description text default '',
   icon text not null default '🏆',
   tier text not null default 'gold',
-  xpReward integer not null default 50,
-  conditionType text not null default 'organ_mastery',
+  xpReward integer not null default 0,
+  conditionType text not null default 'tag_mastery',
   targetOrgan text default '',
+  targetTag text default '',
   targetCount integer default 5
 );
+
+-- Rétrocompatibilité : ajout des colonnes manquantes
+alter table public.custom_badges add column if not exists targetTag text default '';
+alter table public.custom_badges add column if not exists xpReward integer default 0;
 
 -- 9. Table des Fiches de Cours & Critères OMS par Lésion
 create table if not exists public.lesion_notes (
@@ -310,3 +315,77 @@ drop policy if exists "Upload photos autorisée pour tous" on storage.objects;
 create policy "Upload photos autorisée pour tous"
   on storage.objects
   for insert with check (bucket_id = 'pathosorus_images');
+
+-- =========================================================
+-- TABLES STATISTIQUES OFFICIELLES & PROGRESSION PAR QUESTION
+-- =========================================================
+
+create table if not exists public.user_stats (
+  email text primary key,
+  name text not null default '',
+  role text not null default 'reader',
+  xp integer not null default 0,
+  streak integer not null default 1,
+  total_correct integer not null default 0,
+  total_answered integer not null default 0,
+  unlocked_badges jsonb not null default '{}'::jsonb,
+  completed_categories jsonb not null default '[]'::jsonb,
+  equipped_title text default '',
+  trophy_custom_names jsonb default '{}'::jsonb,
+  last_active_date date default current_date,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.user_stats enable row level security;
+
+drop policy if exists "Lecture publique user_stats" on public.user_stats;
+create policy "Lecture publique user_stats" on public.user_stats for select using (true);
+
+drop policy if exists "Écriture user_stats autorisée" on public.user_stats;
+create policy "Écriture user_stats autorisée" on public.user_stats for all using (true) with check (true);
+
+create table if not exists public.user_question_progress (
+  user_email text not null,
+  question_id text not null,
+  mastered boolean not null default false,
+  flagged boolean not null default false,
+  seen integer not null default 0,
+  correct integer not null default 0,
+  consecutive_correct integer not null default 0,
+  interval_days integer not null default 0,
+  last_reviewed timestamptz,
+  next_review_date date,
+  last_failed_date date,
+  last_correct_date date,
+  last_xp_date date,
+  trophy_eligible boolean default true,
+  updated_at timestamptz not null default now(),
+  primary key (user_email, question_id)
+);
+
+alter table public.user_question_progress enable row level security;
+
+drop policy if exists "Accès user_question_progress" on public.user_question_progress;
+create policy "Accès user_question_progress" on public.user_question_progress for all using (true) with check (true);
+
+-- 12. Table des Trophées Débloqués par Utilisateur (100% transparent dans le Supabase Table Editor)
+create table if not exists public.user_trophies (
+  user_email text not null,
+  badge_id text not null,
+  badge_name text not null,
+  category text not null default 'organ',
+  unlocked_at timestamptz not null default now(),
+  primary key (user_email, badge_id)
+);
+
+create index if not exists idx_user_trophies_email on public.user_trophies (user_email);
+
+alter table public.user_trophies enable row level security;
+
+drop policy if exists "Lecture publique user_trophies" on public.user_trophies;
+create policy "Lecture publique user_trophies" on public.user_trophies for select using (true);
+
+drop policy if exists "Écriture user_trophies autorisée" on public.user_trophies;
+create policy "Écriture user_trophies autorisée" on public.user_trophies for all using (true) with check (true);
+
+
