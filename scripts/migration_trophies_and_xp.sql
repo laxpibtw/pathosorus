@@ -72,11 +72,11 @@ alter table public.user_stats add column if not exists trophy_custom_names jsonb
 alter table public.user_stats add column if not exists unlocked_badges jsonb default '{}'::jsonb;
 alter table public.user_stats add column if not exists last_active_date date default current_date;
 
--- Réparation de la série active du Dr Pierre-Alain Doreau (J2 confirmé)
+-- Réparation de la série active des confrères (J2 confirmé)
 update public.user_stats
 set streak = greatest(streak, 2),
     last_active_date = current_date
-where lower(trim(email)) = 'padoreau85@gmail.com';
+where lower(trim(email)) in ('padoreau85@gmail.com', 'belhadef.samy@gmail.com');
 
 
 -- 4. Ajout de l'Anti-Triche et du Cooldown Quotidien d'XP dans public.user_question_progress

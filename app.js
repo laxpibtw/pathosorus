@@ -3751,8 +3751,8 @@ function checkDailyStreak() {
     }
   }
 
-  // Cas explicite du Dr Pierre-Alain Doreau : connexion effective hier
-  if (email === 'padoreau85@gmail.com' && (!state.stats.streak || state.stats.streak < 2)) {
+  // Cas explicite des confrères actifs (Dr Pierre-Alain Doreau & Dr Samy Belhadef) : connexion effective hier
+  if ((email === 'padoreau85@gmail.com' || email === 'belhadef.samy@gmail.com') && (!state.stats.streak || state.stats.streak < 2)) {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = getLocalDateString(yesterday);
@@ -4941,7 +4941,7 @@ async function renderLeaderboard(forceRefresh = false) {
     name: 'Dr Samy Belhadef',
     role: 'creator',
     xp: samyXp,
-    streak: (samyLocalStats && typeof samyLocalStats.streak === 'number') ? samyLocalStats.streak : 1,
+    streak: (samyLocalStats && typeof samyLocalStats.streak === 'number' && samyLocalStats.streak >= 2) ? samyLocalStats.streak : 2,
     totalCorrect: samyCorrect,
     createdQuestions: 0,
     unlockedBadgesCount: samyBadges
