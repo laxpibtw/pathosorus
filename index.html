@@ -1960,20 +1960,28 @@
           <div class="grid grid-cols-2 gap-3">
             <div id="trophy-tag-col">
               <label class="block text-xs font-semibold text-slate-300 mb-1">Tag ciblé *</label>
-              <select id="trophy-input-tag" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-teal-300 text-xs focus:outline-none focus:border-amber-500 font-mono">
+              <select id="trophy-input-tag" onchange="updateTrophyTargetPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-teal-300 text-xs focus:outline-none focus:border-amber-500 font-mono">
                 <!-- Rempli dynamiquement -->
               </select>
             </div>
             <div id="trophy-organ-col" class="hidden">
               <label class="block text-xs font-semibold text-slate-300 mb-1">Organe cible</label>
-              <select id="trophy-input-organ" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500">
+              <select id="trophy-input-organ" onchange="updateTrophyTargetPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500">
                 <!-- Rempli dynamiquement -->
               </select>
             </div>
             <div id="trophy-count-col">
-              <label id="trophy-count-label" class="block text-xs font-semibold text-slate-300 mb-1">Questions requises</label>
-              <input type="number" id="trophy-input-count" min="1" value="5" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500 font-mono">
+              <label id="trophy-count-label" class="block text-xs font-semibold text-slate-300 mb-1">Pourcentage requis (%)</label>
+              <div class="relative">
+                <input type="number" id="trophy-input-count" min="5" max="100" step="5" value="50" oninput="updateTrophyTargetPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500 font-mono pr-8">
+                <span id="trophy-input-count-unit" class="absolute right-2.5 top-2 text-xs text-amber-400 font-bold">%</span>
+              </div>
             </div>
+          </div>
+          <!-- Aide et Aperçu dynamique du nombre de questions calculé -->
+          <div id="trophy-preview-helper" class="text-[11px] text-slate-300 bg-slate-950/70 border border-indigo-500/30 rounded-xl px-3 py-2 flex items-center space-x-2">
+            <i data-lucide="info" class="w-3.5 h-3.5 text-indigo-400 shrink-0"></i>
+            <span id="trophy-preview-text">Calcul de l'objectif...</span>
           </div>
         </div>
 

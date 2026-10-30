@@ -86,13 +86,10 @@ alter table public.user_question_progress add column if not exists last_xp_date 
 alter table public.user_question_progress add column if not exists trophy_eligible boolean default true;
 
 
--- 5. Nettoyage immédiat des 46 faux trophées contaminés du compte du Dr Samy Belhadef
-update public.user_stats
-set unlocked_badges = '{}'::jsonb
-where lower(trim(email)) = 'belhadef.samy@gmail.com';
-
+-- 5. Protection : nettoyer Samy uniquement s'il a encore l'ancien bug des 46 faux trophées contaminés
 delete from public.user_trophies
-where lower(trim(user_email)) = 'belhadef.samy@gmail.com';
+where lower(trim(user_email)) = 'belhadef.samy@gmail.com'
+  and (select count(*) from public.user_trophies where lower(trim(user_email)) = 'belhadef.samy@gmail.com') >= 40;
 
 
 -- 6. Migration automatique des trophées légitimes existants de Pierre-Alain vers public.user_trophies

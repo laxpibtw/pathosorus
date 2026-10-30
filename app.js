@@ -2451,8 +2451,8 @@ async function fetchSupabaseData(silent = false) {
             dbUserTrophies.forEach(t => {
               trophiesMap[t.badge_id] = new Date(t.unlocked_at).getTime() || Date.now();
             });
-            // Si la table user_trophies a des entrées, ou pour Samy, elle fait foi absolue
-            if (dbUserTrophies.length > 0 || currentEmail.toLowerCase().trim() === 'belhadef.samy@gmail.com') {
+            // Si la table user_trophies a des entrées enregistrées, elle fait foi absolue
+            if (dbUserTrophies.length > 0) {
               state.stats.unlockedBadges = trophiesMap;
               localStorage.setItem(getUserStatsStorageKey(currentEmail), JSON.stringify(state.stats));
             }
@@ -2517,6 +2517,13 @@ async function fetchSupabaseData(silent = false) {
             cloudProgressMap.set(row.question_id, up);
             state.userProgress[row.question_id] = up;
           });
+        }
+
+        // 0C. Synchroniser immédiatement tous les trophées légitimes débloqués
+        if (currentEmail) {
+          try {
+            await checkAndUnlockBadges();
+          } catch(e) {}
         }
       } catch (sqlErr) {}
     }
@@ -4059,11 +4066,15 @@ function getBadgesStatus() {
     } else if (b.conditionType === 'organ_mastery') {
       const orgQuestions = (state.questions || []).filter(q => (q.organ || '').toLowerCase() === (b.targetOrgan || '').toLowerCase());
       const totalInOrg = orgQuestions.length;
-      const targetCount = b.targetCount || Math.max(1, totalInOrg);
+      // Pourcentage de maîtrise requis (ex: 50% = moitié des questions)
+      const pct = b.targetPercent || (b.targetCount && b.targetCount <= 100 && b.targetCount >= 5 ? b.targetCount : null);
+      const targetCount = pct ? Math.max(1, Math.ceil((pct / 100) * totalInOrg)) : (b.targetCount || Math.max(1, totalInOrg));
       const qualifiedInOrg = orgQuestions.filter(q => isQuestionTrophyQualified(q)).length;
       isNowMet = totalInOrg > 0 && qualifiedInOrg >= targetCount;
       progressPercent = totalInOrg > 0 ? Math.min(100, Math.round((qualifiedInOrg / targetCount) * 100)) : 0;
-      progressText = `${qualifiedInOrg} / ${targetCount} réussies (${b.targetOrgan})`;
+      progressText = pct 
+        ? `${qualifiedInOrg} / ${targetCount} réussies (${pct}% de ${b.targetOrgan})`
+        : `${qualifiedInOrg} / ${targetCount} réussies (${b.targetOrgan})`;
       missingCount = Math.max(0, targetCount - qualifiedInOrg);
     } else if (b.conditionType === 'question_count') {
       const qualifiedTotal = (state.questions || []).filter(q => isQuestionTrophyQualified(q)).length;
@@ -4119,6 +4130,7 @@ async function checkAndUnlockBadges() {
 
   const badges = getBadgesStatus();
   let newlyUnlocked = false;
+  const allUnlockedRows = [];
 
   for (const b of badges) {
     if (b.status === 'unlocked') {
@@ -4129,20 +4141,24 @@ async function checkAndUnlockBadges() {
         state.stats.badgeHistory[b.id] = { unlocked: true, unlockedAt: Date.now() };
         newlyUnlocked = true;
         showRewardToast(`🏆 Trophée d'Honneur Débloqué : "${b.name}" !`, 'award');
-
-        if (supabaseClient) {
-          try {
-            await supabaseClient.from('user_trophies').upsert({
-              user_email: currentEmail.toLowerCase().trim(),
-              badge_id: b.id,
-              badge_name: b.name,
-              category: b.category || 'organ',
-              unlocked_at: new Date().toISOString()
-            }, { onConflict: 'user_email,badge_id' });
-          } catch(e) {}
-        }
       }
+
+      const unlockedTimestamp = state.stats.unlockedBadges[b.id];
+      allUnlockedRows.push({
+        user_email: currentEmail.toLowerCase().trim(),
+        badge_id: b.id,
+        badge_name: b.name,
+        category: b.category || 'organ',
+        unlocked_at: new Date(typeof unlockedTimestamp === 'number' ? unlockedTimestamp : Date.now()).toISOString()
+      });
     }
+  }
+
+  // Toujours synchroniser l'ensemble des trophées débloqués dans la table SQL public.user_trophies
+  if (supabaseClient && allUnlockedRows.length > 0) {
+    try {
+      await supabaseClient.from('user_trophies').upsert(allUnlockedRows, { onConflict: 'user_email,badge_id' });
+    } catch(e) {}
   }
 
   if (newlyUnlocked) {
@@ -4914,10 +4930,9 @@ async function renderLeaderboard(forceRefresh = false) {
   const samyCorrect = (samyLocalStats && typeof samyLocalStats.totalCorrect === 'number') ? samyLocalStats.totalCorrect : 0;
   let samyBadges = (samyLocalStats && samyLocalStats.unlockedBadges) ? Object.keys(samyLocalStats.unlockedBadges).length : 0;
   if (samyBadges >= 40 && samyCorrect <= 10) {
-    samyBadges = 0;
+    samyBadges = 6;
     if (samyLocalStats) {
-      samyLocalStats.unlockedBadges = {};
-      try { localStorage.setItem(samyKey, JSON.stringify(samyLocalStats)); } catch(e) {}
+      delete samyLocalStats.unlockedBadges;
     }
   }
 
@@ -4966,7 +4981,9 @@ async function renderLeaderboard(forceRefresh = false) {
   if (state.currentUser && state.currentUser.email) {
     const curEmail = state.currentUser.email.trim().toLowerCase();
     const docInfo = getQuestionAuthorDisplayName(curEmail);
-    const selfBadgesCount = (state.stats && state.stats.unlockedBadges) ? Object.keys(state.stats.unlockedBadges).length : 0;
+    // Calcul direct des trophées réellement qualifiés en direct
+    const myRealBadges = getBadgesStatus().filter(b => b.status === 'unlocked');
+    const selfBadgesCount = Math.max(myRealBadges.length, (state.stats && state.stats.unlockedBadges) ? Object.keys(state.stats.unlockedBadges).length : 0);
     const existing = accountsMap.get(curEmail) || {};
 
     accountsMap.set(curEmail, {
@@ -5025,9 +5042,15 @@ async function renderLeaderboard(forceRefresh = false) {
                   ? trophiesCountMap.get(em) 
                   : Object.keys(badgesMap).length;
 
-                // Assainissement strict pour Samy s'il était contaminé
+                // Si c'est le compte connecté, conserver le décompte temps réel exact calculé
+                if (state.currentUser && state.currentUser.email && em === state.currentUser.email.trim().toLowerCase()) {
+                  const liveUnlocked = getBadgesStatus().filter(b => b.status === 'unlocked').length;
+                  badgesCount = Math.max(badgesCount, liveUnlocked);
+                }
+
+                // Assainissement strict pour Samy s'il était contaminé par l'ancien bug des 46 faux trophées
                 if (em === 'belhadef.samy@gmail.com' && badgesCount >= 40 && (row.total_correct || 0) <= 10) {
-                  badgesCount = trophiesCountMap.get(em) || 0;
+                  badgesCount = trophiesCountMap.get(em) || 6;
                 }
 
                 const cleanObj = {
@@ -5046,7 +5069,10 @@ async function renderLeaderboard(forceRefresh = false) {
                 if (state.currentUser && state.currentUser.email && em === state.currentUser.email.trim().toLowerCase()) {
                   state.stats = {
                     ...state.stats,
-                    ...cleanObj
+                    ...cleanObj,
+                    unlockedBadges: (state.stats && state.stats.unlockedBadges && Object.keys(state.stats.unlockedBadges).length > 0)
+                      ? state.stats.unlockedBadges
+                      : cleanObj.unlockedBadges
                   };
                   updateTopBar();
                 }
@@ -5584,7 +5610,7 @@ function openEditTrophyModal(badgeId) {
   }
 
   const countEl = document.getElementById('trophy-input-count');
-  if (countEl) countEl.value = badge.targetCount || 5;
+  if (countEl) countEl.value = badge.targetPercent || badge.targetCount || (badge.conditionType === 'organ_mastery' ? 50 : 5);
 
   onTrophyConditionTypeChange();
 
@@ -5656,10 +5682,41 @@ function closeCreateTrophyModal() {
 }
 window.closeCreateTrophyModal = closeCreateTrophyModal;
 
+function updateTrophyTargetPreview() {
+  const condType = document.getElementById('trophy-input-cond-type')?.value;
+  const countEl = document.getElementById('trophy-input-count');
+  const previewText = document.getElementById('trophy-preview-text');
+  if (!previewText || !countEl) return;
+
+  const val = parseInt(countEl.value, 10) || 0;
+
+  if (condType === 'organ_mastery') {
+    const organ = document.getElementById('trophy-input-organ')?.value || '';
+    const orgQuestions = (state.questions || []).filter(q => (q.organ || '').toLowerCase() === organ.toLowerCase());
+    const total = orgQuestions.length;
+    const required = Math.max(1, Math.ceil((val / 100) * total));
+    previewText.innerHTML = `Objectif : <strong>${val}%</strong> de la rubrique <em>${escapeHtml(organ || 'Sélectionnée')}</em> — soit <strong>${required} question${required > 1 ? 's' : ''} qualifiée${required > 1 ? 's' : ''}</strong> sur les ${total} existantes.`;
+  } else if (condType === 'tag_mastery') {
+    const tag = (document.getElementById('trophy-input-tag')?.value || '').replace(/^#/, '');
+    const tagQuestions = (state.questions || []).filter(q => Array.isArray(q.tags) && q.tags.some(t => String(t).trim().toLowerCase().replace(/^#/, '') === tag.toLowerCase()));
+    const total = tagQuestions.length;
+    previewText.innerHTML = `Objectif : Réussir au moins <strong>${val} question${val > 1 ? 's' : ''}</strong> qualifiée${val > 1 ? 's' : ''} portant le tag <strong>#${escapeHtml(tag)}</strong> (${total} question${total > 1 ? 's' : ''} dans la banque).`;
+  } else if (condType === 'question_count') {
+    previewText.innerHTML = `Objectif : Réussir au moins <strong>${val} question${val > 1 ? 's' : ''}</strong> au total dans toute la banque.`;
+  } else if (condType === 'streak') {
+    previewText.innerHTML = `Objectif : Maintenir une série active de <strong>${val} jour${val > 1 ? 's' : ''} consécutif${val > 1 ? 's' : ''}</strong>.`;
+  } else {
+    previewText.innerHTML = `Défi d'honneur libre.`;
+  }
+}
+window.updateTrophyTargetPreview = updateTrophyTargetPreview;
+
 function onTrophyConditionTypeChange() {
   const condType = document.getElementById('trophy-input-cond-type')?.value;
   const paramBox = document.getElementById('trophy-organ-param-box');
   const countLabel = document.getElementById('trophy-count-label');
+  const countInput = document.getElementById('trophy-input-count');
+  const countUnit = document.getElementById('trophy-input-count-unit');
   const organCol = document.getElementById('trophy-organ-col');
   const tagCol = document.getElementById('trophy-tag-col');
   const countCol = document.getElementById('trophy-count-col');
@@ -5674,22 +5731,31 @@ function onTrophyConditionTypeChange() {
         if (organCol) organCol.classList.add('hidden');
         if (countCol) countCol.classList.remove('hidden');
         if (countLabel) countLabel.textContent = "Questions requises avec ce tag";
+        if (countUnit) countUnit.textContent = "Q";
+        if (countInput && countInput.value > 50) countInput.value = 5;
       } else if (condType === 'organ_mastery') {
         if (tagCol) tagCol.classList.add('hidden');
         if (organCol) organCol.classList.remove('hidden');
         if (countCol) countCol.classList.remove('hidden');
-        if (countLabel) countLabel.textContent = "Questions requises sur l'organe";
+        if (countLabel) countLabel.textContent = "Pourcentage de réussite requis";
+        if (countUnit) countUnit.textContent = "%";
+        if (countInput && (countInput.value < 10 || countInput.value > 100)) countInput.value = 50;
       } else if (condType === 'question_count') {
         if (tagCol) tagCol.classList.add('hidden');
         if (organCol) organCol.classList.add('hidden');
         if (countCol) countCol.classList.remove('hidden');
         if (countLabel) countLabel.textContent = "Total de questions à réussir";
+        if (countUnit) countUnit.textContent = "Q";
+        if (countInput && countInput.value > 50) countInput.value = 10;
       } else if (condType === 'streak') {
         if (tagCol) tagCol.classList.add('hidden');
         if (organCol) organCol.classList.add('hidden');
         if (countCol) countCol.classList.remove('hidden');
         if (countLabel) countLabel.textContent = "Jours consécutifs (Streak)";
+        if (countUnit) countUnit.textContent = "j";
+        if (countInput && countInput.value > 30) countInput.value = 3;
       }
+      updateTrophyTargetPreview();
     }
   }
 }
