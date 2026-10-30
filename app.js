@@ -2732,6 +2732,7 @@ async function fetchSupabaseData(silent = false) {
       // Collecte des tombstones Cloud (suppressions expressément validées par un administrateur)
       const deletedQuestionIds = new Set();
       const deletedCaseIds = new Set();
+      const deletedTagNames = new Set();
 
       if (tRes && tRes.data && Array.isArray(tRes.data)) {
         tRes.data.forEach(t => {
@@ -2739,6 +2740,8 @@ async function fetchSupabaseData(silent = false) {
             deletedQuestionIds.add(t.name.substring(6));
           } else if (t.name && t.name.startsWith('DEL_C:')) {
             deletedCaseIds.add(t.name.substring(6));
+          } else if (t.name && t.name.startsWith('DEL_T:')) {
+            deletedTagNames.add(t.name.substring(6));
           }
         });
       }
@@ -2844,8 +2847,22 @@ async function fetchSupabaseData(silent = false) {
     if (!tRes.error && tRes.data && tRes.data.length > 0) {
       state.customTags = tRes.data
         .map(t => t.name)
-        .filter(n => n && !n.startsWith('ROLE_') && !n.startsWith('UPROG:') && !n.startsWith('USTATS:') && !n.startsWith('DEL_'));
+        .filter(n => n && !n.startsWith('ROLE_') && !n.startsWith('UPROG:') && !n.startsWith('USTATS:') && !n.startsWith('DEL_') && !deletedTagNames.has(n));
       localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(state.customTags));
+    }
+
+    // Nettoyage de tags purgés sur les questions et cas en mémoire
+    if (deletedTagNames.size > 0) {
+      (state.questions || []).forEach(q => {
+        if (q.tags && Array.isArray(q.tags) && q.tags.some(t => deletedTagNames.has(t))) {
+          q.tags = q.tags.filter(t => !deletedTagNames.has(t));
+        }
+      });
+      (state.cases || []).forEach(c => {
+        if (c.tags && Array.isArray(c.tags) && c.tags.some(t => deletedTagNames.has(t))) {
+          c.tags = c.tags.filter(t => !deletedTagNames.has(t));
+        }
+      });
     }
 
     // Récupérer les trophées personnalisés s'ils existent sur Supabase
@@ -3460,6 +3477,7 @@ function saveCustomTags() {
   renderTagsCloud();
   renderEditorTagsSelector();
   renderDPTagsSelector();
+  updateEditorDatalists();
 }
 
 function saveStats() {
@@ -7836,7 +7854,9 @@ function renderEditorTagsSelector() {
   if (!container) return;
   container.innerHTML = '';
 
-  state.customTags.forEach(tag => {
+  const visibleTags = (state.customTags || []).filter(t => t && !t.startsWith('ROLE_') && !t.startsWith('UPROG:') && !t.startsWith('USTATS:') && !t.startsWith('DEL_'));
+
+  visibleTags.forEach(tag => {
     const isSelected = state.editorSelectedTags.has(tag);
     const chip = document.createElement('button');
     chip.type = "button";
@@ -10025,7 +10045,9 @@ function renderDPTagsSelector() {
   if (!container) return;
   container.innerHTML = '';
 
-  state.customTags.forEach(tag => {
+  const visibleTags = (state.customTags || []).filter(t => t && !t.startsWith('ROLE_') && !t.startsWith('UPROG:') && !t.startsWith('USTATS:') && !t.startsWith('DEL_'));
+
+  visibleTags.forEach(tag => {
     const isSelected = state.editorSelectedTags.has(tag);
     const chip = document.createElement('button');
     chip.type = "button";
@@ -11194,6 +11216,308 @@ function createNewGlobalTag(tagName) {
     dbUpsertTag(clean);
   }
 }
+window.createNewGlobalTag = createNewGlobalTag;
+
+// =========================================================================
+// --- GESTIONNAIRE DE TAGS (#) : MODIFICATION, RENOMMAGE & SUPPRESSION ---
+// =========================================================================
+
+function openManageTagsModal() {
+  const modal = document.getElementById('modal-manage-tags');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  renderManageTagsList();
+  const inp = document.getElementById('manage-tags-new-input');
+  if (inp) {
+    inp.value = '';
+    setTimeout(() => inp.focus(), 80);
+  }
+  if (window.lucide) lucide.createIcons();
+}
+window.openManageTagsModal = openManageTagsModal;
+
+function closeManageTagsModal() {
+  const modal = document.getElementById('modal-manage-tags');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+window.closeManageTagsModal = closeManageTagsModal;
+
+function renderManageTagsList() {
+  const container = document.getElementById('manage-tags-list');
+  const countEl = document.getElementById('manage-tags-total-count');
+  const searchInput = document.getElementById('manage-tags-search-input');
+  if (!container) return;
+
+  const query = (searchInput ? searchInput.value : '').trim().toLowerCase().replace(/^#/, '');
+  const allTags = (state.customTags || []).filter(t => t && !t.startsWith('ROLE_') && !t.startsWith('UPROG:') && !t.startsWith('USTATS:') && !t.startsWith('DEL_'));
+
+  const filtered = query
+    ? allTags.filter(t => t.toLowerCase().includes(query))
+    : allTags;
+
+  filtered.sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+
+  if (countEl) {
+    countEl.textContent = `${allTags.length} tag(s) configuré(s)${query ? ` · ${filtered.length} affiché(s)` : ''}`;
+  }
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div class="p-6 text-center text-xs text-slate-500 italic">
+        ${query ? `Aucun tag ne correspond à "#${escapeHtml(query)}"` : "Aucun tag créé pour le moment."}
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = '';
+  filtered.forEach(tag => {
+    const qCount = (state.questions || []).filter(q => (q.tags || []).includes(tag)).length;
+    const cCount = (state.cases || []).filter(c => (c.tags || []).includes(tag)).length;
+    const total = qCount + cCount;
+
+    const row = document.createElement('div');
+    row.className = "flex items-center justify-between py-2.5 px-3 hover:bg-slate-800/50 rounded-2xl transition border border-transparent hover:border-slate-800";
+
+    row.innerHTML = `
+      <div class="flex items-center space-x-3 min-w-0">
+        <span class="px-2.5 py-1 rounded-xl bg-teal-500/10 border border-teal-500/25 text-teal-300 font-mono text-xs font-bold truncate">
+          #${escapeHtml(tag)}
+        </span>
+        <span class="text-[11px] ${total > 0 ? 'text-slate-400 font-mono' : 'text-slate-500 italic'}">
+          ${total > 0 ? `${qCount} QCM${cCount > 0 ? ` · ${cCount} DP` : ''}` : 'Inutilisé (0)'}
+        </span>
+      </div>
+      <div class="flex items-center space-x-1.5 shrink-0">
+        <button type="button" onclick="renameTagPrompt('${escapeJsString(tag)}')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border border-slate-700/60 text-xs font-semibold transition flex items-center space-x-1" title="Renommer ou fusionner ce tag">
+          <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+          <span>Renommer</span>
+        </button>
+        <button type="button" onclick="deleteTag('${escapeJsString(tag)}')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-700/60 text-xs font-semibold transition flex items-center space-x-1" title="Supprimer ce tag">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+    `;
+    container.appendChild(row);
+  });
+
+  if (window.lucide) lucide.createIcons();
+}
+window.renderManageTagsList = renderManageTagsList;
+
+function submitNewTagInManager(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const input = document.getElementById('manage-tags-new-input');
+  if (!input) return;
+  const val = input.value.trim().replace(/^#/, '');
+  if (!val) return;
+  createNewGlobalTag(val);
+  input.value = '';
+  renderManageTagsList();
+  showRewardToast(`Tag #${val} créé avec succès !`, 'check-circle');
+}
+window.submitNewTagInManager = submitNewTagInManager;
+
+function renameTagPrompt(currentTag) {
+  const newName = prompt(`Renommer le tag #${currentTag} :\n\n(Astuce : si vous saisissez le nom d'un tag existant, ils seront automatiquement fusionnés)`, currentTag);
+  if (newName === null) return;
+  const clean = newName.trim().replace(/^#/, '');
+  if (!clean) {
+    alert("Le nom du tag ne peut pas être vide.");
+    return;
+  }
+  renameTag(currentTag, clean);
+}
+window.renameTagPrompt = renameTagPrompt;
+
+async function renameTag(oldTag, newTag) {
+  const cleanOld = (oldTag || '').trim().replace(/^#/, '');
+  const cleanNew = (newTag || '').trim().replace(/^#/, '');
+
+  if (!cleanOld || !cleanNew) {
+    alert("Le nom du tag ne peut pas être vide.");
+    return false;
+  }
+  if (cleanOld === cleanNew) return false;
+
+  const isMerge = (state.customTags || []).some(t => t.toLowerCase() === cleanNew.toLowerCase() && t !== cleanOld);
+  const affectedQuestions = (state.questions || []).filter(q => (q.tags || []).includes(cleanOld));
+  const affectedCases = (state.cases || []).filter(c => (c.tags || []).includes(cleanOld));
+
+  const confirmMsg = `Renommer le tag #${cleanOld} en #${cleanNew} ?\n\n` +
+    `• ${affectedQuestions.length} question(s) QCM seront mises à jour\n` +
+    `• ${affectedCases.length} Dossier(s) Progressif(s) seront mis à jour\n` +
+    (isMerge ? `\n⚠️ Le tag #${cleanNew} existe déjà : ils seront fusionnés ensemble !\n` : '') +
+    `\nCette modification sera sauvegardée et synchronisée pour toute l'équipe.`;
+
+  if (!confirm(confirmMsg)) return false;
+
+  // 1. Mettre à jour state.customTags
+  const updatedTags = [];
+  let addedNew = false;
+  for (const t of (state.customTags || [])) {
+    if (t === cleanOld) {
+      if (!updatedTags.includes(cleanNew)) {
+        updatedTags.push(cleanNew);
+        addedNew = true;
+      }
+    } else if (t.toLowerCase() === cleanNew.toLowerCase()) {
+      if (!updatedTags.includes(cleanNew)) {
+        updatedTags.push(cleanNew);
+        addedNew = true;
+      }
+    } else {
+      updatedTags.push(t);
+    }
+  }
+  if (!addedNew && !updatedTags.includes(cleanNew)) {
+    updatedTags.push(cleanNew);
+  }
+  state.customTags = updatedTags;
+  saveCustomTags();
+
+  // 2. Mettre à jour la sélection active de l'éditeur si présent
+  if (state.editorSelectedTags && state.editorSelectedTags.has(cleanOld)) {
+    state.editorSelectedTags.delete(cleanOld);
+    state.editorSelectedTags.add(cleanNew);
+  }
+
+  // 3. Mettre à jour les questions en mémoire et localement
+  affectedQuestions.forEach(q => {
+    const set = new Set((q.tags || []).map(t => t === cleanOld ? cleanNew : t));
+    q.tags = Array.from(set);
+  });
+  saveQuestions();
+
+  // 4. Mettre à jour les DP en mémoire et localement
+  affectedCases.forEach(c => {
+    const set = new Set((c.tags || []).map(t => t === cleanOld ? cleanNew : t));
+    c.tags = Array.from(set);
+  });
+  saveCases();
+
+  // 5. Synchronisation Cloud Supabase
+  if (supabaseClient) {
+    try {
+      await dbUpsertTag(cleanNew);
+      await supabaseClient.from('custom_tags').delete().eq('name', cleanOld);
+      await supabaseClient.from('custom_tags').upsert({ name: 'DEL_T:' + cleanOld });
+
+      const qPayloads = affectedQuestions.map(q => formatQuestionForSupabase(q));
+      if (qPayloads.length > 0) {
+        await supabaseClient.from('questions').upsert(qPayloads);
+      }
+      for (const c of affectedCases) {
+        await dbUpsertCase(c);
+      }
+    } catch (e) {
+      console.warn("Erreur sync Supabase renameTag:", e);
+    }
+  }
+
+  renderManageTagsList();
+  showRewardToast(`Tag #${cleanOld} renommé en #${cleanNew} (${affectedQuestions.length} QCM mis à jour) !`, 'check-circle');
+  return true;
+}
+window.renameTag = renameTag;
+
+async function deleteTag(tagName) {
+  const clean = (tagName || '').trim().replace(/^#/, '');
+  if (!clean) return false;
+
+  const affectedQuestions = (state.questions || []).filter(q => (q.tags || []).includes(clean));
+  const affectedCases = (state.cases || []).filter(c => (c.tags || []).includes(clean));
+
+  const confirmMsg = `Supprimer définitivement le tag #${clean} ?\n\n` +
+    `• Il sera retiré de la liste des tags\n` +
+    `• Il sera détaché de ${affectedQuestions.length} question(s) QCM\n` +
+    `• Il sera détaché de ${affectedCases.length} Dossier(s) Progressif(s)\n\n` +
+    `Cette suppression sera synchronisée pour toute l'équipe.`;
+
+  if (!confirm(confirmMsg)) return false;
+
+  // 1. Retirer de state.customTags
+  state.customTags = (state.customTags || []).filter(t => t !== clean);
+  saveCustomTags();
+
+  // 2. Retirer de la sélection active de l'éditeur si présent
+  if (state.editorSelectedTags && state.editorSelectedTags.has(clean)) {
+    state.editorSelectedTags.delete(clean);
+  }
+
+  // 3. Retirer des questions
+  affectedQuestions.forEach(q => {
+    q.tags = (q.tags || []).filter(t => t !== clean);
+  });
+  saveQuestions();
+
+  // 4. Retirer des cas
+  affectedCases.forEach(c => {
+    c.tags = (c.tags || []).filter(t => t !== clean);
+  });
+  saveCases();
+
+  // 5. Synchroniser Cloud Supabase
+  if (supabaseClient) {
+    try {
+      await supabaseClient.from('custom_tags').delete().eq('name', clean);
+      await supabaseClient.from('custom_tags').upsert({ name: 'DEL_T:' + clean });
+
+      const qPayloads = affectedQuestions.map(q => formatQuestionForSupabase(q));
+      if (qPayloads.length > 0) {
+        await supabaseClient.from('questions').upsert(qPayloads);
+      }
+      for (const c of affectedCases) {
+        await dbUpsertCase(c);
+      }
+    } catch (e) {
+      console.warn("Erreur sync Supabase deleteTag:", e);
+    }
+  }
+
+  renderManageTagsList();
+  showRewardToast(`Tag #${clean} supprimé avec succès !`, 'trash-2');
+  return true;
+}
+window.deleteTag = deleteTag;
+
+async function cleanUnusedTags() {
+  const allTags = (state.customTags || []).filter(t => t && !t.startsWith('ROLE_') && !t.startsWith('UPROG:') && !t.startsWith('USTATS:') && !t.startsWith('DEL_'));
+  const unused = allTags.filter(t => {
+    const qCount = (state.questions || []).filter(q => (q.tags || []).includes(t)).length;
+    const cCount = (state.cases || []).filter(c => (c.tags || []).includes(t)).length;
+    return (qCount + cCount) === 0;
+  });
+
+  if (unused.length === 0) {
+    alert("Aucun tag inutilisé. Tous les tags existants sont associés à au moins une question ou un cas.");
+    return;
+  }
+
+  const confirmMsg = `Purger ${unused.length} tag(s) inutilisé(s) ?\n\n` +
+    unused.map(t => `• #${t}`).join('\n') +
+    `\n\nCes tags ne sont rattachés à aucun QCM ni cas clinique.`;
+
+  if (!confirm(confirmMsg)) return;
+
+  for (const t of unused) {
+    state.customTags = (state.customTags || []).filter(x => x !== t);
+    if (supabaseClient) {
+      try {
+        await supabaseClient.from('custom_tags').delete().eq('name', t);
+        await supabaseClient.from('custom_tags').upsert({ name: 'DEL_T:' + t });
+      } catch (e) {}
+    }
+  }
+
+  saveCustomTags();
+  renderManageTagsList();
+  showRewardToast(`${unused.length} tag(s) inutilisé(s) purgé(s) !`, 'sparkles');
+}
+window.cleanUnusedTags = cleanUnusedTags;
 
 // =========================================================================
 // --- MODIFICATION & FUSION GLOBALE : ORGANES, CATÉGORIES ET LÉSIONS ---

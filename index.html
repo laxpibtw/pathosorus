@@ -480,7 +480,13 @@
               <i data-lucide="tag" class="w-4 h-4"></i>
               <span>Sessions Ciblées par Tag (#)</span>
             </h3>
-            <span class="text-[11px] text-slate-400">Cliquez sur un tag pour réviser cette modalité</span>
+            <div class="flex items-center space-x-2">
+              <span class="hidden sm:inline text-[11px] text-slate-400">Cliquez pour réviser</span>
+              <button type="button" onclick="openManageTagsModal()" class="text-xs font-semibold text-teal-400 hover:text-teal-300 flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/25 transition shadow-sm" title="Gérer, renommer ou supprimer des tags">
+                <i data-lucide="settings" class="w-3.5 h-3.5"></i>
+                <span>Gérer les tags</span>
+              </button>
+            </div>
           </div>
           <div id="home-tags-container" class="flex flex-wrap gap-2 pt-1"></div>
         </div>
@@ -1261,7 +1267,10 @@
           <div class="space-y-2 pt-2 border-t border-slate-800">
             <div class="flex items-center justify-between">
               <label class="block text-xs font-semibold text-slate-300">Tags de la question (Cliquez pour activer/désactiver)</label>
-              <span class="text-[11px] text-slate-500 font-medium">Optionnel</span>
+              <button type="button" onclick="openManageTagsModal()" class="text-[11px] text-teal-400 hover:text-teal-300 font-semibold flex items-center space-x-1 transition">
+                <i data-lucide="settings" class="w-3 h-3"></i>
+                <span>Gérer les tags</span>
+              </button>
             </div>
             <div id="editor-tags-pills" class="flex flex-wrap gap-1.5 p-3 rounded-xl bg-slate-950 border border-slate-800"></div>
             <div class="flex items-center space-x-2 pt-1">
@@ -1355,7 +1364,10 @@
           <div class="space-y-2 pt-2 border-t border-slate-800">
             <div class="flex items-center justify-between">
               <label class="block text-xs font-semibold text-slate-300">Tags du Dossier (Cliquez pour activer/désactiver)</label>
-              <span class="text-[11px] text-slate-500 font-medium">Optionnel</span>
+              <button type="button" onclick="openManageTagsModal()" class="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center space-x-1 transition">
+                <i data-lucide="settings" class="w-3 h-3"></i>
+                <span>Gérer les tags</span>
+              </button>
             </div>
             <div id="dp-tags-pills" class="flex flex-wrap gap-1.5 p-3 rounded-xl bg-slate-950 border border-slate-800"></div>
             <div class="flex items-center space-x-2 pt-1">
@@ -2051,6 +2063,60 @@
 
       <div class="pt-2 flex justify-end">
         <button type="button" onclick="closeManageStatementTemplatesModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Gestionnaire des Tags (#) : Modification, Renommage & Suppression -->
+  <div id="modal-manage-tags" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 space-y-4 shadow-2xl relative max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center">
+            <i data-lucide="tag" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Gestionnaire des Tags (#)</h3>
+            <p class="text-xs text-slate-400">Modifier, renommer ou supprimer des tags pour toute l'équipe.</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeManageTagsModal()" class="text-slate-500 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Formulaire d'ajout rapide de nouveau tag -->
+      <form onsubmit="submitNewTagInManager(event)" class="space-y-1.5">
+        <label class="block text-xs font-semibold text-slate-300">Ajouter un nouveau tag</label>
+        <div class="flex items-center space-x-2">
+          <input type="text" id="manage-tags-new-input" placeholder="ex: Cytogénétique, Ki67, Lame..." class="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono">
+          <button type="submit" class="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shrink-0 shadow-sm shadow-teal-500/20">
+            <i data-lucide="plus" class="w-4 h-4"></i>
+            <span>Créer</span>
+          </button>
+        </div>
+      </form>
+
+      <!-- Barre de recherche / filtrage et bouton purger inutilisés -->
+      <div class="flex items-center justify-between gap-2 pt-1">
+        <div class="relative flex-1">
+          <i data-lucide="search" class="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5"></i>
+          <input type="text" id="manage-tags-search-input" oninput="renderManageTagsList()" placeholder="Rechercher parmi les tags..." class="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono">
+        </div>
+        <button type="button" onclick="cleanUnusedTags()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 border border-slate-700/60 text-[11px] font-semibold transition flex items-center space-x-1 shrink-0" title="Supprimer tous les tags rattachés à 0 question et 0 DP">
+          <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i>
+          <span>Purger inutilisés</span>
+        </button>
+      </div>
+
+      <!-- Liste scrollable des tags -->
+      <div id="manage-tags-list" class="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-72 divide-y divide-slate-800/40">
+        <!-- Rempli dynamiquement -->
+      </div>
+
+      <div class="pt-2 flex justify-between items-center border-t border-slate-800">
+        <span id="manage-tags-total-count" class="text-xs text-slate-500 font-mono">0 tags configurés</span>
+        <button type="button" onclick="closeManageTagsModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">Fermer</button>
       </div>
     </div>
   </div>
