@@ -86,10 +86,17 @@ alter table public.user_question_progress add column if not exists last_xp_date 
 alter table public.user_question_progress add column if not exists trophy_eligible boolean default true;
 
 
--- 5. Protection : nettoyer Samy uniquement s'il a encore l'ancien bug des 46 faux trophées contaminés
+-- 5. Protection : nettoyer Samy pour ne conserver strictement que ses 6 trophées légitimes
 delete from public.user_trophies
 where lower(trim(user_email)) = 'belhadef.samy@gmail.com'
-  and (select count(*) from public.user_trophies where lower(trim(user_email)) = 'belhadef.samy@gmail.com') >= 40;
+  and badge_id not in (
+    'organ_orl_10',
+    'organ_ovaire_10',
+    'organ_ovaire_25',
+    'organ_placenta_10',
+    'organ_col_ut_rin_10',
+    'organ_col_ut_rin_25'
+  );
 
 
 -- 6. Migration automatique des trophées légitimes existants de Pierre-Alain vers public.user_trophies

@@ -2460,20 +2460,48 @@ async function fetchSupabaseData(silent = false) {
             });
             // Si la table user_trophies a des entrées enregistrées, elle fait foi absolue
             if (dbUserTrophies.length > 0) {
-              state.stats.unlockedBadges = trophiesMap;
-              localStorage.setItem(getUserStatsStorageKey(currentEmail), JSON.stringify(state.stats));
+              // Protection anti-contamination pour Samy : si anomalie (> 6 trophées pour <= 15 réponses)
+              if (currentEmail.toLowerCase().trim() === 'belhadef.samy@gmail.com' && Object.keys(trophiesMap).length > 6) {
+                const cleanSamyBadges = {
+                  "organ_orl_10": 1793392939292,
+                  "organ_ovaire_10": 1793392939292,
+                  "organ_ovaire_25": 1793392939292,
+                  "organ_placenta_10": 1793392939292,
+                  "organ_col_ut_rin_10": 1793392939292,
+                  "organ_col_ut_rin_25": 1793392939292
+                };
+                state.stats.unlockedBadges = cleanSamyBadges;
+                localStorage.setItem(getUserStatsStorageKey(currentEmail), JSON.stringify(state.stats));
+                // Purger dans Supabase immédiatement toute entrée parasite
+                try {
+                  await supabaseClient.from('user_trophies')
+                    .delete()
+                    .eq('user_email', 'belhadef.samy@gmail.com')
+                    .not('badge_id', 'in', '(organ_orl_10,organ_ovaire_10,organ_ovaire_25,organ_placenta_10,organ_col_ut_rin_10,organ_col_ut_rin_25)');
+                } catch(e) {}
+              } else {
+                state.stats.unlockedBadges = trophiesMap;
+                localStorage.setItem(getUserStatsStorageKey(currentEmail), JSON.stringify(state.stats));
+              }
             }
           }
         } catch(trophyErr) {}
 
-        // Assainissement immédiat du cache local de Samy s'il était contaminé par 46 trophées
+        // Assainissement immédiat du cache local de Samy s'il était contaminé par de faux trophées
         try {
           const samyLocalKey = 'pathosorus_stats_belhadef_samy_gmail_com';
           const samyRaw = localStorage.getItem(samyLocalKey);
           if (samyRaw) {
             const parsedSamy = JSON.parse(samyRaw);
-            if (parsedSamy && parsedSamy.unlockedBadges && Object.keys(parsedSamy.unlockedBadges).length > 10) {
-              parsedSamy.unlockedBadges = {};
+            if (parsedSamy && parsedSamy.unlockedBadges && Object.keys(parsedSamy.unlockedBadges).length > 6) {
+              parsedSamy.unlockedBadges = {
+                "organ_orl_10": 1793392939292,
+                "organ_ovaire_10": 1793392939292,
+                "organ_ovaire_25": 1793392939292,
+                "organ_placenta_10": 1793392939292,
+                "organ_col_ut_rin_10": 1793392939292,
+                "organ_col_ut_rin_25": 1793392939292
+              };
               localStorage.setItem(samyLocalKey, JSON.stringify(parsedSamy));
             }
           }
@@ -2524,13 +2552,6 @@ async function fetchSupabaseData(silent = false) {
             cloudProgressMap.set(row.question_id, up);
             state.userProgress[row.question_id] = up;
           });
-        }
-
-        // 0C. Synchroniser immédiatement tous les trophées légitimes débloqués
-        if (currentEmail) {
-          try {
-            await checkAndUnlockBadges();
-          } catch(e) {}
         }
       } catch (sqlErr) {}
     }
@@ -2812,6 +2833,13 @@ async function fetchSupabaseData(silent = false) {
         }
       });
       localStorage.setItem(userStorageKey, JSON.stringify(syncProg));
+
+      // Synchronisation sécurisée des trophées une fois les questions personnelles chargées et isolées
+      if (currentEmail) {
+        try {
+          await checkAndUnlockBadges();
+        } catch(e) {}
+      }
     }
 
     if (!cRes.error && cRes.data) {
@@ -3996,6 +4024,14 @@ function getBadgesStatus() {
       missingCount = isNowMet ? 0 : 1;
     }
 
+    if ((b.id === 'patho_phyllode_3' || b.id === 'patho_phyllode_filou')) {
+      const correctPhyllodes = (state.questions || []).filter(q => (q.entity || '').toLowerCase().includes('phyllode') && isQuestionTrophyQualified(q)).length;
+      if (correctPhyllodes === 0) {
+        if (state.stats.unlockedBadges && state.stats.unlockedBadges[b.id]) delete state.stats.unlockedBadges[b.id];
+        if (state.stats.badgeHistory && state.stats.badgeHistory[b.id]) delete state.stats.badgeHistory[b.id];
+      }
+    }
+
     const isUnlockedInStats = !!(state.stats.unlockedBadges && state.stats.unlockedBadges[b.id]);
     const wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[b.id] && state.stats.badgeHistory[b.id].unlocked);
     const isUnlocked = wasUnlocked || isNowMet;
@@ -4048,7 +4084,17 @@ function getBadgesStatus() {
       const wasUnlocked = isUnlockedInStats || !!(state.stats.badgeHistory && state.stats.badgeHistory[badgeId] && state.stats.badgeHistory[badgeId].unlocked);
 
       // Attribution indépendante et permanente : une fois obtenu, le trophée reste acquis à vie
-      const isUnlocked = wasUnlocked || isNowMet;
+      // Règle de cohérence stricte : impossible de détenir un trophée sur un organe avec 0 question réussie
+      let isUnlocked = (wasUnlocked && qualifiedInOrg > 0) || isNowMet;
+      if (qualifiedInOrg === 0) {
+        isUnlocked = false;
+        if (state.stats.unlockedBadges && state.stats.unlockedBadges[badgeId]) {
+          delete state.stats.unlockedBadges[badgeId];
+        }
+        if (state.stats.badgeHistory && state.stats.badgeHistory[badgeId]) {
+          delete state.stats.badgeHistory[badgeId];
+        }
+      }
       const status = isUnlocked ? 'unlocked' : 'locked';
 
       if (isUnlocked && !isUnlockedInStats) {
@@ -4967,10 +5013,20 @@ async function renderLeaderboard(forceRefresh = false) {
   const samyXp = (samyLocalStats && typeof samyLocalStats.xp === 'number') ? samyLocalStats.xp : 0;
   const samyCorrect = (samyLocalStats && typeof samyLocalStats.totalCorrect === 'number') ? samyLocalStats.totalCorrect : 0;
   let samyBadges = (samyLocalStats && samyLocalStats.unlockedBadges) ? Object.keys(samyLocalStats.unlockedBadges).length : 0;
-  if (samyBadges >= 40 && samyCorrect <= 10) {
+  if (samyBadges > 6 && samyCorrect <= 15) {
     samyBadges = 6;
     if (samyLocalStats) {
-      delete samyLocalStats.unlockedBadges;
+      samyLocalStats.unlockedBadges = {
+        "organ_orl_10": 1793392939292,
+        "organ_ovaire_10": 1793392939292,
+        "organ_ovaire_25": 1793392939292,
+        "organ_placenta_10": 1793392939292,
+        "organ_col_ut_rin_10": 1793392939292,
+        "organ_col_ut_rin_25": 1793392939292
+      };
+      try {
+        localStorage.setItem(samyKey, JSON.stringify(samyLocalStats));
+      } catch(e) {}
     }
   }
 
@@ -5086,9 +5142,9 @@ async function renderLeaderboard(forceRefresh = false) {
                   badgesCount = Math.max(badgesCount, liveUnlocked);
                 }
 
-                // Assainissement strict pour Samy s'il était contaminé par l'ancien bug des 46 faux trophées
-                if (em === 'belhadef.samy@gmail.com' && badgesCount >= 40 && (row.total_correct || 0) <= 10) {
-                  badgesCount = trophiesCountMap.get(em) || 6;
+                // Assainissement strict pour Samy s'il était contaminé par l'ancien bug des faux trophées
+                if (em === 'belhadef.samy@gmail.com' && badgesCount > 6 && (row.total_correct || 0) <= 15) {
+                  badgesCount = 6;
                 }
 
                 const cleanObj = {
@@ -5097,7 +5153,16 @@ async function renderLeaderboard(forceRefresh = false) {
                   streak: typeof row.streak === 'number' ? row.streak : 1,
                   totalCorrect: typeof row.total_correct === 'number' ? row.total_correct : 0,
                   totalAnswered: typeof row.total_answered === 'number' ? row.total_answered : 0,
-                  unlockedBadges: em === 'belhadef.samy@gmail.com' && Object.keys(badgesMap).length >= 40 && (row.total_correct || 0) <= 10 ? {} : badgesMap,
+                  unlockedBadges: em === 'belhadef.samy@gmail.com' && (Object.keys(badgesMap).length > 6 || badgesCount > 6) && (row.total_correct || 0) <= 15
+                    ? {
+                        "organ_orl_10": 1793392939292,
+                        "organ_ovaire_10": 1793392939292,
+                        "organ_ovaire_25": 1793392939292,
+                        "organ_placenta_10": 1793392939292,
+                        "organ_col_ut_rin_10": 1793392939292,
+                        "organ_col_ut_rin_25": 1793392939292
+                      }
+                    : badgesMap,
                   completedCategories: row.completed_categories || []
                 };
                 try {
