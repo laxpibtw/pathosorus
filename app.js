@@ -2179,6 +2179,12 @@ function openQuestionDetail(id) {
     hierarchyBadge.textContent = `${q.organ} > ${q.category} > ${q.entity}`;
   }
 
+  const authorNameEl = document.getElementById('detail-author-name');
+  if (authorNameEl) {
+    const authorInfo = getQuestionAuthorDisplayName(q);
+    authorNameEl.textContent = `Rédigé par ${authorInfo.short || authorInfo.name}`;
+  }
+
   state.detailModalQuestionId = q.id;
 
   const editBtn = document.getElementById('btn-detail-edit');
@@ -2724,9 +2730,13 @@ async function fetchSupabaseData(silent = false) {
           ];
         }
 
-        const expImgs = (Array.isArray(q.explanationimages) && q.explanationimages.length > 0)
+        let qImgs = (Array.isArray(q.images) && q.images.length > 0 && q.images.some(img => img && img.url && img.url.trim()))
+          ? q.images
+          : ((localQ && Array.isArray(localQ.images) && localQ.images.length > 0) ? localQ.images : (q.images || []));
+
+        const expImgs = (Array.isArray(q.explanationimages) && q.explanationimages.length > 0 && q.explanationimages.some(img => img && img.url && img.url.trim()))
           ? q.explanationimages
-          : ((Array.isArray(q.explanationImages) && q.explanationImages.length > 0) ? q.explanationImages : (localQ?.explanationImages || []));
+          : ((Array.isArray(q.explanationImages) && q.explanationImages.length > 0) ? q.explanationImages : (localQ?.explanationImages || localQ?.explanationimages || []));
 
         const accAns = (Array.isArray(q.acceptedanswers) && q.acceptedanswers.length > 0)
           ? q.acceptedanswers
@@ -2746,7 +2756,7 @@ async function fetchSupabaseData(silent = false) {
           acceptedAnswers: accAns,
           acceptedanswers: accAns,
           tags: q.tags || [],
-          images: q.images || [],
+          images: qImgs,
           explanationImages: expImgs,
           explanationimages: expImgs,
           difficulty: diff,
@@ -2947,23 +2957,35 @@ async function fetchSupabaseData(silent = false) {
     renderBank();
     renderTrophiesView();
 
+    const detailModal = document.getElementById('modal-question-detail');
+    if (detailModal && !detailModal.classList.contains('hidden') && state.detailModalQuestionId) {
+      openQuestionDetail(state.detailModalQuestionId);
+    }
+
     const newTotal = (state.questions ? state.questions.length : 0) + (state.cases ? state.cases.length : 0);
     if (newTotal !== previousTotal && previousTotal > 0) {
       console.log(`⚡ Banque Cloud synchronisée : ${previousTotal} -> ${newTotal} éléments`);
       showToast(`⚡ Banque Cloud synchronisée : ${newTotal} éléments (${state.questions.length} questions, ${state.cases.length} cas)`, "success");
     }
 
-    // Auto-push vers Supabase : si des questions ont des justifications locales mais vides sur Supabase
+    // Auto-push vers Supabase : si des questions ont des justifications ou des lames locales mais vides sur Supabase
     if (state.currentUser && isCreator() && qRes.data) {
       const rawCloudMap = new Map(qRes.data.map(item => [item.id, item]));
       const needSync = state.questions.filter(q => {
-        const hasNotes = Array.isArray(q.optionExplanations) && q.optionExplanations.some(e => e && e.trim());
         const rawQ = rawCloudMap.get(q.id);
-        const remoteEmpty = !rawQ || !rawQ.optionexplanations || rawQ.optionexplanations.length === 0 || rawQ.optionexplanations.every(e => !e || !e.trim());
-        return hasNotes && remoteEmpty;
+        const hasNotes = Array.isArray(q.optionExplanations) && q.optionExplanations.some(e => e && e.trim());
+        const remoteEmptyNotes = !rawQ || !rawQ.optionexplanations || rawQ.optionexplanations.length === 0 || rawQ.optionexplanations.every(e => !e || !e.trim());
+
+        const hasLocalImgs = Array.isArray(q.images) && q.images.some(img => img && img.url && img.url.trim());
+        const remoteEmptyImgs = !rawQ || !Array.isArray(rawQ.images) || rawQ.images.length === 0 || rawQ.images.every(img => !img || !img.url || !img.url.trim());
+
+        const hasLocalExpImgs = Array.isArray(q.explanationImages) && q.explanationImages.some(img => img && img.url && img.url.trim());
+        const remoteEmptyExpImgs = !rawQ || !Array.isArray(rawQ.explanationimages) || rawQ.explanationimages.length === 0 || rawQ.explanationimages.every(img => !img || !img.url || !img.url.trim());
+
+        return (hasNotes && remoteEmptyNotes) || (hasLocalImgs && remoteEmptyImgs) || (hasLocalExpImgs && remoteEmptyExpImgs);
       });
       if (needSync.length > 0) {
-        console.log(`☁️ Auto-push vers Supabase de ${needSync.length} question(s) avec justifications...`);
+        console.log(`☁️ Auto-push vers Supabase de ${needSync.length} question(s) (justifications / lames)...`);
         Promise.all(needSync.map(q => dbUpsertQuestion(q))).catch(e => console.warn("Auto-push background:", e));
       }
     }
@@ -8227,16 +8249,19 @@ async function attachFilesToEditor(files) {
     state.editorUploadedImages.push(imgObj);
 
     // Upload vers Supabase Storage en tâche de fond sans bloquer l'aperçu local instantané
-    uploadImageFile(file).then(cloudUrl => {
+    const uploadPromise = uploadImageFile(file).then(cloudUrl => {
       if (cloudUrl) {
         imgObj.url = cloudUrl;
       }
       imgObj.uploading = false;
+      delete imgObj._uploadPromise;
       renderEditorUploadedImages();
     }).catch(err => {
       console.warn("Upload lame background err:", err);
       imgObj.uploading = false;
+      delete imgObj._uploadPromise;
     });
+    Object.defineProperty(imgObj, '_uploadPromise', { value: uploadPromise, enumerable: false, configurable: true });
   }
 
   if (!state.editorSelectedTags.has('Lame')) {
@@ -8313,16 +8338,19 @@ async function attachExplanationFilesToEditor(files) {
     };
     state.editorUploadedExplanationImages.push(imgObj);
 
-    uploadImageFile(file).then(cloudUrl => {
+    const uploadPromise = uploadImageFile(file).then(cloudUrl => {
       if (cloudUrl) {
         imgObj.url = cloudUrl;
       }
       imgObj.uploading = false;
+      delete imgObj._uploadPromise;
       renderEditorUploadedExplanationImages();
     }).catch(err => {
       console.warn("Upload schéma background err:", err);
       imgObj.uploading = false;
+      delete imgObj._uploadPromise;
     });
+    Object.defineProperty(imgObj, '_uploadPromise', { value: uploadPromise, enumerable: false, configurable: true });
   }
   renderEditorUploadedExplanationImages();
   showToast(`💡 ${validFiles.length} schéma${validFiles.length > 1 ? 's' : ''} d'explication ajouté${validFiles.length > 1 ? 's' : ''} !`);
@@ -9106,7 +9134,18 @@ async function handleSaveQuestionForm(e) {
 
     // 4. Synchronisation Supabase en arrière-plan sans JAMAIS figer l'écran
     if (supabaseClient && savedQuestion) {
-      dbUpsertQuestionWithTimeout(savedQuestion, 7000).then(res => {
+      const pendingUploads = [
+        ...(savedQuestion.images || []),
+        ...(savedQuestion.explanationImages || [])
+      ].map(img => img && img._uploadPromise).filter(Boolean);
+
+      Promise.allSettled(pendingUploads).then(() => {
+        if (savedQuestion.explanationImages) {
+          savedQuestion.explanationimages = [...savedQuestion.explanationImages];
+        }
+        saveQuestions();
+        return dbUpsertQuestionWithTimeout(savedQuestion, 7000);
+      }).then(res => {
         if (res && res.success) {
           delete savedQuestion._localUnsynced;
           delete savedQuestion._localEdited;
