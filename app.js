@@ -412,6 +412,14 @@ function setupRealtimeSync() {
         console.log("⚡ [Realtime] Changement détecté tags/progression/tombstones:", payload.eventType);
         fetchSupabaseData(true);
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_stats' }, (payload) => {
+        console.log("⚡ [Realtime] Changement détecté user_stats (XP/Série):", payload.eventType);
+        fetchSupabaseData(true);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_question_progress' }, (payload) => {
+        console.log("⚡ [Realtime] Changement détecté progression questions:", payload.eventType);
+        fetchSupabaseData(true);
+      })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           console.log("⚡ [Realtime] Connecté aux changements en direct multi-appareils");
@@ -584,6 +592,8 @@ async function saveSupabaseSettings() {
 // --- MODULE D'AUTHENTIFICATION & GESTION DES RÔLES (CRÉATEUR / LECTEUR) ---
 // =========================================================================
 
+let _cloudStatsLoadedForEmail = '';
+
 async function initAuth() {
   const rememberedUser = getActiveUser();
   if (rememberedUser) {
@@ -602,22 +612,24 @@ async function initAuth() {
         const em = session.user.email.trim().toLowerCase();
         localStorage.setItem('pathosorus_current_email', em);
         localStorage.removeItem('pathosorus_explicit_logout');
-        loadUserStatsForAccount(em);
-        loadUserProgressForAccount(em);
+        if (_cloudStatsLoadedForEmail !== em) {
+          loadUserStatsForAccount(em);
+          loadUserProgressForAccount(em);
+        }
       }
       await fetchCurrentUserRole();
-      checkDailyStreak();
     } else {
       const active = getActiveUser();
       if (active) {
         state.currentUser = active;
         if (active.email) {
           const em = active.email.trim().toLowerCase();
-          loadUserStatsForAccount(em);
-          loadUserProgressForAccount(em);
+          if (_cloudStatsLoadedForEmail !== em) {
+            loadUserStatsForAccount(em);
+            loadUserProgressForAccount(em);
+          }
         }
         await fetchCurrentUserRole();
-        checkDailyStreak();
       } else {
         state.currentUser = null;
         state.currentRole = 'reader';
@@ -625,7 +637,7 @@ async function initAuth() {
     }
     updateUserRoleUI();
 
-    // Charger les questions et synchroniser la progression liée au compte depuis le Cloud (Cloud-Authoritative)
+    // Charger d'abord les statistiques et la progression depuis le Cloud AVANT de calculer la série quotidienne
     await fetchSupabaseData(true);
     if (state.currentUser) {
       checkDailyStreak();
@@ -639,16 +651,18 @@ async function initAuth() {
           const em = session.user.email.trim().toLowerCase();
           localStorage.setItem('pathosorus_current_email', em);
           localStorage.removeItem('pathosorus_explicit_logout');
-          loadUserStatsForAccount(em);
-          loadUserProgressForAccount(em);
+          if (_cloudStatsLoadedForEmail !== em) {
+            loadUserStatsForAccount(em);
+            loadUserProgressForAccount(em);
+          }
         }
         await fetchCurrentUserRole();
-        checkDailyStreak();
         await fetchSupabaseData(true);
         checkDailyStreak();
       } else if (event === 'SIGNED_OUT') {
         const explicitLogout = localStorage.getItem('pathosorus_explicit_logout') === 'true';
         if (explicitLogout) {
+          _cloudStatsLoadedForEmail = '';
           state.currentUser = null;
           state.currentRole = 'reader';
           state.stats = getDefaultStats();
@@ -897,14 +911,47 @@ async function syncStatsToCloud() {
   if (!supabaseClient || !state.currentUser) return;
   const currentEmail = getCurrentUserEmail();
   try {
-    const statsPayload = {
-      ...state.stats,
-      customBadges: state.customBadges || []
-    };
-
     // 0. Sauvegarde principale dans la table SQL public.user_stats (Source de vérité universelle)
+    // Protection anti-écrasement multi-Mac : fusionner systématiquement par Math.max avec le Cloud
     if (currentEmail) {
       try {
+        const { data: existingRemote } = await supabaseClient
+          .from('user_stats')
+          .select('*')
+          .eq('email', currentEmail)
+          .maybeSingle();
+
+        if (existingRemote) {
+          const remoteXp = typeof existingRemote.xp === 'number' ? existingRemote.xp : 0;
+          const remoteStreak = typeof existingRemote.streak === 'number' ? existingRemote.streak : 1;
+          const remoteCorrect = typeof existingRemote.total_correct === 'number' ? existingRemote.total_correct : 0;
+          const remoteAnswered = typeof existingRemote.total_answered === 'number' ? existingRemote.total_answered : 0;
+          const remoteCats = Array.isArray(existingRemote.completed_categories) ? existingRemote.completed_categories : [];
+          const remoteBadges = (existingRemote.unlocked_badges && typeof existingRemote.unlocked_badges === 'object') ? existingRemote.unlocked_badges : {};
+
+          const mergedXp = Math.max(state.stats.xp || 0, remoteXp);
+          const mergedStreak = Math.max(state.stats.streak || 1, remoteStreak);
+          const mergedCorrect = Math.max(state.stats.totalCorrect || 0, remoteCorrect);
+          const mergedAnswered = Math.max(state.stats.totalAnswered || 0, remoteAnswered);
+          const mergedCats = Array.from(new Set([...remoteCats, ...(state.stats.completedCategories || [])]));
+          const mergedBadges = { ...remoteBadges, ...(state.stats.unlockedBadges || {}) };
+
+          const hadHigherOnCloud = mergedXp > (state.stats.xp || 0) || mergedCorrect > (state.stats.totalCorrect || 0) || mergedStreak > (state.stats.streak || 1);
+
+          state.stats.xp = mergedXp;
+          state.stats.streak = mergedStreak;
+          state.stats.totalCorrect = mergedCorrect;
+          state.stats.totalAnswered = mergedAnswered;
+          state.stats.completedCategories = mergedCats;
+          state.stats.unlockedBadges = mergedBadges;
+
+          if (hadHigherOnCloud) {
+            localStorage.setItem(getUserStatsStorageKey(currentEmail), JSON.stringify(state.stats));
+            localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+            updateTopBar();
+          }
+        }
+
         await supabaseClient.from('user_stats').upsert({
           email: currentEmail,
           name: getQuestionAuthorDisplayName(currentEmail).name,
@@ -922,6 +969,11 @@ async function syncStatsToCloud() {
         }, { onConflict: 'email' });
       } catch (statsErr) {}
     }
+
+    const statsPayload = {
+      ...state.stats,
+      customBadges: state.customBadges || []
+    };
 
     // 1. Sauvegarde dans la table public.profiles (si UUID valide)
     if (isValidUUID(state.currentUser.id)) {
@@ -1456,7 +1508,6 @@ async function handleAuthLoginSubmit(e) {
     (async () => {
       try {
         await fetchCurrentUserRole();
-        checkDailyStreak();
         await fetchSupabaseData(true);
         checkDailyStreak();
         updateTopBar();
@@ -1505,6 +1556,7 @@ function handleAuthLogout() {
   }
 
   // 2. Déconnexion locale INSTANTANÉE (0 ms, aucun blocage UI)
+  _cloudStatsLoadedForEmail = '';
   localStorage.setItem('pathosorus_explicit_logout', 'true');
   localStorage.removeItem('pathosorus_current_email');
   state.currentUser = null;
@@ -1533,14 +1585,21 @@ function handleAuthLogout() {
   showToast("Vous avez été déconnecté avec succès.", "info");
   if (window.lucide) lucide.createIcons();
 
-  // 5. Synchronisation Cloud sortante et signOut Supabase en tâche de fond complètement détachée
+  // 5. Synchronisation Cloud sortante sécurisée (uniquement si XP local >= Cloud) et signOut Supabase
   (async () => {
     if (previousEmail && supabaseClient) {
       try {
-        let statsToPush = previousStats;
-        const tagName = `USTATS:${previousEmail}:${JSON.stringify(statsToPush)}`;
-        await supabaseClient.from('custom_tags').upsert({ name: tagName }, { onConflict: 'name' });
-        await supabaseClient.from('custom_tags').delete().ilike('name', `USTATS:${previousEmail}:%`).neq('name', tagName);
+        const { data: remoteRow } = await supabaseClient
+          .from('user_stats')
+          .select('xp, streak, total_correct, total_answered')
+          .eq('email', previousEmail)
+          .maybeSingle();
+        const remoteXp = (remoteRow && typeof remoteRow.xp === 'number') ? remoteRow.xp : 0;
+        if ((previousStats.xp || 0) >= remoteXp) {
+          const tagName = `USTATS:${previousEmail}:${JSON.stringify(previousStats)}`;
+          await supabaseClient.from('custom_tags').upsert({ name: tagName }, { onConflict: 'name' });
+          await supabaseClient.from('custom_tags').delete().ilike('name', `USTATS:${previousEmail}:%`).neq('name', tagName);
+        }
       } catch(e) {}
     }
     if (supabaseClient) {
@@ -2384,14 +2443,16 @@ window.handleEditFromDetailModal = handleEditFromDetailModal;
 
 let isFetchingSupabase = false;
 let pendingFetchRequest = false;
+let _activeFetchPromise = null;
 
 async function fetchSupabaseData(silent = false) {
   if (!supabaseClient) return;
   if (isFetchingSupabase) {
     pendingFetchRequest = true;
-    return;
+    return _activeFetchPromise;
   }
   isFetchingSupabase = true;
+  _activeFetchPromise = (async () => {
   const previousTotal = (state.questions ? state.questions.length : 0) + (state.cases ? state.cases.length : 0);
   try {
     const promises = [
@@ -2411,6 +2472,61 @@ async function fetchSupabaseData(silent = false) {
     const cloudProgressMap = new Map();
     const currentEmail = getCurrentUserEmail();
 
+    // 0-PRE. Lire les tags USTATS et UPROG dans custom_tags pour fusion sans perte
+    let parsedUStatsTag = null;
+    if (tRes && !tRes.error && tRes.data && Array.isArray(tRes.data)) {
+      // Mettre en cache local les stats de chaque confrère (Pierre-Alain, Samy...)
+      tRes.data.forEach(t => {
+        if (t && t.name && t.name.startsWith('USTATS:')) {
+          try {
+            const parts = t.name.split(':', 2);
+            const raw = t.name.substring(parts[0].length + parts[1].length + 2);
+            const em = parts[1].trim().toLowerCase();
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+              const k = getUserStatsStorageKey(em);
+              const existingRaw = localStorage.getItem(k);
+              let existingObj = null;
+              if (existingRaw) {
+                try { existingObj = JSON.parse(existingRaw); } catch(e) {}
+              }
+              if (!existingObj || (typeof parsed.xp === 'number' && parsed.xp >= (existingObj.xp || 0))) {
+                localStorage.setItem(k, JSON.stringify(parsed));
+              }
+              if (currentEmail && em === currentEmail) {
+                parsedUStatsTag = parsed;
+              }
+            }
+          } catch(e) {}
+        }
+      });
+
+      if (currentEmail) {
+        const uProgTag = tRes.data.find(t => t.name && t.name.startsWith(`UPROG:${currentEmail}:`));
+        if (uProgTag) {
+          try {
+            localStorage.setItem('pathosorus_last_synced_uprog_tag', uProgTag.name);
+            const raw = uProgTag.name.substring(`UPROG:${currentEmail}:`.length);
+            const parsed = JSON.parse(raw);
+            if (!state.userProgress) state.userProgress = {};
+            Object.keys(parsed).forEach(qId => {
+              const item = parsed[qId];
+              const upObj = {
+                question_id: qId,
+                stats: item.s || item.stats || getDefaultQuestionStats(),
+                mastered: Boolean(item.m ?? item.mastered),
+                flagged: Boolean(item.f ?? item.flagged)
+              };
+              cloudProgressMap.set(qId, upObj);
+              state.userProgress[qId] = upObj;
+            });
+          } catch (e) {
+            console.warn("Erreur parse UPROG:", e);
+          }
+        }
+      }
+    }
+
     let hasSqlStats = false;
     // 0A. Source de vérité officielle SQL : public.user_stats & public.user_question_progress
     if (currentEmail && supabaseClient) {
@@ -2423,33 +2539,87 @@ async function fetchSupabaseData(silent = false) {
 
         if (dbUserStats) {
           hasSqlStats = true;
-          const cloudLastActive = dbUserStats.last_active_date || null;
+          _cloudStatsLoadedForEmail = currentEmail;
+          const cloudLastActive = dbUserStats.last_active_date || (parsedUStatsTag && parsedUStatsTag.lastActiveDate) || null;
           const localLastActive = localStorage.getItem('pathosorus_last_active_' + currentEmail) || (state.stats && state.stats.lastActiveDate) || null;
-          const preservedLastActive = cloudLastActive || localLastActive || null;
-          
-          const currentMemStreak = (state.stats && typeof state.stats.streak === 'number') ? state.stats.streak : 1;
+          const preservedLastActive = (cloudLastActive && localLastActive)
+            ? (cloudLastActive >= localLastActive ? cloudLastActive : localLastActive)
+            : (cloudLastActive || localLastActive || null);
+
+          // Lire le cache local strictement associé à cet email
+          let localAccountStats = null;
+          try {
+            const rawLocal = localStorage.getItem(getUserStatsStorageKey(currentEmail));
+            if (rawLocal) localAccountStats = JSON.parse(rawLocal);
+          } catch(e) {}
+
+          const localXp = Math.max(
+            (state.stats && typeof state.stats.xp === 'number') ? state.stats.xp : 0,
+            (localAccountStats && typeof localAccountStats.xp === 'number') ? localAccountStats.xp : 0
+          );
+          const tagXp = (parsedUStatsTag && typeof parsedUStatsTag.xp === 'number') ? parsedUStatsTag.xp : 0;
+          const dbXp = typeof dbUserStats.xp === 'number' ? dbUserStats.xp : 0;
+          const effectiveXp = Math.max(localXp, tagXp, dbXp);
+
+          const currentMemStreak = Math.max(
+            (state.stats && typeof state.stats.streak === 'number') ? state.stats.streak : 1,
+            (localAccountStats && typeof localAccountStats.streak === 'number') ? localAccountStats.streak : 1,
+            (parsedUStatsTag && typeof parsedUStatsTag.streak === 'number') ? parsedUStatsTag.streak : 1
+          );
           const dbStreak = typeof dbUserStats.streak === 'number' ? dbUserStats.streak : 1;
           const effectiveStreak = Math.max(currentMemStreak, dbStreak);
+
+          const effectiveAnswered = Math.max(
+            (state.stats && typeof state.stats.totalAnswered === 'number') ? state.stats.totalAnswered : 0,
+            (localAccountStats && typeof localAccountStats.totalAnswered === 'number') ? localAccountStats.totalAnswered : 0,
+            (parsedUStatsTag && typeof parsedUStatsTag.totalAnswered === 'number') ? parsedUStatsTag.totalAnswered : 0,
+            typeof dbUserStats.total_answered === 'number' ? dbUserStats.total_answered : 0
+          );
+
+          const effectiveCorrect = Math.max(
+            (state.stats && typeof state.stats.totalCorrect === 'number') ? state.stats.totalCorrect : 0,
+            (localAccountStats && typeof localAccountStats.totalCorrect === 'number') ? localAccountStats.totalCorrect : 0,
+            (parsedUStatsTag && typeof parsedUStatsTag.totalCorrect === 'number') ? parsedUStatsTag.totalCorrect : 0,
+            typeof dbUserStats.total_correct === 'number' ? dbUserStats.total_correct : 0
+          );
+
+          const mergedCats = Array.from(new Set([
+            ...(Array.isArray(dbUserStats.completed_categories) ? dbUserStats.completed_categories : []),
+            ...((parsedUStatsTag && Array.isArray(parsedUStatsTag.completedCategories)) ? parsedUStatsTag.completedCategories : []),
+            ...((state.stats && Array.isArray(state.stats.completedCategories)) ? state.stats.completedCategories : [])
+          ]));
 
           state.stats = {
             ...getDefaultStats(),
             lastActiveDate: preservedLastActive,
-            xp: typeof dbUserStats.xp === 'number' ? dbUserStats.xp : 0,
+            xp: effectiveXp,
             creatorXp: (state.stats && state.stats.creatorXp) || 0,
             streak: effectiveStreak,
-            totalAnswered: typeof dbUserStats.total_answered === 'number' ? dbUserStats.total_answered : 0,
-            totalCorrect: typeof dbUserStats.total_correct === 'number' ? dbUserStats.total_correct : 0,
-            unlockedBadges: dbUserStats.unlocked_badges || {},
-            completedCategories: dbUserStats.completed_categories || [],
-            equippedTitle: dbUserStats.equipped_title || '',
+            totalAnswered: effectiveAnswered,
+            totalCorrect: effectiveCorrect,
+            unlockedBadges: {
+              ...((parsedUStatsTag && parsedUStatsTag.unlockedBadges) || {}),
+              ...(dbUserStats.unlocked_badges || {}),
+              ...((state.stats && state.stats.unlockedBadges) || {})
+            },
+            completedCategories: mergedCats,
+            equippedTitle: dbUserStats.equipped_title || (state.stats && state.stats.equippedTitle) || '',
             equippedTitleBadgeId: (state.stats && state.stats.equippedTitleBadgeId) || '',
-            trophyCustomNames: dbUserStats.trophy_custom_names || {}
+            trophyCustomNames: {
+              ...(dbUserStats.trophy_custom_names || {}),
+              ...((state.stats && state.stats.trophyCustomNames) || {})
+            }
           };
           localStorage.setItem(getUserStatsStorageKey(currentEmail), JSON.stringify(state.stats));
           if (preservedLastActive) {
             localStorage.setItem('pathosorus_last_active_' + currentEmail, preservedLastActive);
           }
           localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
+
+          // Si ce Mac possédait un XP supérieur non encore reflété dans user_stats, pousser immédiatement vers le Cloud
+          if (effectiveXp > dbXp || effectiveCorrect > (dbUserStats.total_correct || 0)) {
+            syncStatsToCloud();
+          }
         }
 
         // 0B. Trophées individuels officiels depuis public.user_trophies (Source de vérité 100% transparente)
@@ -2536,23 +2706,25 @@ async function fetchSupabaseData(silent = false) {
           .eq('user_email', currentEmail);
 
         if (dbProg && Array.isArray(dbProg) && dbProg.length > 0) {
-          state.userProgress = {};
+          if (!state.userProgress) state.userProgress = {};
           dbProg.forEach(row => {
+            const existingUp = cloudProgressMap.get(row.question_id);
+            const exSt = (existingUp && existingUp.stats) ? existingUp.stats : {};
             const up = {
               question_id: row.question_id,
               stats: {
-                seen: row.seen || 0,
-                correct: row.correct || 0,
-                consecutiveCorrect: row.consecutive_correct || 0,
-                intervalDays: row.interval_days || 0,
-                lastReviewed: row.last_reviewed,
-                nextReviewDate: row.next_review_date,
-                lastFailedDate: row.last_failed_date || null,
-                lastCorrectDate: row.last_correct_date || null,
-                lastXpDate: row.last_xp_date || null,
-                trophyEligible: row.trophy_eligible !== undefined ? Boolean(row.trophy_eligible) : false
+                seen: Math.max(row.seen || 0, exSt.seen || 0),
+                correct: Math.max(row.correct || 0, exSt.correct || 0),
+                consecutiveCorrect: row.consecutive_correct ?? exSt.consecutiveCorrect ?? 0,
+                intervalDays: row.interval_days || exSt.intervalDays || 0,
+                lastReviewed: row.last_reviewed || exSt.lastReviewed || null,
+                nextReviewDate: row.next_review_date || exSt.nextReviewDate || null,
+                lastFailedDate: row.last_failed_date || exSt.lastFailedDate || null,
+                lastCorrectDate: row.last_correct_date || exSt.lastCorrectDate || null,
+                lastXpDate: row.last_xp_date || exSt.lastXpDate || null,
+                trophyEligible: row.trophy_eligible !== undefined ? Boolean(row.trophy_eligible) : Boolean(exSt.trophyEligible)
               },
-              mastered: Boolean(row.mastered),
+              mastered: Boolean(row.mastered || (existingUp && existingUp.mastered)),
               flagged: Boolean(row.flagged)
             };
             cloudProgressMap.set(row.question_id, up);
@@ -2562,73 +2734,24 @@ async function fetchSupabaseData(silent = false) {
       } catch (sqlErr) {}
     }
 
-    // 0. Progression et Stats depuis custom_tags (UPROG & USTATS) - Fallback uniquement si user_stats non disponible
-    if (!hasSqlStats && tRes && !tRes.error && tRes.data && Array.isArray(tRes.data) && currentEmail) {
-      const uProgTag = tRes.data.find(t => t.name && t.name.startsWith(`UPROG:${currentEmail}:`));
-      if (uProgTag) {
-        try {
-          const raw = uProgTag.name.substring(`UPROG:${currentEmail}:`.length);
-          const parsed = JSON.parse(raw);
-          state.userProgress = {};
-          Object.keys(parsed).forEach(qId => {
-            const item = parsed[qId];
-            cloudProgressMap.set(qId, {
-              question_id: qId,
-              stats: item.s || item.stats || getDefaultQuestionStats(),
-              mastered: Boolean(item.m ?? item.mastered),
-              flagged: Boolean(item.f ?? item.flagged)
-            });
-            state.userProgress[qId] = cloudProgressMap.get(qId);
-          });
-        } catch (e) {
-          console.warn("Erreur parse UPROG:", e);
-        }
-      }
-
-      // Mettre en cache local les stats de chaque confrère (Pierre-Alain, Samy...)
-      if (tRes && tRes.data && Array.isArray(tRes.data)) {
-        tRes.data.forEach(t => {
-          if (t && t.name && t.name.startsWith('USTATS:')) {
-            try {
-              const parts = t.name.split(':', 2);
-              const raw = t.name.substring(parts[0].length + parts[1].length + 2);
-              const em = parts[1].trim().toLowerCase();
-              const parsed = JSON.parse(raw);
-              if (parsed && typeof parsed === 'object') {
-                const k = getUserStatsStorageKey(em);
-                localStorage.setItem(k, JSON.stringify(parsed));
-              }
-            } catch(e) {}
-          }
-        });
-      }
-
-      const uStatsTag = tRes.data.find(t => t.name && t.name.startsWith(`USTATS:${currentEmail}:`));
-      if (uStatsTag) {
-        try {
-          const raw = uStatsTag.name.substring(`USTATS:${currentEmail}:`.length);
-          const parsedStats = JSON.parse(raw);
-          if (parsedStats && typeof parsedStats === 'object') {
-            state.stats = {
-              ...getDefaultStats(),
-              ...parsedStats,
-              xp: typeof parsedStats.xp === 'number' ? parsedStats.xp : (state.stats.xp || 0),
-              creatorXp: typeof parsedStats.creatorXp === 'number' ? parsedStats.creatorXp : (state.stats.creatorXp || 0),
-              streak: typeof parsedStats.streak === 'number' ? parsedStats.streak : 1,
-              totalAnswered: typeof parsedStats.totalAnswered === 'number' ? parsedStats.totalAnswered : 0,
-              totalCorrect: typeof parsedStats.totalCorrect === 'number' ? parsedStats.totalCorrect : 0,
-              unlockedBadges: parsedStats.unlockedBadges || {},
-              badgeHistory: parsedStats.badgeHistory || {},
-              completedCategories: parsedStats.completedCategories || []
-            };
-            const userStatsKey = getUserStatsStorageKey(currentEmail);
-            localStorage.setItem(userStatsKey, JSON.stringify(state.stats));
-            localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
-          }
-        } catch (e) {
-          console.warn("Erreur parse USTATS:", e);
-        }
-      }
+    // 0. Fallback sur USTATS si user_stats non disponible
+    if (!hasSqlStats && parsedUStatsTag && currentEmail) {
+      _cloudStatsLoadedForEmail = currentEmail;
+      state.stats = {
+        ...getDefaultStats(),
+        ...parsedUStatsTag,
+        xp: Math.max(typeof parsedUStatsTag.xp === 'number' ? parsedUStatsTag.xp : 0, (state.stats && state.stats.xp) || 0),
+        creatorXp: typeof parsedUStatsTag.creatorXp === 'number' ? parsedUStatsTag.creatorXp : (state.stats.creatorXp || 0),
+        streak: Math.max(typeof parsedUStatsTag.streak === 'number' ? parsedUStatsTag.streak : 1, (state.stats && state.stats.streak) || 1),
+        totalAnswered: Math.max(typeof parsedUStatsTag.totalAnswered === 'number' ? parsedUStatsTag.totalAnswered : 0, (state.stats && state.stats.totalAnswered) || 0),
+        totalCorrect: Math.max(typeof parsedUStatsTag.totalCorrect === 'number' ? parsedUStatsTag.totalCorrect : 0, (state.stats && state.stats.totalCorrect) || 0),
+        unlockedBadges: parsedUStatsTag.unlockedBadges || {},
+        badgeHistory: parsedUStatsTag.badgeHistory || {},
+        completedCategories: parsedUStatsTag.completedCategories || []
+      };
+      const userStatsKey = getUserStatsStorageKey(currentEmail);
+      localStorage.setItem(userStatsKey, JSON.stringify(state.stats));
+      localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(state.stats));
     }
 
     // 1. Depuis la table user_progress
@@ -2996,11 +3119,14 @@ async function fetchSupabaseData(silent = false) {
     if (!silent) alert("Erreur lors de la récupération des données : " + err.message);
   } finally {
     isFetchingSupabase = false;
+    _activeFetchPromise = null;
     if (pendingFetchRequest) {
       pendingFetchRequest = false;
       setTimeout(() => fetchSupabaseData(true), 250);
     }
   }
+  })();
+  return _activeFetchPromise;
 }
 
 async function syncLocalToSupabase() {
@@ -3661,7 +3787,7 @@ function switchTab(viewId) {
     }
   }
 
-  if (viewId === 'bank' || viewId === 'play') {
+  if (viewId === 'bank' || viewId === 'play' || viewId === 'trophies') {
     if (typeof checkForRemoteChanges === 'function') {
       checkForRemoteChanges();
     }
@@ -5192,13 +5318,20 @@ async function renderLeaderboard(forceRefresh = false) {
                 } catch(e) {}
 
                 if (state.currentUser && state.currentUser.email && em === state.currentUser.email.trim().toLowerCase()) {
+                  cleanObj.xp = Math.max(state.stats.xp || 0, cleanObj.xp || 0);
+                  cleanObj.streak = Math.max(state.stats.streak || 1, cleanObj.streak || 1);
+                  cleanObj.totalCorrect = Math.max(state.stats.totalCorrect || 0, cleanObj.totalCorrect || 0);
+                  cleanObj.totalAnswered = Math.max(state.stats.totalAnswered || 0, cleanObj.totalAnswered || 0);
                   state.stats = {
                     ...state.stats,
                     ...cleanObj,
                     unlockedBadges: (state.stats && state.stats.unlockedBadges && Object.keys(state.stats.unlockedBadges).length > 0)
-                      ? state.stats.unlockedBadges
+                      ? { ...cleanObj.unlockedBadges, ...state.stats.unlockedBadges }
                       : cleanObj.unlockedBadges
                   };
+                  try {
+                    localStorage.setItem(getUserStatsStorageKey(em), JSON.stringify(state.stats));
+                  } catch(e) {}
                   updateTopBar();
                 }
 
@@ -13347,6 +13480,32 @@ async function checkForRemoteChanges() {
     if (!needSync) {
       const curEmail = getCurrentUserEmail();
       if (curEmail) {
+        try {
+          const { data: remoteUserStats } = await supabaseClient
+            .from('user_stats')
+            .select('xp, streak, total_correct, total_answered')
+            .eq('email', curEmail)
+            .maybeSingle();
+          if (remoteUserStats) {
+            const localXp = (state.stats && typeof state.stats.xp === 'number') ? state.stats.xp : 0;
+            const localCorrect = (state.stats && typeof state.stats.totalCorrect === 'number') ? state.stats.totalCorrect : 0;
+            const localStreak = (state.stats && typeof state.stats.streak === 'number') ? state.stats.streak : 1;
+            if (
+              (typeof remoteUserStats.xp === 'number' && remoteUserStats.xp !== localXp) ||
+              (typeof remoteUserStats.total_correct === 'number' && remoteUserStats.total_correct !== localCorrect) ||
+              (typeof remoteUserStats.streak === 'number' && remoteUserStats.streak !== localStreak)
+            ) {
+              console.log(`🔄 Changement XP/Stats Cloud détecté (Cloud: ${remoteUserStats.xp} XP, Local: ${localXp} XP)`);
+              needSync = true;
+            }
+          }
+        } catch(e) {}
+      }
+    }
+
+    if (!needSync) {
+      const curEmail = getCurrentUserEmail();
+      if (curEmail) {
         const { data: progTag } = await supabaseClient
           .from('custom_tags')
           .select('name')
@@ -13354,7 +13513,7 @@ async function checkForRemoteChanges() {
           .limit(1);
         if (progTag && progTag.length > 0) {
           const lastTag = localStorage.getItem('pathosorus_last_synced_uprog_tag');
-          if (lastTag && lastTag !== progTag[0].name) {
+          if (!lastTag || lastTag !== progTag[0].name) {
             console.log("🔄 Changement de progression utilisateur Cloud détecté");
             needSync = true;
           }
