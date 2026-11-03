@@ -724,8 +724,8 @@ async function syncUserProgressTagToCloud() {
     const payload = JSON.stringify(compactMap);
     const tagName = `UPROG:${email}:${payload}`;
 
+    await supabaseClient.from('custom_tags').delete().ilike('name', `UPROG:${email}:%`);
     await supabaseClient.from('custom_tags').upsert({ name: tagName }, { onConflict: 'name' });
-    await supabaseClient.from('custom_tags').delete().ilike('name', `UPROG:${email}:%`).neq('name', tagName);
   } catch (err) {
     console.warn("Erreur syncUserProgressTagToCloud:", err);
   }
@@ -749,8 +749,8 @@ async function syncUserStatsTagToCloud() {
     };
     const tagName = `USTATS:${email}:${JSON.stringify(statsPayload)}`;
 
+    await supabaseClient.from('custom_tags').delete().ilike('name', `USTATS:${email}:%`);
     await supabaseClient.from('custom_tags').upsert({ name: tagName }, { onConflict: 'name' });
-    await supabaseClient.from('custom_tags').delete().ilike('name', `USTATS:${email}:%`).neq('name', tagName);
   } catch (err) {
     console.warn("Erreur syncUserStatsTagToCloud:", err);
   }
@@ -2502,7 +2502,7 @@ async function fetchSupabaseData(silent = false) {
       });
 
       if (currentEmail) {
-        const uProgTag = tRes.data.find(t => t.name && t.name.startsWith(`UPROG:${currentEmail}:`));
+        const uProgTag = tRes.data.filter(t => t.name && t.name.startsWith(`UPROG:${currentEmail}:`)).pop();
         if (uProgTag) {
           try {
             localStorage.setItem('pathosorus_last_synced_uprog_tag', uProgTag.name);
@@ -2636,8 +2636,8 @@ async function fetchSupabaseData(silent = false) {
             });
             // Si la table user_trophies a des entrées enregistrées, elle fait foi absolue
             if (dbUserTrophies.length > 0) {
-              // Protection anti-contamination pour Samy : si anomalie (> 6 trophées pour <= 15 réponses)
-              if (currentEmail.toLowerCase().trim() === 'belhadef.samy@gmail.com' && Object.keys(trophiesMap).length > 6) {
+              // Protection anti-contamination pour Samy : uniquement si anomalie massive (>= 30 trophées pour <= 15 réponses)
+              if (currentEmail.toLowerCase().trim() === 'belhadef.samy@gmail.com' && Object.keys(trophiesMap).length >= 30 && (state.stats.totalCorrect || 0) <= 15) {
                 const cleanSamyBadges = {
                   "organ_orl_10": 1793392939292,
                   "organ_ovaire_10": 1793392939292,
@@ -2663,13 +2663,13 @@ async function fetchSupabaseData(silent = false) {
           }
         } catch(trophyErr) {}
 
-        // Assainissement immédiat du cache local de Samy s'il était contaminé par de faux trophées
+        // Assainissement immédiat du cache local de Samy s'il était contaminé par de faux trophées (>= 30 pour <= 15 réponses)
         try {
           const samyLocalKey = 'pathosorus_stats_belhadef_samy_gmail_com';
           const samyRaw = localStorage.getItem(samyLocalKey);
           if (samyRaw) {
             const parsedSamy = JSON.parse(samyRaw);
-            if (parsedSamy && parsedSamy.unlockedBadges && Object.keys(parsedSamy.unlockedBadges).length > 6) {
+            if (parsedSamy && parsedSamy.unlockedBadges && Object.keys(parsedSamy.unlockedBadges).length >= 30 && (parsedSamy.totalCorrect || 0) <= 15) {
               parsedSamy.unlockedBadges = {
                 "organ_orl_10": 1793392939292,
                 "organ_ovaire_10": 1793392939292,
@@ -5161,7 +5161,7 @@ async function renderLeaderboard(forceRefresh = false) {
   const samyXp = (samyLocalStats && typeof samyLocalStats.xp === 'number') ? samyLocalStats.xp : 0;
   const samyCorrect = (samyLocalStats && typeof samyLocalStats.totalCorrect === 'number') ? samyLocalStats.totalCorrect : 0;
   let samyBadges = (samyLocalStats && samyLocalStats.unlockedBadges) ? Object.keys(samyLocalStats.unlockedBadges).length : 0;
-  if (samyBadges > 6 && samyCorrect <= 15) {
+  if (samyBadges >= 30 && samyCorrect <= 15) {
     samyBadges = 6;
     if (samyLocalStats) {
       samyLocalStats.unlockedBadges = {
@@ -5290,8 +5290,8 @@ async function renderLeaderboard(forceRefresh = false) {
                   badgesCount = Math.max(badgesCount, liveUnlocked);
                 }
 
-                // Assainissement strict pour Samy s'il était contaminé par l'ancien bug des faux trophées
-                if (em === 'belhadef.samy@gmail.com' && badgesCount > 6 && (row.total_correct || 0) <= 15) {
+                // Assainissement strict pour Samy s'il était contaminé par l'ancien bug des faux trophées (>= 30 pour <= 15 réponses)
+                if (em === 'belhadef.samy@gmail.com' && badgesCount >= 30 && (row.total_correct || 0) <= 15) {
                   badgesCount = 6;
                 }
 
@@ -5301,7 +5301,7 @@ async function renderLeaderboard(forceRefresh = false) {
                   streak: typeof row.streak === 'number' ? row.streak : 1,
                   totalCorrect: typeof row.total_correct === 'number' ? row.total_correct : 0,
                   totalAnswered: typeof row.total_answered === 'number' ? row.total_answered : 0,
-                  unlockedBadges: em === 'belhadef.samy@gmail.com' && (Object.keys(badgesMap).length > 6 || badgesCount > 6) && (row.total_correct || 0) <= 15
+                  unlockedBadges: em === 'belhadef.samy@gmail.com' && (Object.keys(badgesMap).length >= 30 || badgesCount >= 30) && (row.total_correct || 0) <= 15
                     ? {
                         "organ_orl_10": 1793392939292,
                         "organ_ovaire_10": 1793392939292,
@@ -13479,28 +13479,42 @@ async function checkForRemoteChanges() {
 
     if (!needSync) {
       const curEmail = getCurrentUserEmail();
-      if (curEmail) {
-        try {
-          const { data: remoteUserStats } = await supabaseClient
-            .from('user_stats')
-            .select('xp, streak, total_correct, total_answered')
-            .eq('email', curEmail)
-            .maybeSingle();
-          if (remoteUserStats) {
-            const localXp = (state.stats && typeof state.stats.xp === 'number') ? state.stats.xp : 0;
-            const localCorrect = (state.stats && typeof state.stats.totalCorrect === 'number') ? state.stats.totalCorrect : 0;
-            const localStreak = (state.stats && typeof state.stats.streak === 'number') ? state.stats.streak : 1;
-            if (
-              (typeof remoteUserStats.xp === 'number' && remoteUserStats.xp !== localXp) ||
-              (typeof remoteUserStats.total_correct === 'number' && remoteUserStats.total_correct !== localCorrect) ||
-              (typeof remoteUserStats.streak === 'number' && remoteUserStats.streak !== localStreak)
-            ) {
-              console.log(`🔄 Changement XP/Stats Cloud détecté (Cloud: ${remoteUserStats.xp} XP, Local: ${localXp} XP)`);
-              needSync = true;
+      try {
+        const { data: allStats } = await supabaseClient
+          .from('user_stats')
+          .select('email, xp, streak, total_correct, total_answered');
+        if (allStats && Array.isArray(allStats)) {
+          const sig = allStats
+            .slice()
+            .sort((a, b) => String(a.email || '').localeCompare(String(b.email || '')))
+            .map(r => `${r.email}:${r.xp}:${r.total_correct}:${r.total_answered}:${r.streak}`)
+            .join('|');
+          if (state._lastAllUserStatsSig && state._lastAllUserStatsSig !== sig) {
+            console.log('🔄 Changement XP/Stats d’un confrère détecté sur le Cloud');
+            if (state.view === 'leaderboard') {
+              renderLeaderboard();
             }
           }
-        } catch(e) {}
-      }
+          state._lastAllUserStatsSig = sig;
+
+          if (curEmail) {
+            const remoteUserStats = allStats.find(r => r && r.email && r.email.trim().toLowerCase() === curEmail);
+            if (remoteUserStats) {
+              const localXp = (state.stats && typeof state.stats.xp === 'number') ? state.stats.xp : 0;
+              const localCorrect = (state.stats && typeof state.stats.totalCorrect === 'number') ? state.stats.totalCorrect : 0;
+              const localStreak = (state.stats && typeof state.stats.streak === 'number') ? state.stats.streak : 1;
+              if (
+                (typeof remoteUserStats.xp === 'number' && remoteUserStats.xp !== localXp) ||
+                (typeof remoteUserStats.total_correct === 'number' && remoteUserStats.total_correct !== localCorrect) ||
+                (typeof remoteUserStats.streak === 'number' && remoteUserStats.streak !== localStreak)
+              ) {
+                console.log(`🔄 Changement XP/Stats Cloud détecté (Cloud: ${remoteUserStats.xp} XP, Local: ${localXp} XP)`);
+                needSync = true;
+              }
+            }
+          }
+        }
+      } catch(e) {}
     }
 
     if (!needSync) {
@@ -13510,6 +13524,7 @@ async function checkForRemoteChanges() {
           .from('custom_tags')
           .select('name')
           .like('name', `UPROG:${curEmail}:%`)
+          .order('created_at', { ascending: false })
           .limit(1);
         if (progTag && progTag.length > 0) {
           const lastTag = localStorage.getItem('pathosorus_last_synced_uprog_tag');
