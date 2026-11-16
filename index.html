@@ -848,7 +848,7 @@
       <div id="trophies-contested-banner" class="hidden"></div>
 
       <!-- Navigation sous-onglets Trophées & Classement -->
-      <div class="flex items-center space-x-2 border-b border-slate-800 pb-3">
+      <div class="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
         <button id="btn-subtab-trophies" onclick="switchTrophiesSubtab('trophies')" class="px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-amber-500 text-slate-950 shadow-sm">
           <i data-lucide="award" class="w-4 h-4"></i>
           <span>🏆 Galerie des Trophées</span>
@@ -856,6 +856,10 @@
         <button id="btn-subtab-leaderboard" onclick="switchTrophiesSubtab('leaderboard')" class="px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-slate-900 text-slate-400 hover:text-white border border-slate-800">
           <i data-lucide="trending-up" class="w-4 h-4 text-indigo-400"></i>
           <span>🏅 Classement de l'Équipe</span>
+        </button>
+        <button id="btn-subtab-organs" onclick="switchTrophiesSubtab('organs')" class="px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-slate-900 text-slate-400 hover:text-white border border-slate-800">
+          <i data-lucide="bar-chart-3" class="w-4 h-4 text-teal-400"></i>
+          <span>📊 Stats par Organe</span>
         </button>
       </div>
 
@@ -930,6 +934,11 @@
       <!-- Contenu Sous-Onglet 2 : Classement de l'Équipe (Leaderboard) -->
       <div id="trophies-leaderboard-container" class="hidden space-y-6">
         <!-- Rendu dynamique par renderLeaderboard() -->
+      </div>
+
+      <!-- Contenu Sous-Onglet 3 : Statistiques détaillées par Organe -->
+      <div id="trophies-organs-container" class="hidden space-y-6">
+        <!-- Rendu dynamique par renderOrganStats() -->
       </div>
 
     </div>

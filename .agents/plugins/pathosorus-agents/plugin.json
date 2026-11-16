@@ -1,0 +1,11 @@
+{
+  "name": "pathosorus-agents",
+  "displayName": "PathoSorus Agents",
+  "description": "Agents spécialisés pour PathoSorus : statistiques entre utilisateurs, génération des redondances de questions et gestion des données / questions.",
+  "version": "1.0.0",
+  "suggestedPrompts": [
+    "Audite la synchronisation des statistiques et duels entre utilisateurs",
+    "Analyse comment les redondances et variantes de questions sont générées",
+    "Vérifie la cohérence entre app.js et supabase_schema.sql pour les questions"
+  ]
+}

@@ -336,6 +336,20 @@ create table if not exists public.user_stats (
   updated_at timestamptz not null default now()
 );
 
+-- Rétrocompatibilité : ajout sans erreur des colonnes manquantes si user_stats existait déjà
+alter table public.user_stats add column if not exists name text not null default '';
+alter table public.user_stats add column if not exists role text not null default 'reader';
+alter table public.user_stats add column if not exists xp integer not null default 0;
+alter table public.user_stats add column if not exists streak integer not null default 1;
+alter table public.user_stats add column if not exists total_correct integer not null default 0;
+alter table public.user_stats add column if not exists total_answered integer not null default 0;
+alter table public.user_stats add column if not exists unlocked_badges jsonb not null default '{}'::jsonb;
+alter table public.user_stats add column if not exists completed_categories jsonb not null default '[]'::jsonb;
+alter table public.user_stats add column if not exists equipped_title text default '';
+alter table public.user_stats add column if not exists trophy_custom_names jsonb default '{}'::jsonb;
+alter table public.user_stats add column if not exists last_active_date date default current_date;
+alter table public.user_stats add column if not exists updated_at timestamptz not null default now();
+
 alter table public.user_stats enable row level security;
 
 drop policy if exists "Lecture publique user_stats" on public.user_stats;
@@ -387,5 +401,26 @@ create policy "Lecture publique user_trophies" on public.user_trophies for selec
 
 drop policy if exists "Écriture user_trophies autorisée" on public.user_trophies;
 create policy "Écriture user_trophies autorisée" on public.user_trophies for all using (true) with check (true);
+
+-- =========================================================
+-- ACTIVATION REALTIME MULTI-POSTES (XP, PROGRESSION, TAGS)
+-- =========================================================
+do $$
+begin
+  alter publication supabase_realtime add table public.user_stats;
+exception when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.user_question_progress;
+exception when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.custom_tags;
+exception when duplicate_object then null;
+end $$;
 
 
