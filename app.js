@@ -2830,10 +2830,37 @@ async function fetchSupabaseData(silent = false) {
           }
         }
 
-        const { data: dbProg } = await supabaseClient
-          .from('user_question_progress')
-          .select('*')
-          .eq('user_email', currentEmail);
+        let dbProg = null;
+        try {
+          const { data: progData, error: dbProgErr } = await supabaseClient
+            .from('user_question_progress')
+            .select('*')
+            .eq('user_email', currentEmail);
+          if (dbProgErr) {
+            console.warn("Erreur lecture user_question_progress:", dbProgErr);
+          } else if (Array.isArray(progData)) {
+            dbProg = progData;
+          }
+        } catch (progEx) {
+          console.warn("Exception lecture user_question_progress:", progEx);
+        }
+
+        if (!dbProg || dbProg.length === 0) {
+          try {
+            const { url, key } = getSupabaseCredentials();
+            if (url && key) {
+              const resp = await fetch(`${url}/rest/v1/user_question_progress?user_email=eq.${encodeURIComponent(currentEmail)}&select=*`, {
+                headers: { apikey: key, Authorization: `Bearer ${key}` }
+              });
+              if (resp.ok) {
+                const json = await resp.json();
+                if (Array.isArray(json) && json.length > 0) dbProg = json;
+              }
+            }
+          } catch (restProgErr) {
+            console.warn("Erreur fallback REST user_question_progress:", restProgErr);
+          }
+        }
 
         if (dbProg && Array.isArray(dbProg) && dbProg.length > 0) {
           if (!state.userProgress) state.userProgress = {};
@@ -2866,7 +2893,9 @@ async function fetchSupabaseData(silent = false) {
           });
         }
         }
-      } catch (sqlErr) {}
+      } catch (sqlErr) {
+        console.warn("Erreur SQL fetchSupabaseData:", sqlErr);
+      }
     }
 
     // 0. Fallback sur USTATS si user_stats non disponible
