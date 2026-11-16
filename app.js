@@ -365,7 +365,6 @@ function isQuestionDue(q) {
   return q.stats.nextReviewDate <= getTodayString();
 }
 
-const DAILY_NEW_CARDS_CAP = 20;
 const SPACED_REPETITION_INTERVALS = [1, 3, 7, 15, 30];
 
 function computeNextReviewSchedule(consecutiveCorrect, isCorrect) {
@@ -2915,6 +2914,24 @@ async function fetchSupabaseData(silent = false) {
       localStorage.setItem('pathosorus_progress_' + state.currentUser.id, JSON.stringify(state.userProgress));
     }
 
+    // Collecte des tombstones Cloud (suppressions expressément validées par un administrateur)
+    const deletedQuestionIds = new Set();
+    const deletedCaseIds = new Set();
+    const deletedTagNames = new Set();
+    const unsyncedQuestionsToPush = [];
+
+    if (tRes && tRes.data && Array.isArray(tRes.data)) {
+      tRes.data.forEach(t => {
+        if (t.name && t.name.startsWith('DEL_Q:')) {
+          deletedQuestionIds.add(t.name.substring(6));
+        } else if (t.name && t.name.startsWith('DEL_C:')) {
+          deletedCaseIds.add(t.name.substring(6));
+        } else if (t.name && t.name.startsWith('DEL_T:')) {
+          deletedTagNames.add(t.name.substring(6));
+        }
+      });
+    }
+
     if (!qRes.error && qRes.data) {
       // Conserver une trace brute et intacte de Supabase pour vérifier les colonnes réellement vides
       const rawCloudQuestionsMap = new Map((qRes.data || []).map(item => [item.id, item]));
@@ -3041,23 +3058,6 @@ async function fetchSupabaseData(silent = false) {
         };
       });
 
-      // Collecte des tombstones Cloud (suppressions expressément validées par un administrateur)
-      const deletedQuestionIds = new Set();
-      const deletedCaseIds = new Set();
-      const deletedTagNames = new Set();
-
-      if (tRes && tRes.data && Array.isArray(tRes.data)) {
-        tRes.data.forEach(t => {
-          if (t.name && t.name.startsWith('DEL_Q:')) {
-            deletedQuestionIds.add(t.name.substring(6));
-          } else if (t.name && t.name.startsWith('DEL_C:')) {
-            deletedCaseIds.add(t.name.substring(6));
-          } else if (t.name && t.name.startsWith('DEL_T:')) {
-            deletedTagNames.add(t.name.substring(6));
-          }
-        });
-      }
-
       // Nettoyage intelligent du cache local de suppressions :
       // Si une question ou un DP est vivant sur Supabase et qu'aucun tombstone DEL_ n'existe,
       // c'est qu'il n'a JAMAIS été supprimé par Pierre-Alain ou Samy. On retire le faux positif local.
@@ -3087,7 +3087,6 @@ async function fetchSupabaseData(silent = false) {
       // FUSION SÉCURISÉE DES QUESTIONS (ZÉRO PERTE DE DONNÉES)
       const validCloudQuestions = cloudQuestions.filter(q => !deletedQuestionIds.has(q.id));
       const cloudQMap = new Map(validCloudQuestions.map(q => [q.id, q]));
-      const unsyncedQuestionsToPush = [];
       const mergedQuestions = [...validCloudQuestions];
 
       (state.questions || []).forEach(localQ => {
@@ -3471,14 +3470,65 @@ async function dbDeleteQuestion(id) {
   }
 }
 
+function formatCaseForSupabase(c) {
+  const authorEmail = c.created_by || ((state.currentUser && state.currentUser.email) ? state.currentUser.email.toLowerCase() : 'padoreau85@gmail.com');
+  const cleanSteps = Array.isArray(c.steps) ? JSON.parse(JSON.stringify(c.steps)) : [];
+  return {
+    id: c.id,
+    created_at: c.created_at || new Date().toISOString(),
+    title: c.title || '',
+    organ: c.organ || '',
+    category: c.category || '',
+    entity: c.entity || '',
+    synopsis: c.synopsis || '',
+    tags: Array.isArray(c.tags) ? c.tags.filter(t => !isSystemTag(t)) : [],
+    steps: cleanSteps,
+    created_by: authorEmail
+  };
+}
+
 async function dbUpsertCase(c) {
   if (!supabaseClient) return { success: true, localOnly: true };
   try {
-    const { error } = await supabaseClient.from('cases').upsert(c);
-    if (error) {
-      console.warn("Erreur upsert case supabase:", error);
-      return { error };
+    const payload = formatCaseForSupabase(c);
+    let res = await supabaseClient.from('cases').upsert(payload);
+
+    if (res.error && (
+      res.error.code === 'PGRST204' ||
+      (res.error.message && (
+        res.error.message.toLowerCase().includes('column') ||
+        res.error.message.toLowerCase().includes('schema cache')
+      ))
+    )) {
+      const msg = (res.error.message || '').toLowerCase();
+      if (msg.includes('created_by')) {
+        console.warn("Colonne created_by absente dans cases, repli sans created_by...", res.error.message);
+        const fallback = { ...payload };
+        delete fallback.created_by;
+        res = await supabaseClient.from('cases').upsert(fallback);
+      }
     }
+
+    if (res.error) {
+      console.warn("Erreur upsert case supabase:", res.error);
+      return { error: res.error };
+    }
+
+    const hadLocalFlags = Boolean(c && (c._localUnsynced || c._localEdited));
+    if (c) {
+      delete c._localUnsynced;
+      delete c._localEdited;
+    }
+    const memCase = c && c.id ? (state.cases || []).find(item => item && item.id === c.id) : null;
+    const memHadFlags = Boolean(memCase && (memCase._localUnsynced || memCase._localEdited));
+    if (memCase) {
+      delete memCase._localUnsynced;
+      delete memCase._localEdited;
+    }
+    if (hadLocalFlags || memHadFlags) {
+      saveCases();
+    }
+
     return { success: true };
   } catch (e) {
     console.warn("Erreur upsert case supabase:", e);
@@ -7005,23 +7055,10 @@ function startIHCQuestionsSession(forceDueOnly = false) {
 }
 window.startIHCQuestionsSession = startIHCQuestionsSession;
 
-function getDueSessionSplit(activeQuestions) {
-  const dueAll = (activeQuestions || []).filter(q => isQuestionDue(q));
-  const dueReviews = dueAll.filter(q => q.stats && q.stats.seen > 0);
-  const newUnseen = dueAll.filter(q => !q.stats || !q.stats.seen);
-  const cappedNewCount = Math.min(newUnseen.length, DAILY_NEW_CARDS_CAP);
-  return {
-    dueReviews,
-    newUnseen,
-    cappedNewCount,
-    totalSessionCount: dueReviews.length + cappedNewCount
-  };
-}
-
 // --- DASHBOARD DE RÉPÉTITION ESPACÉE ---
 function renderSpacedRepetitionDashboard() {
   const activeQuestions = state.questions.filter(q => !q.mastered);
-  const { dueReviews, newUnseen, cappedNewCount, totalSessionCount } = getDueSessionSplit(activeQuestions);
+  const dueQuestions = activeQuestions.filter(q => isQuestionDue(q));
   const masteredCount = state.questions.filter(q => q.mastered).length;
 
   const allSlides = activeQuestions.filter(q => isSlideQuestion(q));
@@ -7032,19 +7069,12 @@ function renderSpacedRepetitionDashboard() {
 
   // 1. Module Répétition du Jour
   const dueBadge = document.getElementById('stat-due-today-count');
-  if (dueBadge) dueBadge.textContent = totalSessionCount;
+  if (dueBadge) dueBadge.textContent = dueQuestions.length;
 
   const dueStatus = document.getElementById('stat-due-today-status');
   if (dueStatus) {
-    if (totalSessionCount > 0) {
-      const details = [];
-      if (dueReviews.length > 0) details.push(`${dueReviews.length} révision(s)`);
-      if (cappedNewCount > 0) {
-        details.push(newUnseen.length > DAILY_NEW_CARDS_CAP
-          ? `${cappedNewCount} nouvelle(s) (plafond ${DAILY_NEW_CARDS_CAP}/j sur ${newUnseen.length} inédites)`
-          : `${cappedNewCount} nouvelle(s)`);
-      }
-      dueStatus.innerHTML = `<span class="text-xs text-amber-400 font-bold">${totalSessionCount} carte(s) aujourd'hui • ${details.join(' + ')}</span>`;
+    if (dueQuestions.length > 0) {
+      dueStatus.innerHTML = `<span class="text-xs text-amber-400 font-bold">${dueQuestions.length} carte(s) à réviser aujourd'hui</span>`;
     } else {
       dueStatus.innerHTML = `<span class="text-xs text-emerald-400 font-semibold flex items-center space-x-1"><i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i><span>À jour pour aujourd'hui ! (0 échue)</span></span>`;
     }
@@ -7055,9 +7085,9 @@ function renderSpacedRepetitionDashboard() {
   const iconDue = document.getElementById('icon-play-due-today');
   if (btnStartDue && labelDue) {
     btnStartDue.disabled = false;
-    if (totalSessionCount > 0) {
+    if (dueQuestions.length > 0) {
       btnStartDue.className = "w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-sm shadow-teal-500/25";
-      labelDue.textContent = `Lancer la session du jour (${totalSessionCount} à revoir)`;
+      labelDue.textContent = `Lancer la session du jour (${dueQuestions.length} à revoir)`;
       if (iconDue) iconDue.setAttribute('data-lucide', 'play');
     } else {
       btnStartDue.className = "w-full py-2.5 px-4 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-bold text-xs flex items-center justify-center space-x-2 transition";
@@ -7226,9 +7256,7 @@ function renderSpacedRepetitionDashboard() {
 
 function startSpacedRepetitionDueSession() {
   const activeQuestions = state.questions.filter(q => !q.mastered);
-  const { dueReviews, newUnseen } = getDueSessionSplit(activeQuestions);
-  const cappedNew = shuffleArrayFisherYates(newUnseen).slice(0, DAILY_NEW_CARDS_CAP);
-  const due = [...dueReviews, ...cappedNew];
+  const due = activeQuestions.filter(q => isQuestionDue(q));
   if (due.length === 0) {
     showToast("🎉 Vos révisions du jour sont déjà toutes terminées ! Pour continuer à vous exercer sans contrainte de planning, lancez 'Entraînement libre' ci-dessous.", "success");
     return;
@@ -7288,7 +7316,7 @@ function chooseReviewInterval(days) {
   targetDate.setDate(targetDate.getDate() + (days === 0 ? 1 : days));
   const nextDateStr = getLocalDateString(targetDate);
 
-  if (!q.stats) q.stats = { seen: 0, correct: 0, consecutiveCorrect: 0 };
+  if (!q.stats) q.stats = getDefaultQuestionStats();
   q.stats.intervalDays = days;
   q.stats.nextReviewDate = nextDateStr;
   q.stats.lastReviewed = new Date().toISOString();
@@ -7304,9 +7332,12 @@ function chooseReviewInterval(days) {
     globalQ.stats = q.stats;
     globalQ.flagged = q.flagged;
     dbSaveUserProgress(globalQ);
+  } else {
+    dbSaveUserProgress(q);
   }
 
   saveQuestions();
+  renderSpacedRepetitionDashboard();
   checkDailyStreak();
   playSound('correct');
   nextSessionQuestion();

@@ -22,6 +22,9 @@
       darkMode: 'class',
       theme: {
         extend: {
+          screens: {
+            xs: '420px',
+          },
           colors: {
             brand: {
               50: '#f0fdfa',
@@ -70,14 +73,14 @@
     }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-teal-500 selection:text-white">
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-teal-500 selection:text-white overflow-x-hidden">
 
   <!-- ================= TOP HEADER ================= -->
   <header class="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80">
-    <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-2 sm:gap-3">
+    <div class="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-1.5 sm:gap-3 min-w-0">
       
       <!-- Brand & Mode Local -->
-      <div class="flex items-center space-x-2 sm:space-x-2.5 shrink-0">
+      <div class="flex items-center space-x-1.5 sm:space-x-2.5 shrink-0 min-w-0">
         <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-teal-500 via-sky-500 to-indigo-500 flex items-center justify-center shadow-md shadow-teal-500/20 shrink-0">
           <i data-lucide="microscope" class="w-4 h-4 text-white"></i>
         </div>
@@ -117,9 +120,9 @@
       </nav>
 
       <!-- Stats Capsule, Comptes & Actions -->
-      <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+      <div class="flex items-center space-x-1 sm:space-x-2 shrink-0 min-w-0">
         <!-- Capsule unique de progression HUD -->
-        <div id="top-user-stats" onclick="switchTab('trophies')" class="hidden cursor-pointer items-center space-x-1.5 sm:space-x-2.5 px-2 sm:px-2.5 py-1 rounded-xl bg-slate-950/80 hover:bg-slate-900 border border-slate-800/80 text-[11px] sm:text-xs transition shadow-sm group" title="Progression Joueur (Cliquez pour afficher les Trophées & XP)">
+        <div id="top-user-stats" onclick="switchTab('trophies')" class="hidden cursor-pointer items-center space-x-1 sm:space-x-2.5 px-1.5 sm:px-2.5 py-1 rounded-xl bg-slate-950/80 hover:bg-slate-900 border border-slate-800/80 text-[11px] sm:text-xs transition shadow-sm group min-w-0" title="Progression Joueur (Cliquez pour afficher les Trophées & XP)">
           <div class="flex items-center space-x-1 text-amber-400 font-bold" title="Série de jours actifs">
             <i data-lucide="flame" class="w-3 sm:w-3.5 h-3 sm:h-3.5 fill-amber-400"></i>
             <span><span id="top-streak">1</span>j</span>
@@ -134,33 +137,33 @@
             <span id="top-xp">0</span><span class="text-[9px] sm:text-[10px] text-indigo-400 font-sans">XP</span>
           </div>
           <span id="top-user-title-sep" class="w-px h-3 bg-slate-800 hidden"></span>
-          <div id="top-user-title" class="hidden items-center space-x-1 text-amber-300 font-extrabold max-w-[140px] truncate" title="Titre honorifique actif">
+          <div id="top-user-title" class="hidden items-center space-x-1 text-amber-300 font-extrabold max-w-[100px] sm:max-w-[140px] truncate" title="Titre honorifique actif">
             <i data-lucide="crown" class="w-3 sm:w-3.5 h-3 sm:h-3.5 text-amber-400 shrink-0"></i>
             <span class="truncate" id="top-user-title-text"></span>
           </div>
         </div>
 
         <!-- Bouton Gestion des Comptes (visible uniquement pour Créateur) -->
-        <button id="btn-accounts-modal" onclick="openAccountsModal()" class="hidden items-center space-x-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-indigo-500/15 text-indigo-300 hover:text-white border border-slate-800 hover:border-indigo-500/40 transition shadow-sm" title="Gérer les comptes collègues">
+        <button id="btn-accounts-modal" onclick="openAccountsModal()" class="hidden items-center space-x-1.5 px-1.5 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-indigo-500/15 text-indigo-300 hover:text-white border border-slate-800 hover:border-indigo-500/40 transition shadow-sm" title="Gérer les comptes collègues">
           <i data-lucide="users" class="w-3.5 h-3.5"></i>
           <span class="hidden xl:inline">Comptes</span>
         </button>
 
         <!-- Bouton Application Apple / PWA -->
-        <button id="btn-apple-app" onclick="openAppleAppModal()" class="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-teal-500/15 via-indigo-500/15 to-purple-500/15 hover:from-teal-500/30 hover:to-indigo-500/30 text-teal-300 hover:text-white transition border border-teal-500/30 flex items-center space-x-1 sm:space-x-1.5 shadow-sm" title="Installer l'application sur iPhone ou Mac">
+        <button id="btn-apple-app" onclick="openAppleAppModal()" class="px-1.5 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-teal-500/15 via-indigo-500/15 to-purple-500/15 hover:from-teal-500/30 hover:to-indigo-500/30 text-teal-300 hover:text-white transition border border-teal-500/30 flex items-center space-x-1 sm:space-x-1.5 shadow-sm" title="Installer l'application sur iPhone ou Mac">
           <i data-lucide="smartphone" class="w-3.5 h-3.5 text-teal-400"></i>
           <span class="hidden sm:inline">App Apple</span>
         </button>
 
 
         <!-- Bouton Synchronisation Instantanée Cloud -->
-        <button id="btn-quick-sync" onclick="syncCloudNow()" class="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-teal-500/15 text-teal-300 hover:text-white transition border border-slate-800 hover:border-teal-500/40 flex items-center space-x-1 sm:space-x-1.5 shadow-sm" title="Synchroniser immédiatement avec la base Cloud">
+        <button id="btn-quick-sync" onclick="syncCloudNow()" class="px-1.5 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-teal-500/15 text-teal-300 hover:text-white transition border border-slate-800 hover:border-teal-500/40 flex items-center space-x-1 sm:space-x-1.5 shadow-sm" title="Synchroniser immédiatement avec la base Cloud">
           <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-teal-400"></i>
           <span class="hidden xl:inline">Sync Cloud</span>
         </button>
 
         <!-- Bouton Connexion / Déconnexion -->
-        <button id="btn-auth-toggle" onclick="toggleAuthModal()" class="px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-slate-800 text-slate-300 hover:text-white transition border border-slate-800 flex items-center space-x-1 sm:space-x-1.5" title="Se connecter ou se déconnecter">
+        <button id="btn-auth-toggle" onclick="toggleAuthModal()" class="px-1.5 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950/80 hover:bg-slate-800 text-slate-300 hover:text-white transition border border-slate-800 flex items-center space-x-1 sm:space-x-1.5" title="Se connecter ou se déconnecter">
           <i data-lucide="log-in" class="w-3.5 h-3.5" id="auth-btn-icon"></i>
           <span id="auth-btn-text" class="hidden sm:inline">Connexion</span>
         </button>
@@ -179,12 +182,12 @@
       <div id="play-view-guest" class="space-y-8 py-4">
 
         <!-- Hero Vitrine -->
-        <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900/90 to-indigo-950/80 border border-slate-800 p-8 sm:p-12 shadow-2xl">
+        <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900/90 to-indigo-950/80 border border-slate-800 p-5 sm:p-10 md:p-12 shadow-2xl">
           <div class="absolute -top-24 -right-24 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none"></div>
           <div class="absolute -bottom-24 -left-24 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
           <div class="relative z-10 max-w-3xl space-y-5">
-            <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20 text-xs font-bold tracking-wide">
+            <div class="inline-flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20 text-xs font-bold tracking-wide">
               <span>🦖 PathoSorus</span>
               <span class="text-slate-600">•</span>
               <span>Entraînement en Anatomie & Cytologie Pathologiques (ACP)</span>
@@ -247,8 +250,8 @@
         </div>
 
         <!-- Bandeau Chiffres Clés & Accès -->
-        <div class="rounded-2xl bg-slate-900 border border-slate-800 p-6 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl">
-          <div class="grid grid-cols-3 gap-6 sm:gap-10 text-center w-full md:w-auto">
+        <div class="rounded-2xl bg-slate-900 border border-slate-800 p-4 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl">
+          <div class="grid grid-cols-3 gap-3 sm:gap-10 text-center w-full md:w-auto">
             <div>
               <div id="guest-stat-questions-count-2" class="text-2xl sm:text-3xl font-extrabold text-teal-400">48</div>
               <div class="text-[11px] text-slate-400 font-medium mt-0.5">Questions validées</div>
@@ -281,7 +284,7 @@
       <div id="play-view-authenticated" class="hidden space-y-6">
         
         <!-- Bannière -->
-        <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 border border-slate-800 p-6 sm:p-7">
+        <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 border border-slate-800 p-4 sm:p-7">
           <div class="relative z-10 max-w-2xl">
             <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/20 text-xs font-semibold mb-2.5">
               <i data-lucide="repeat" class="w-3.5 h-3.5"></i>
@@ -342,7 +345,7 @@
                   <i data-lucide="microscope" class="w-5 h-5"></i>
                 </div>
                 <div>
-                  <h3 class="font-bold text-white text-base flex items-center space-x-1.5">
+                  <h3 class="font-bold text-white text-base flex flex-wrap items-center gap-1.5">
                     <span>Réviser des Lames</span>
                     <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">🔬 Lames</span>
                   </h3>
@@ -376,7 +379,7 @@
                   <i data-lucide="flask-conical" class="w-5 h-5"></i>
                 </div>
                 <div>
-                  <h3 class="font-bold text-white text-base flex items-center space-x-1.5">
+                  <h3 class="font-bold text-white text-base flex flex-wrap items-center gap-1.5">
                     <span>Révision IHC</span>
                     <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 border border-violet-500/30">🧪 #IHC</span>
                   </h3>
@@ -458,14 +461,14 @@
 
         <!-- Section : Dossiers Progressifs (DP) -->
         <div class="space-y-3">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-2">
-              <div class="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center space-x-2 min-w-0">
+              <div class="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center shrink-0">
                 <i data-lucide="layers" class="w-4 h-4"></i>
               </div>
               <h3 class="text-base font-bold text-white">Mes Dossiers Progressifs Clinico-Pathologiques (DP)</h3>
             </div>
-            <button onclick="switchTab('create'); setCreatorMode('dp');" class="text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center space-x-1">
+            <button onclick="switchTab('create'); setCreatorMode('dp');" class="text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center space-x-1 shrink-0">
               <i data-lucide="plus" class="w-3.5 h-3.5"></i>
               <span>Nouveau DP</span>
             </button>
@@ -474,8 +477,8 @@
         </div>
 
         <!-- Raccourcis par Tags (#HES, #IHC, etc.) -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-lg">
-          <div class="flex items-center justify-between">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3 shadow-lg">
+          <div class="flex flex-wrap items-center justify-between gap-2">
             <h3 class="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center space-x-2">
               <i data-lucide="tag" class="w-4 h-4"></i>
               <span>Sessions Ciblées par Tag (#)</span>
@@ -499,7 +502,7 @@
     <div id="view-session" class="app-view hidden max-w-5xl mx-auto space-y-6">
       
       <!-- Barre d'état -->
-      <div class="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl px-5 py-3">
+      <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-2xl px-3.5 sm:px-5 py-3">
         <button onclick="quitCurrentSession()" class="text-xs font-semibold text-slate-400 hover:text-rose-400 flex items-center space-x-1.5 transition">
           <i data-lucide="x" class="w-4 h-4"></i>
           <span>Quitter</span>
@@ -518,7 +521,7 @@
       </div>
 
       <!-- Carte Question -->
-      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-8 shadow-xl space-y-6">
         
         <div class="space-y-2">
           <div class="flex flex-wrap items-center justify-between gap-2 pb-1 border-b border-slate-800/60">
@@ -539,7 +542,7 @@
           </div>
           <!-- Zone Classification : Masquée par défaut pendant l'entraînement pour ne pas donner d'indice -->
           <div id="session-breadcrumb-wrapper" class="space-y-1">
-            <button type="button" id="btn-toggle-organ-hint" onclick="toggleSessionOrganHint()" class="w-full text-left p-2.5 rounded-xl bg-slate-950/70 hover:bg-slate-950 border border-slate-800 hover:border-slate-700 text-xs text-slate-400 hover:text-teal-300 transition flex items-center justify-between group" title="Cliquez si vous avez besoin d'un indice sur l'organe">
+            <button type="button" id="btn-toggle-organ-hint" onclick="toggleSessionOrganHint()" class="w-full text-left p-2.5 rounded-xl bg-slate-950/70 hover:bg-slate-950 border border-slate-800 hover:border-slate-700 text-xs text-slate-400 hover:text-teal-300 transition flex flex-wrap items-center justify-between gap-2 group" title="Cliquez si vous avez besoin d'un indice sur l'organe">
               <span class="flex items-center space-x-2">
                 <i data-lucide="eye-off" id="icon-organ-hint" class="w-3.5 h-3.5 text-slate-500 group-hover:text-teal-400 shrink-0"></i>
                 <span id="text-organ-hint" class="font-medium text-slate-400 group-hover:text-slate-300">Organe masqué pour l'entraînement</span>
@@ -574,7 +577,7 @@
               <span>Quel est votre diagnostic ?</span>
             </label>
             <div class="relative">
-              <input type="text" id="session-open-input" placeholder="Tapez votre diagnostic ici puis validez (ou appuyez sur Entrée ↵)..." class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 font-medium pr-10" onkeydown="handleOpenAnswerKeyDown(event)">
+              <input type="text" id="session-open-input" placeholder="Tapez votre diagnostic ici puis validez (ou appuyez sur Entrée ↵)..." class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 font-medium pr-10" onkeydown="handleOpenAnswerKeyDown(event)">
               <button type="button" onclick="document.getElementById('session-open-input').value = ''; document.getElementById('session-open-input').focus();" title="Effacer" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
                 <i data-lucide="x" class="w-4 h-4"></i>
               </button>
@@ -626,7 +629,7 @@
 
           <!-- Topo de cours & Critères OMS associé à la lésion -->
           <div id="session-lesion-topo-box" class="hidden p-4 rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/30 border border-indigo-500/30 text-xs space-y-2.5">
-            <div class="flex items-center justify-between border-b border-indigo-500/20 pb-2">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-500/20 pb-2">
               <div class="flex items-center space-x-2 font-bold text-teal-300">
                 <i data-lucide="book-open" class="w-4 h-4 text-teal-400"></i>
                 <span id="session-lesion-topo-title">📘 Fiche de cours & Critères OMS</span>
@@ -638,7 +641,7 @@
 
           <!-- SÉLECTEUR DE DÉLAI DE RÉPÉTITION ESPACÉE (ANKI STYLE) -->
           <div class="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2.5">
-            <div class="flex items-center justify-between text-xs">
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
               <span class="font-bold text-white flex items-center space-x-1.5">
                 <i data-lucide="calendar" class="w-4 h-4 text-teal-400"></i>
                 <span>Quand souhaitez-vous revoir cette question ? (Répétition Espacée)</span>
@@ -675,7 +678,7 @@
           </div>
 
           <!-- Barre d'actions secondaires : Neutralisation & Suivant classique -->
-          <div class="flex items-center justify-between pt-2">
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-2">
             <button id="btn-session-toggle-mastered" onclick="toggleCurrentSessionQuestionMastered()" type="button" class="px-3 py-2 rounded-xl border text-xs font-bold flex items-center space-x-1.5 transition">
               <!-- Rempli dynamiquement -->
             </button>
@@ -697,7 +700,7 @@
       <div id="dp-session-playing-view" class="space-y-6">
         
         <!-- En-tête de la session -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
           <div class="flex items-center justify-between">
             <button onclick="quitCurrentDPSession()" class="text-xs font-semibold text-slate-400 hover:text-rose-400 flex items-center space-x-1.5 transition">
               <i data-lucide="x" class="w-4 h-4"></i>
@@ -717,7 +720,7 @@
         </div>
 
         <!-- Carte de l'étape active -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-8 shadow-xl space-y-6">
           
           <div class="space-y-3">
             <h3 id="dp-step-title" class="text-base font-bold text-indigo-300 flex items-center space-x-2">
@@ -730,7 +733,7 @@
           <div id="dp-step-images-container" class="grid grid-cols-1 sm:grid-cols-2 gap-3 hidden"></div>
 
           <div class="pt-2 border-t border-slate-800 space-y-3">
-            <div class="flex items-center justify-between">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <span id="dp-step-type-badge" class="text-[11px] font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">☑️ QCM</span>
               <span class="text-xs text-slate-400">Épreuve progressive • Bilan complet à la fin du cas</span>
             </div>
@@ -743,7 +746,7 @@
           <!-- Question à remplir / Diagnostic textuel (Format Ouverte) -->
           <div id="dp-step-open-container" class="hidden space-y-2">
             <label class="block text-xs font-semibold text-indigo-300">Votre diagnostic ou réponse textuelle :</label>
-            <input type="text" id="dp-step-open-input" oninput="onDPOpenInput(this.value)" onkeydown="if(event.key === 'Enter') submitCurrentDPStep()" placeholder="Tapez votre diagnostic ou réponse ici..." class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-medium">
+            <input type="text" id="dp-step-open-input" oninput="onDPOpenInput(this.value)" onkeydown="if(event.key === 'Enter') submitCurrentDPStep()" placeholder="Tapez votre diagnostic ou réponse ici..." class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-base sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-medium">
           </div>
 
           <!-- Bouton de validation sans spoiler -->
@@ -769,12 +772,12 @@
         <div class="flex flex-col sm:flex-row flex-1 flex-wrap items-stretch sm:items-center gap-2">
           <div class="relative w-full sm:flex-1 sm:min-w-[180px]">
             <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
-            <input type="text" id="bank-search-input" oninput="renderBank()" placeholder="Rechercher organe, lésion, critères OMS, #tag..." class="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+            <input type="text" id="bank-search-input" oninput="renderBank()" placeholder="Rechercher organe, lésion, critères OMS, #tag..." class="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
           </div>
           
           <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
             <!-- Filtre Statut avec option Échues aujourd'hui & Fiches OMS -->
-            <select id="bank-filter-status" onchange="renderBank()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-teal-300 font-semibold focus:outline-none focus:border-teal-500 truncate">
+            <select id="bank-filter-status" onchange="renderBank()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-teal-300 font-semibold focus:outline-none focus:border-teal-500 truncate">
               <option value="all">Tous les statuts</option>
               <option value="due">📅 À revoir aujourd'hui (Dues)</option>
               <option value="active">⏳ En apprentissage (Actives)</option>
@@ -784,7 +787,7 @@
               <option value="without_topo">📝 Sans Fiche OMS (À rédiger)</option>
             </select>
 
-            <select id="bank-filter-format" onchange="renderBank()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500 truncate">
+            <select id="bank-filter-format" onchange="renderBank()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-slate-300 focus:outline-none focus:border-teal-500 truncate">
               <option value="all">Tous formats & types</option>
               <option value="qcm">☑️ QCM (Choix Multiples)</option>
               <option value="qcu">🔘 QCU (Choix Unique)</option>
@@ -793,17 +796,17 @@
               <option value="dp">📋 Dossiers Progressifs (DP)</option>
             </select>
 
-            <select id="bank-filter-organ" onchange="onBankOrganSelectChange()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500 truncate">
+            <select id="bank-filter-organ" onchange="onBankOrganSelectChange()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-slate-300 focus:outline-none focus:border-teal-500 truncate">
               <option value="all">Tous les organes</option>
             </select>
 
-            <select id="bank-filter-tag" onchange="renderBank()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-teal-500 truncate">
+            <select id="bank-filter-tag" onchange="renderBank()" class="w-full sm:w-auto py-2 px-2.5 sm:px-3 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-slate-300 focus:outline-none focus:border-teal-500 truncate">
               <option value="all">Tous les tags (#)</option>
             </select>
           </div>
         </div>
 
-        <div class="flex items-center space-x-2 self-end lg:self-auto shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-800/80 w-full lg:w-auto justify-end">
+        <div class="flex flex-wrap items-center gap-2 self-end lg:self-auto shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-800/80 w-full lg:w-auto justify-end">
           <button onclick="syncCloudNowSafe()" class="px-3 py-2 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 text-xs font-semibold flex items-center space-x-1.5 transition border border-teal-500/30" title="Synchronisation bidirectionnelle sécurisée avec le Cloud Supabase">
             <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
             <span>Synchroniser Cloud</span>
@@ -891,35 +894,35 @@
         </div>
 
         <!-- CLASSIFICATION THÉMATIQUE DES TROPHÉES (4 PILIERS) -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <button type="button" onclick="setTrophyCategoryFilter('all')" id="btn-trophy-cat-all" class="p-3.5 rounded-2xl border transition text-left flex items-center space-x-3 bg-slate-900 border-amber-500 shadow-md shadow-amber-500/10 ring-1 ring-amber-500/30">
-            <span class="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-base font-bold shrink-0">🌟</span>
-            <div class="truncate">
-              <div class="text-xs font-bold text-white">Tous les Trophées</div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+          <button type="button" onclick="setTrophyCategoryFilter('all')" id="btn-trophy-cat-all" class="p-2.5 sm:p-3.5 rounded-2xl border transition text-left flex items-center gap-2 sm:gap-3 min-w-0 bg-slate-900 border-amber-500 shadow-md shadow-amber-500/10 ring-1 ring-amber-500/30">
+            <span class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-sm sm:text-base font-bold shrink-0">🌟</span>
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-bold text-white truncate">Tous les Trophées</div>
               <div id="trophy-cat-count-all" class="text-[10px] text-slate-400 font-mono">-- / --</div>
             </div>
           </button>
 
-          <button type="button" onclick="setTrophyCategoryFilter('organ')" id="btn-trophy-cat-organ" class="p-3.5 rounded-2xl border transition text-left flex items-center space-x-3 bg-slate-950/80 border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100">
-            <span class="w-9 h-9 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center text-base font-bold shrink-0">🔬</span>
-            <div class="truncate">
-              <div class="text-xs font-bold text-slate-200">Rubriques d'Organes</div>
+          <button type="button" onclick="setTrophyCategoryFilter('organ')" id="btn-trophy-cat-organ" class="p-2.5 sm:p-3.5 rounded-2xl border transition text-left flex items-center gap-2 sm:gap-3 min-w-0 bg-slate-950/80 border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100">
+            <span class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center text-sm sm:text-base font-bold shrink-0">🔬</span>
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-bold text-slate-200 truncate">Rubriques d'Organes</div>
               <div id="trophy-cat-count-organ" class="text-[10px] text-slate-400 font-mono">-- / --</div>
             </div>
           </button>
 
-          <button type="button" onclick="setTrophyCategoryFilter('custom')" id="btn-trophy-cat-custom" class="p-3.5 rounded-2xl border transition text-left flex items-center space-x-3 bg-slate-950/80 border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100">
-            <span class="w-9 h-9 rounded-xl bg-teal-500/20 text-teal-400 flex items-center justify-center text-base font-bold shrink-0">🏷️</span>
-            <div class="truncate">
-              <div class="text-xs font-bold text-slate-200">Tags & Défis d'Équipe</div>
+          <button type="button" onclick="setTrophyCategoryFilter('custom')" id="btn-trophy-cat-custom" class="p-2.5 sm:p-3.5 rounded-2xl border transition text-left flex items-center gap-2 sm:gap-3 min-w-0 bg-slate-950/80 border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100">
+            <span class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-teal-500/20 text-teal-400 flex items-center justify-center text-sm sm:text-base font-bold shrink-0">🏷️</span>
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-bold text-slate-200 truncate">Tags & Défis d'Équipe</div>
               <div id="trophy-cat-count-custom" class="text-[10px] text-slate-400 font-mono">-- / --</div>
             </div>
           </button>
 
-          <button type="button" onclick="setTrophyCategoryFilter('progression')" id="btn-trophy-cat-progression" class="p-3.5 rounded-2xl border transition text-left flex items-center space-x-3 bg-slate-950/80 border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100">
-            <span class="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-base font-bold shrink-0">⚡</span>
-            <div class="truncate">
-              <div class="text-xs font-bold text-slate-200">Niveaux & Séries</div>
+          <button type="button" onclick="setTrophyCategoryFilter('progression')" id="btn-trophy-cat-progression" class="p-2.5 sm:p-3.5 rounded-2xl border transition text-left flex items-center gap-2 sm:gap-3 min-w-0 bg-slate-950/80 border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100">
+            <span class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-sm sm:text-base font-bold shrink-0">⚡</span>
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-bold text-slate-200 truncate">Niveaux & Séries</div>
               <div id="trophy-cat-count-progression" class="text-[10px] text-slate-400 font-mono">-- / --</div>
             </div>
           </button>
@@ -947,7 +950,7 @@
     <div id="view-create" class="app-view hidden max-w-5xl mx-auto space-y-6">
 
       <!-- Écran Verrouillé pour les Comptes Lecteurs -->
-      <div id="view-create-locked" class="hidden text-center py-16 px-6 bg-slate-900 border border-slate-800 rounded-3xl max-w-xl mx-auto space-y-5 shadow-2xl">
+      <div id="view-create-locked" class="hidden text-center py-10 sm:py-16 px-4 sm:px-6 bg-slate-900 border border-slate-800 rounded-3xl max-w-xl mx-auto space-y-5 shadow-2xl">
         <div class="w-16 h-16 mx-auto rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center shadow-inner">
           <i data-lucide="lock" class="w-8 h-8"></i>
         </div>
@@ -975,7 +978,7 @@
       <!-- Contenu de Rédaction (affiché pour les Créateurs) -->
       <div id="view-create-content" class="space-y-6">
       
-      <div class="flex items-center p-1.5 rounded-2xl bg-slate-900 border border-slate-800 shadow-lg">
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 sm:gap-0 p-1.5 rounded-2xl bg-slate-900 border border-slate-800 shadow-lg">
         <button type="button" id="tab-creator-simple" onclick="setCreatorMode('simple')" class="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 bg-teal-600 text-white shadow-md">
           <i data-lucide="help-circle" class="w-4 h-4"></i>
           <span>Question Simple (QCM par défaut)</span>
@@ -994,7 +997,7 @@
       <datalist id="datalist-dp-entities"></datalist>
 
       <!-- 5A. QUESTION SIMPLE -->
-      <div id="creator-box-simple" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
+      <div id="creator-box-simple" class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-8 shadow-xl space-y-6">
         <div>
           <h2 class="text-xl font-bold text-white flex items-center space-x-2">
             <i data-lucide="plus-circle" class="w-5 h-5 text-teal-400"></i>
@@ -1009,7 +1012,7 @@
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label class="block text-xs font-semibold text-slate-300 mb-1.5">Format de réponse *</label>
-              <select id="form-q-format" onchange="onFormatChange()" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-teal-500 font-medium">
+              <select id="form-q-format" onchange="onFormatChange()" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white focus:outline-none focus:border-teal-500 font-medium">
                 <option value="qcm" selected>☑️ Choix Multiples (QCM) - Par défaut</option>
                 <option value="qcu">🔘 Choix Unique (QCU) - 1 seule bonne réponse</option>
                 <option value="piege">⚠️ Vrai / Faux - Diagnostic tranché</option>
@@ -1018,7 +1021,7 @@
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-300 mb-1.5">Difficulté & Barème XP *</label>
-              <select id="form-q-difficulty" onchange="onDifficultyChange()" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-teal-500 font-medium">
+              <select id="form-q-difficulty" onchange="onDifficultyChange()" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white focus:outline-none focus:border-teal-500 font-medium">
                 <option value="facile" selected>🟢 Facile (+2 XP) - Par défaut</option>
                 <option value="intermediaire">🟡 Intermédiaire (+5 XP)</option>
                 <option value="difficile">🔴 Difficile (+10 XP)</option>
@@ -1030,7 +1033,7 @@
                 <label for="form-q-author" class="block text-xs font-semibold text-amber-300">Rédacteur attribué *</label>
                 <span class="text-[10px] text-slate-400 font-mono">+5 XP Auteur</span>
               </div>
-              <select id="form-q-author" onchange="onAuthorSelectChange()" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/30 text-xs text-white focus:outline-none focus:border-amber-400 font-medium">
+              <select id="form-q-author" onchange="onAuthorSelectChange()" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/30 text-base sm:text-xs text-white focus:outline-none focus:border-amber-400 font-medium">
                 <option value="padoreau85@gmail.com">Pierre-Alain Doreau (padoreau85@gmail.com)</option>
                 <option value="belhadef.samy@gmail.com">Samy Belhadef (belhadef.samy@gmail.com)</option>
               </select>
@@ -1046,7 +1049,7 @@
             <p class="text-[11px] text-slate-300 leading-relaxed">
               Pour cette question Extrême, la solution brute ne sera pas dévoilée immédiatement en correction ! Renseignez ici des indices descriptifs, un profil immuno ou une piste bibliographique pour pousser la recherche.
             </p>
-            <textarea id="form-q-extreme-clues" rows="2" placeholder="ex: IHC : Cytokératines négatives, CD34 focalement positif. Pensez aux marqueurs mésenchymateux et reconsidérez l'âge..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-purple-500/30 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-400"></textarea>
+            <textarea id="form-q-extreme-clues" rows="2" placeholder="ex: IHC : Cytokératines négatives, CD34 focalement positif. Pensez aux marqueurs mésenchymateux et reconsidérez l'âge..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-purple-500/30 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-400"></textarea>
           </div>
 
           <!-- CLASSIFICATION 3 NIVEAUX -->
@@ -1059,15 +1062,15 @@
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 1 : Organe *</label>
-                <input type="text" id="form-q-organ" list="datalist-organs" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Sein, Poumon..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+                <input type="text" id="form-q-organ" list="datalist-organs" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Sein, Poumon..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
               </div>
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 2 : Catégorie *</label>
-                <input type="text" id="form-q-category" list="datalist-categories" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Tumeurs épithéliales..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+                <input type="text" id="form-q-category" list="datalist-categories" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Tumeurs épithéliales..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
               </div>
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 3 : Lésion précise *</label>
-                <input type="text" id="form-q-entity" list="datalist-entities" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Carcinome lobulaire..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+                <input type="text" id="form-q-entity" list="datalist-entities" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Carcinome lobulaire..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
               </div>
             </div>
           </div>
@@ -1079,7 +1082,7 @@
                 <label class="block text-xs font-semibold text-white">Énoncé de la question *</label>
                 <span id="templates-lesion-indicator" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 hidden"></span>
               </div>
-              <div class="flex items-center space-x-1.5">
+              <div class="flex flex-wrap items-center gap-1.5">
                 <button type="button" onclick="promptAddNewStatementTemplate()" class="px-2.5 py-1 rounded-lg bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 border border-teal-500/30 text-[10px] font-bold flex items-center space-x-1 transition shadow-sm" title="Créer une phrase type réutilisable pour tous les QCM">
                   <i data-lucide="plus" class="w-3 h-3 text-teal-400"></i>
                   <span>Phrase Générale</span>
@@ -1100,17 +1103,17 @@
               <!-- Rendu dynamique par renderStatementTemplates() -->
             </div>
 
-            <input type="text" id="form-q-text" required placeholder="ex: Quels marqueurs immunohistochimiques permettent de confirmer..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-teal-500">
+            <input type="text" id="form-q-text" required placeholder="ex: Quels marqueurs immunohistochimiques permettent de confirmer..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white focus:outline-none focus:border-teal-500">
           </div>
 
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1.5">Contexte clinique / Profil d'anticorps / Vignette</label>
-            <textarea id="form-q-context" rows="2" placeholder="ex: Profil IHC : E-cadhérine membranaire négative, p120 caténine cytoplasmique diffuse..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-mono focus:outline-none focus:border-teal-500"></textarea>
+            <textarea id="form-q-context" rows="2" placeholder="ex: Profil IHC : E-cadhérine membranaire négative, p120 caténine cytoplasmique diffuse..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white font-mono focus:outline-none focus:border-teal-500"></textarea>
           </div>
 
           <!-- Multi-Photos & Lames microscopiques -->
           <div id="editor-statement-section" class="space-y-3" onfocusin="setLastActiveImageZone('statement')" onclick="setLastActiveImageZone('statement')">
-            <div class="flex items-center justify-between">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <label class="block text-xs font-semibold text-slate-300">Lames microscopiques & Clichés à faire deviner (Optionnel)</label>
                 <p class="text-[11px] text-slate-400">Collez une capture de lame avec <strong class="text-teal-300 font-mono">⌘V</strong> / <strong class="text-teal-300 font-mono">Ctrl+V</strong> n'importe où dans le formulaire, ou déposez un fichier.</p>
@@ -1156,12 +1159,12 @@
 
           <!-- Options de Réponses -->
           <div class="space-y-3 pt-2">
-            <div id="editor-mcq-header" class="flex items-center justify-between">
+            <div id="editor-mcq-header" class="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <label class="block text-xs font-semibold text-slate-300">Propositions & Justifications *</label>
                 <p class="text-[11px] text-slate-400">Cochez la ou les bonnes réponses. Vous pouvez ajouter autant de propositions que nécessaire.</p>
               </div>
-              <button type="button" id="btn-add-editor-option" onclick="addEditorOption()" class="px-3 py-1.5 rounded-xl bg-teal-600/20 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold flex items-center space-x-1.5 transition">
+              <button type="button" id="btn-add-editor-option" onclick="addEditorOption()" class="px-3 py-1.5 rounded-xl bg-teal-600/20 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/30 text-xs font-bold flex items-center space-x-1.5 transition shrink-0">
                 <i data-lucide="plus" class="w-3.5 h-3.5"></i>
                 <span>Ajouter une proposition</span>
               </button>
@@ -1173,7 +1176,7 @@
 
             <!-- Formulaire pour Question Ouverte (Saisie Diagnostique) -->
             <div id="form-open-wrapper" class="hidden space-y-3 p-4 rounded-2xl bg-slate-950/80 border border-teal-500/30">
-              <div class="flex items-start justify-between gap-3">
+              <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <span class="text-xs font-bold text-teal-300 flex items-center space-x-1.5">
                     <i data-lucide="edit-3" class="w-4 h-4 text-teal-400"></i>
@@ -1209,19 +1212,19 @@
           <div id="editor-explanation-section" class="space-y-3 pt-2 border-t border-slate-800" onfocusin="setLastActiveImageZone('explanation')" onclick="setLastActiveImageZone('explanation')">
             <div>
               <label class="block text-xs font-semibold text-slate-300 mb-1.5">Explication globale de la question (optionnel)</label>
-              <textarea id="form-q-explanation" rows="2" placeholder="Synthèse globale, rappels théoriques ou pourquoi ces réponses sont exactes (laisser vide si vous avez déjà commenté chaque item)..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"></textarea>
+              <textarea id="form-q-explanation" rows="2" placeholder="Synthèse globale, rappels théoriques ou pourquoi ces réponses sont exactes (laisser vide si vous avez déjà commenté chaque item)..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"></textarea>
             </div>
             <div>
               <label class="block text-xs font-semibold text-amber-400 mb-1.5 flex items-center space-x-1.5">
                 <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
                 <span>Le Piège Classique ACP à éviter (optionnel)</span>
               </label>
-              <textarea id="form-q-trap" rows="2" placeholder="ex: Attention au piège de l'anticorps... ou au faux positif en IHC (laisser vide si non applicable)..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/30 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"></textarea>
+              <textarea id="form-q-trap" rows="2" placeholder="ex: Attention au piège de l'anticorps... ou au faux positif en IHC (laisser vide si non applicable)..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-amber-500/30 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"></textarea>
             </div>
 
             <!-- Images & Schémas d'explication -->
             <div class="space-y-2 pt-1">
-              <div class="flex items-center justify-between">
+              <div class="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <label class="block text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
                     <i data-lucide="image" class="w-3.5 h-3.5 text-teal-400"></i>
@@ -1229,7 +1232,7 @@
                   </label>
                   <p class="text-[11px] text-slate-400">Révélés uniquement lors de la correction (arbres décisionnels, différentiels...). Collez avec ⌘V ou déposez un fichier.</p>
                 </div>
-                <div class="flex items-center space-x-2">
+                <div class="flex flex-wrap items-center gap-2">
                   <button type="button" onclick="pasteClipboardToExplanation(event)" class="px-2.5 py-1 rounded-lg bg-teal-500/15 hover:bg-teal-500/30 text-teal-300 text-xs font-semibold flex items-center space-x-1 border border-teal-500/40 transition shadow-sm shrink-0" title="Coller l'image actuellement copiée dans le presse-papiers">
                     <i data-lucide="clipboard-copy" class="w-3.5 h-3.5"></i>
                     <span>Coller (⌘V)</span>
@@ -1274,7 +1277,7 @@
 
           <!-- TAGS DE LA QUESTION (En bas pour aérer le haut du formulaire) -->
           <div class="space-y-2 pt-2 border-t border-slate-800">
-            <div class="flex items-center justify-between">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <label class="block text-xs font-semibold text-slate-300">Tags de la question (Cliquez pour activer/désactiver)</label>
               <button type="button" onclick="openManageTagsModal()" class="text-[11px] text-teal-400 hover:text-teal-300 font-semibold flex items-center space-x-1 transition">
                 <i data-lucide="settings" class="w-3 h-3"></i>
@@ -1282,9 +1285,9 @@
               </button>
             </div>
             <div id="editor-tags-pills" class="flex flex-wrap gap-1.5 p-3 rounded-xl bg-slate-950 border border-slate-800"></div>
-            <div class="flex items-center space-x-2 pt-1">
-              <input type="text" id="form-new-tag-input" placeholder="Créer un nouveau tag (ex: E-cadhérine, Ki67...)" class="flex-1 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono">
-              <button type="button" onclick="handleAddCustomTagFromInput()" class="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center space-x-1">
+            <div class="flex flex-wrap sm:flex-nowrap items-center gap-2 pt-1">
+              <input type="text" id="form-new-tag-input" placeholder="Créer un nouveau tag (ex: E-cadhérine, Ki67...)" class="flex-1 min-w-0 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono">
+              <button type="button" onclick="handleAddCustomTagFromInput()" class="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center space-x-1 shrink-0">
                 <i data-lucide="plus" class="w-3.5 h-3.5"></i>
                 <span>Ajouter ce Tag</span>
               </button>
@@ -1304,7 +1307,7 @@
       </div>
 
       <!-- 5B. FORMULAIRE DOSSIER PROGRESSIF -->
-      <div id="creator-box-dp" class="hidden bg-slate-900 border border-indigo-500/30 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
+      <div id="creator-box-dp" class="hidden bg-slate-900 border border-indigo-500/30 rounded-2xl p-4 sm:p-8 shadow-xl space-y-6">
         <div>
           <div class="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-xs font-semibold mb-2">
             <i data-lucide="layers" class="w-3.5 h-3.5"></i>
@@ -1321,7 +1324,7 @@
 
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1.5">Titre du Dossier Clinique *</label>
-            <input type="text" id="form-dp-title" required placeholder="ex: Masse sous-muqueuse gastrique chez un homme de 62 ans" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500 font-medium">
+            <input type="text" id="form-dp-title" required placeholder="ex: Masse sous-muqueuse gastrique chez un homme de 62 ans" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white focus:outline-none focus:border-indigo-500 font-medium">
           </div>
 
           <!-- CLASSIFICATION 3 NIVEAUX DU DP -->
@@ -1334,15 +1337,15 @@
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 1 : Organe *</label>
-                <input type="text" id="form-dp-organ" list="datalist-dp-organs" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Tube Digestif, Sein..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                <input type="text" id="form-dp-organ" list="datalist-dp-organs" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Tube Digestif, Sein..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
               </div>
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 2 : Catégorie *</label>
-                <input type="text" id="form-dp-category" list="datalist-dp-categories" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Tumeurs mésenchymateuses..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                <input type="text" id="form-dp-category" list="datalist-dp-categories" oninput="updateEditorDatalists()" onchange="updateEditorDatalists()" required placeholder="ex: Tumeurs mésenchymateuses..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
               </div>
               <div>
                 <label class="block text-[11px] font-semibold text-slate-300 mb-1">Niveau 3 : Lésion finale *</label>
-                <input type="text" id="form-dp-entity" list="datalist-dp-entities" required placeholder="ex: GIST gastrique..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                <input type="text" id="form-dp-entity" list="datalist-dp-entities" required placeholder="ex: GIST gastrique..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
               </div>
             </div>
           </div>
@@ -1350,12 +1353,12 @@
           <!-- Synopsis -->
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1.5">Synopsis / Présentation clinique générale *</label>
-            <textarea id="form-dp-synopsis" rows="2" required placeholder="ex: Découverte endoscopique d'une masse sous-muqueuse de 4,5 cm chez un homme de 62 ans..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans"></textarea>
+            <textarea id="form-dp-synopsis" rows="2" required placeholder="ex: Découverte endoscopique d'une masse sous-muqueuse de 4,5 cm chez un homme de 62 ans..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white focus:outline-none focus:border-indigo-500 font-sans"></textarea>
           </div>
 
           <!-- CONTENEUR DES ÉTAPES DU DP -->
           <div class="space-y-4 pt-2 border-t border-slate-800">
-            <div class="flex items-center justify-between">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <h3 class="text-sm font-bold text-white flex items-center space-x-2">
                 <i data-lucide="list-ordered" class="w-4 h-4 text-indigo-400"></i>
                 <span>Étapes Séquentielles du Dossier</span>
@@ -1371,7 +1374,7 @@
 
           <!-- TAGS DU DP (En bas du formulaire) -->
           <div class="space-y-2 pt-2 border-t border-slate-800">
-            <div class="flex items-center justify-between">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <label class="block text-xs font-semibold text-slate-300">Tags du Dossier (Cliquez pour activer/désactiver)</label>
               <button type="button" onclick="openManageTagsModal()" class="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center space-x-1 transition">
                 <i data-lucide="settings" class="w-3 h-3"></i>
@@ -1379,9 +1382,9 @@
               </button>
             </div>
             <div id="dp-tags-pills" class="flex flex-wrap gap-1.5 p-3 rounded-xl bg-slate-950 border border-slate-800"></div>
-            <div class="flex items-center space-x-2 pt-1">
-              <input type="text" id="form-dp-new-tag-input" placeholder="Ajouter un tag..." class="flex-1 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono">
-              <button type="button" onclick="handleAddCustomTagFromDPInput()" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center space-x-1">
+            <div class="flex flex-wrap sm:flex-nowrap items-center gap-2 pt-1">
+              <input type="text" id="form-dp-new-tag-input" placeholder="Ajouter un tag..." class="flex-1 min-w-0 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono">
+              <button type="button" onclick="handleAddCustomTagFromDPInput()" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center space-x-1 shrink-0">
                 <i data-lucide="plus" class="w-3.5 h-3.5"></i>
                 <span>Ajouter ce Tag</span>
               </button>
@@ -1413,26 +1416,26 @@
   </main>
 
   <!-- ================= BARRE DE NAVIGATION MOBILE INFÉRIEURE (FIXÉE SUR SMARTPHONE / TABLETTE) ================= -->
-  <nav id="mobile-bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 px-3 py-1.5 flex items-center justify-around shadow-2xl safe-area-pb">
-    <button onclick="switchTab('play')" id="mob-nav-btn-play" class="mob-nav-link flex-1 py-1 px-2 flex flex-col items-center justify-center space-y-0.5 text-teal-400 font-bold transition">
+  <nav id="mobile-bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 px-1 sm:px-3 py-1 flex items-center justify-around shadow-2xl safe-area-pb">
+    <button onclick="switchTab('play')" id="mob-nav-btn-play" class="mob-nav-link flex-1 min-h-[44px] py-1.5 px-2 flex flex-col items-center justify-center space-y-0.5 text-teal-400 font-bold transition">
       <i data-lucide="play" class="w-5 h-5"></i>
       <span class="text-[10px] tracking-tight">Jouer</span>
     </button>
-    <button onclick="switchTab('bank')" id="mob-nav-btn-bank" class="mob-nav-link flex-1 py-1 px-2 flex flex-col items-center justify-center space-y-0.5 text-slate-400 hover:text-white transition relative">
+    <button onclick="switchTab('bank')" id="mob-nav-btn-bank" class="mob-nav-link flex-1 min-h-[44px] py-1.5 px-2 flex flex-col items-center justify-center space-y-0.5 text-slate-400 hover:text-white transition relative">
       <div class="relative">
         <i data-lucide="database" class="w-5 h-5"></i>
-        <span id="mob-badge-bank-count" class="absolute -top-1.5 -right-3 text-[9px] px-1.5 py-0.2 rounded-full bg-slate-900 border border-teal-500/50 text-teal-300 font-bold">0</span>
+        <span id="mob-badge-bank-count" class="absolute -top-1 -right-2 text-[9px] leading-tight min-w-[16px] text-center px-1 py-0 rounded-full bg-slate-900 border border-teal-500/50 text-teal-300 font-bold">0</span>
       </div>
       <span class="text-[10px] tracking-tight">Banque</span>
     </button>
-    <button onclick="switchTab('trophies')" id="mob-nav-btn-trophies" class="mob-nav-link flex-1 py-1 px-2 flex flex-col items-center justify-center space-y-0.5 text-slate-400 hover:text-white transition relative">
+    <button onclick="switchTab('trophies')" id="mob-nav-btn-trophies" class="mob-nav-link flex-1 min-h-[44px] py-1.5 px-2 flex flex-col items-center justify-center space-y-0.5 text-slate-400 hover:text-white transition relative">
       <div class="relative">
         <i data-lucide="trophy" class="w-5 h-5"></i>
-        <span id="mob-badge-contested-count" class="hidden absolute -top-1.5 -right-2.5 text-[8px] px-1 py-0 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold">⚡</span>
+        <span id="mob-badge-contested-count" class="hidden absolute -top-1 -right-2 text-[8px] leading-tight px-1 py-0 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold">⚡</span>
       </div>
       <span class="text-[10px] tracking-tight">Trophées</span>
     </button>
-    <button onclick="switchTab('create')" id="mob-nav-btn-create" class="mob-nav-link flex-1 py-1 px-2 flex flex-col items-center justify-center space-y-0.5 text-slate-400 hover:text-white transition">
+    <button onclick="switchTab('create')" id="mob-nav-btn-create" class="mob-nav-link flex-1 min-h-[44px] py-1.5 px-2 flex flex-col items-center justify-center space-y-0.5 text-slate-400 hover:text-white transition">
       <i data-lucide="plus-circle" class="w-5 h-5"></i>
       <span class="text-[10px] tracking-tight">Créer</span>
     </button>
@@ -1451,7 +1454,7 @@
 
   <!-- ================= MODAL SUPABASE CLOUD ================= -->
   <div id="modal-supabase" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-2.5">
           <div class="w-9 h-9 rounded-xl bg-teal-500/20 text-teal-400 border border-teal-500/30 flex items-center justify-center">
@@ -1475,11 +1478,11 @@
       <div class="space-y-3 text-xs">
         <div>
           <label class="block font-bold text-slate-300 mb-1">Supabase Project URL</label>
-          <input type="text" id="supabase-input-url" placeholder="https://votre-projet.supabase.co" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 font-mono text-xs">
+          <input type="text" id="supabase-input-url" placeholder="https://votre-projet.supabase.co" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 font-mono text-base sm:text-xs">
         </div>
         <div>
           <label class="block font-bold text-slate-300 mb-1">Supabase Anon Key (clé publique)</label>
-          <input type="password" id="supabase-input-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 font-mono text-xs">
+          <input type="password" id="supabase-input-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 font-mono text-base sm:text-xs">
         </div>
       </div>
 
@@ -1498,8 +1501,8 @@
 
   <!-- ================= MODAL INSTALLATION APPLICATION APPLE ================= -->
   <div id="modal-apple-app" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4" onclick="closeAppleAppModal()">
-    <div class="bg-slate-900 border border-teal-500/30 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl space-y-5 relative" onclick="event.stopPropagation()">
-      <button onclick="closeAppleAppModal()" class="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-xl hover:bg-slate-800 transition">
+    <div class="bg-slate-900 border border-teal-500/30 rounded-3xl max-w-lg w-full p-4 sm:p-7 shadow-2xl space-y-5 relative max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
+      <button onclick="closeAppleAppModal()" class="absolute top-4 right-4 sm:top-5 sm:right-5 text-slate-400 hover:text-white p-1 rounded-xl hover:bg-slate-800 transition">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
 
@@ -1560,7 +1563,7 @@
 
   <!-- ================= MODAL AUTHENTIFICATION (CONNEXION) ================= -->
   <div id="modal-auth" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl space-y-5">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-4 sm:p-7 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
       
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-3">
@@ -1588,7 +1591,7 @@
           <label class="block text-xs font-bold text-slate-300 mb-1.5">Adresse e-mail</label>
           <div class="relative">
             <i data-lucide="mail" class="w-4 h-4 text-slate-500 absolute left-3 top-3"></i>
-            <input type="email" id="auth-input-email" required placeholder="nom.prenom@ch-hopital.fr" class="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 text-xs">
+            <input type="email" id="auth-input-email" required placeholder="nom.prenom@ch-hopital.fr" class="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 text-base sm:text-xs">
           </div>
         </div>
 
@@ -1596,7 +1599,7 @@
           <label class="block text-xs font-bold text-slate-300 mb-1.5">Mot de passe</label>
           <div class="relative">
             <i data-lucide="key-round" class="w-4 h-4 text-slate-500 absolute left-3 top-3"></i>
-            <input type="password" id="auth-input-password" required placeholder="••••••••" class="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 text-xs font-mono">
+            <input type="password" id="auth-input-password" required placeholder="••••••••" class="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 text-base sm:text-xs font-mono">
           </div>
         </div>
 
@@ -1610,7 +1613,7 @@
         </p>
       </form>
 
-      <div class="pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+      <div class="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
         <button type="button" onclick="toggleAdminInitView()" id="btn-toggle-admin-init" class="text-teal-400 hover:text-teal-300 transition underline underline-offset-2">
           Première connexion Administrateur ?
         </button>
@@ -1637,36 +1640,36 @@
 
   <!-- ================= MODAL GESTION DES COMPTES COLLÈGUES (CRÉATEUR ONLY) ================= -->
   <div id="modal-accounts" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 sm:p-7 shadow-2xl space-y-5">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-4 sm:p-7 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
       
       <!-- En-tête -->
-      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-        <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+      <div class="flex items-center justify-between gap-2 pb-3 border-b border-slate-800">
+        <div class="flex items-center space-x-3 min-w-0">
+          <div class="w-10 h-10 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center shrink-0">
             <i data-lucide="users" class="w-5 h-5"></i>
           </div>
-          <div>
-            <h3 class="font-extrabold text-base text-white flex items-center space-x-2">
+          <div class="min-w-0">
+            <h3 class="font-extrabold text-base text-white flex flex-wrap items-center gap-1.5">
               <span>Gestion des Comptes Internes</span>
               <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">Créateur</span>
             </h3>
             <p class="text-xs text-slate-400">Créez des accès pour vos co-internes et gérez leurs permissions</p>
           </div>
         </div>
-        <button onclick="closeAccountsModal()" class="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition">
+        <button onclick="closeAccountsModal()" class="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition shrink-0">
           <i data-lucide="x" class="w-5 h-5"></i>
         </button>
       </div>
 
       <!-- Navigation Onglets Modal -->
-      <div class="flex items-center p-1 rounded-xl bg-slate-950 border border-slate-800">
-        <button type="button" onclick="switchAccountModalTab('list')" id="tab-btn-acc-list" class="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-white bg-indigo-600 shadow-sm transition">
+      <div class="flex flex-wrap sm:flex-nowrap items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800">
+        <button type="button" onclick="switchAccountModalTab('list')" id="tab-btn-acc-list" class="flex-1 min-w-0 py-1.5 px-2.5 sm:px-3 rounded-lg text-xs font-bold text-white bg-indigo-600 shadow-sm transition whitespace-nowrap">
           👥 Collègues & Rôles
         </button>
-        <button type="button" onclick="switchAccountModalTab('create')" id="tab-btn-acc-create" class="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition">
+        <button type="button" onclick="switchAccountModalTab('create')" id="tab-btn-acc-create" class="flex-1 min-w-0 py-1.5 px-2.5 sm:px-3 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition whitespace-nowrap">
           ➕ Créer un compte
         </button>
-        <button type="button" onclick="switchAccountModalTab('settings')" id="tab-btn-acc-settings" class="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition">
+        <button type="button" onclick="switchAccountModalTab('settings')" id="tab-btn-acc-settings" class="flex-1 min-w-0 py-1.5 px-2.5 sm:px-3 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition whitespace-nowrap">
           ⚙️ Clé Locale
         </button>
       </div>
@@ -1676,7 +1679,7 @@
 
         <!-- Boîte de promotion directe de rôle -->
         <div class="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
-          <div class="flex items-center justify-between">
+          <div class="flex flex-wrap items-center justify-between gap-2">
             <span class="text-xs font-bold text-teal-300 flex items-center space-x-1.5">
               <i data-lucide="shield-check" class="w-4 h-4 text-teal-400"></i>
               <span>Promouvoir un collègue en Rédacteur / Créateur 🦖</span>
@@ -1690,8 +1693,8 @@
 
           <form onsubmit="handlePromoteColleagueSubmit(event)" class="space-y-2">
             <div class="flex flex-col sm:flex-row gap-2">
-              <input type="email" id="input-promote-email" required placeholder="ex: interne.dupont@ch-hopital.fr" class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 text-xs">
-              <select id="select-promote-role" class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-teal-300 focus:outline-none focus:border-teal-500 text-xs font-semibold">
+              <input type="email" id="input-promote-email" required placeholder="ex: interne.dupont@ch-hopital.fr" class="flex-1 min-w-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 text-base sm:text-xs">
+              <select id="select-promote-role" class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-teal-300 focus:outline-none focus:border-teal-500 text-base sm:text-xs font-semibold">
                 <option value="creator">🦖 Rédacteur (Créateur)</option>
                 <option value="reader">📖 Lecteur</option>
               </select>
@@ -1732,18 +1735,18 @@
         <form id="form-create-colleague" onsubmit="handleCreateColleagueSubmit(event)" class="space-y-4">
           <div>
             <label class="block text-xs font-bold text-slate-300 mb-1.5">Adresse e-mail du collègue *</label>
-            <input type="email" id="colleague-email" required placeholder="ex: interne.dupont@ch-hopital.fr" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-xs">
+            <input type="email" id="colleague-email" required placeholder="ex: interne.dupont@ch-hopital.fr" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-base sm:text-xs">
           </div>
 
           <div>
-            <div class="flex items-center justify-between mb-1.5">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
               <label class="block text-xs font-bold text-slate-300">Mot de passe provisoire *</label>
               <button type="button" onclick="generateColleaguePassword()" class="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center space-x-1">
                 <i data-lucide="refresh-cw" class="w-3 h-3"></i>
                 <span>Générer un mot de passe</span>
               </button>
             </div>
-            <input type="text" id="colleague-password" required minlength="6" placeholder="ex: Patho2026!#" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-xs font-mono">
+            <input type="text" id="colleague-password" required minlength="6" placeholder="ex: Patho2026!#" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-base sm:text-xs font-mono">
           </div>
 
           <!-- Choix du Rôle -->
@@ -1801,8 +1804,8 @@
           <p class="text-[11px] text-slate-400 leading-relaxed">
             Permet à votre environnement local de créer instantanément des comptes avec confirmation automatique d'e-mail. (Dans Supabase Dashboard $\rightarrow$ Project Settings $\rightarrow$ API $\rightarrow$ <code class="text-teal-300 font-mono">service_role secret</code>).
           </p>
-          <input type="password" id="input-local-service-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-mono text-xs">
-          <div class="flex items-center space-x-2 pt-1">
+          <input type="password" id="input-local-service-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-mono text-base sm:text-xs">
+          <div class="flex flex-wrap items-center gap-2 pt-1">
             <button type="button" onclick="saveLocalServiceKey()" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition">
               Enregistrer en local
             </button>
@@ -1818,18 +1821,18 @@
 
   <!-- ================= MODAL DÉTAILS DE LA QUESTION (APERÇU POUR LECTEURS) ================= -->
   <div id="modal-question-detail" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 sm:p-7 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-4 sm:p-7 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
       
       <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
-        <div class="flex flex-wrap items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
           <span id="detail-format-badge" class="text-xs font-bold px-2.5 py-1 rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/30">☑️ QCM</span>
-          <span id="detail-hierarchy-badge" class="text-xs font-mono px-2.5 py-1 rounded-full bg-slate-800 text-slate-300">Organe > Catégorie > Entité</span>
+          <span id="detail-hierarchy-badge" class="text-xs font-mono px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 max-w-full truncate">Organe > Catégorie > Entité</span>
           <span id="detail-author-badge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30 flex items-center space-x-1" title="Auteur de la question">
             <span>✍️</span>
             <span id="detail-author-name">Rédigé par ...</span>
           </span>
         </div>
-        <div class="flex items-center space-x-2">
+        <div class="flex items-center space-x-2 shrink-0">
           <button id="btn-detail-edit" type="button" onclick="handleEditFromDetailModal()" class="hidden text-xs font-semibold px-3 py-1.5 rounded-xl bg-teal-500/20 text-teal-300 hover:bg-teal-500/30 border border-teal-500/30 transition items-center space-x-1.5" title="Modifier cette question dans l'éditeur (réservé créateur)">
             <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
             <span>Modifier</span>
@@ -1878,7 +1881,7 @@
 
         <!-- Fiche de cours OMS associée à la lésion -->
         <div id="detail-lesion-topo-container" class="p-3.5 rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/30 border border-indigo-500/30 text-xs space-y-2 hidden">
-          <div class="flex items-center justify-between border-b border-indigo-500/20 pb-2">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-500/20 pb-2">
             <span class="font-bold text-teal-300 flex items-center space-x-2">
               <i data-lucide="book-open" class="w-4 h-4 text-teal-400"></i>
               <span id="detail-lesion-topo-title">Critères diagnostiques OMS & Fiche de cours</span>
@@ -1889,7 +1892,7 @@
         </div>
       </div>
 
-      <div class="flex items-center justify-between pt-2">
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-2">
         <div id="detail-tags-container" class="flex flex-wrap gap-1"></div>
         <button type="button" onclick="closeQuestionDetailModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">
           Fermer
@@ -1901,18 +1904,18 @@
 
   <!-- ================= MODALE CRÉATION DE TROPHÉE & BADGE ================= -->
   <div id="modal-create-trophy" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl relative">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <div class="flex items-center space-x-2.5">
-          <div class="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center font-bold">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-4 sm:p-6 space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-3">
+        <div class="flex items-center space-x-2.5 min-w-0">
+          <div class="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center font-bold shrink-0">
             <i data-lucide="award" class="w-4 h-4"></i>
           </div>
-          <div>
+          <div class="min-w-0">
             <h3 id="trophy-modal-title" class="font-bold text-white text-base">Créer un Trophée Personnalisé</h3>
             <p id="trophy-modal-subtitle" class="text-xs text-slate-400">Ajoutez un défi d'équipe pour vos co-internes et vous-même</p>
           </div>
         </div>
-        <button onclick="closeCreateTrophyModal()" class="text-slate-400 hover:text-white transition">
+        <button onclick="closeCreateTrophyModal()" class="text-slate-400 hover:text-white transition shrink-0">
           <i data-lucide="x" class="w-5 h-5"></i>
         </button>
       </div>
@@ -1921,18 +1924,18 @@
         <input type="hidden" id="trophy-edit-id" value="">
         <div>
           <label class="block text-xs font-semibold text-slate-300 mb-1">Nom du Trophée *</label>
-          <input type="text" id="trophy-input-name" required placeholder="ex: Grand Maître de la Thyroïde, Chasseur de Mitoses..." class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 text-xs">
+          <input type="text" id="trophy-input-name" required placeholder="ex: Grand Maître de la Thyroïde, Chasseur de Mitoses..." class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 text-base sm:text-xs">
         </div>
 
         <div>
           <label class="block text-xs font-semibold text-slate-300 mb-1">Description & Défi *</label>
-          <textarea id="trophy-input-desc" required rows="2" placeholder="ex: Réussir au moins 10 questions sur la thyroïde pour décrocher ce titre prestigieux." class="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 text-xs"></textarea>
+          <textarea id="trophy-input-desc" required rows="2" placeholder="ex: Réussir au moins 10 questions sur la thyroïde pour décrocher ce titre prestigieux." class="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 text-base sm:text-xs"></textarea>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1">Icône / Emoji</label>
-            <select id="trophy-input-icon" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500">
+            <select id="trophy-input-icon" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-base sm:text-xs focus:outline-none focus:border-amber-500">
               <option value="🏆">🏆 Coupe d'or</option>
               <option value="👑">👑 Couronne</option>
               <option value="🎖️">🎖️ Médaille</option>
@@ -1949,7 +1952,7 @@
 
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1">Palier / Rang</label>
-            <select id="trophy-input-tier" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500">
+            <select id="trophy-input-tier" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-base sm:text-xs focus:outline-none focus:border-amber-500">
               <option value="bronze">🥉 Bronze</option>
               <option value="silver">🥈 Argent</option>
               <option value="gold" selected>🥇 Or</option>
@@ -1958,10 +1961,10 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1">Type de Défi</label>
-            <select id="trophy-input-cond-type" onchange="onTrophyConditionTypeChange()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500">
+            <select id="trophy-input-cond-type" onchange="onTrophyConditionTypeChange()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-base sm:text-xs focus:outline-none focus:border-amber-500">
               <option value="tag_mastery" selected>🏷️ Cibler un Tag (#IHC, #Lame...)</option>
               <option value="organ_mastery">🔬 Maîtrise d'un organe</option>
               <option value="question_count">✅ Total de questions réussies</option>
@@ -1982,23 +1985,23 @@
 
         <!-- Paramètres conditionnels -->
         <div id="trophy-organ-param-box" class="space-y-3 pt-1">
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div id="trophy-tag-col">
               <label class="block text-xs font-semibold text-slate-300 mb-1">Tag ciblé *</label>
-              <select id="trophy-input-tag" onchange="updateTrophyTargetPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-teal-300 text-xs focus:outline-none focus:border-amber-500 font-mono">
+              <select id="trophy-input-tag" onchange="updateTrophyTargetPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-teal-300 text-base sm:text-xs focus:outline-none focus:border-amber-500 font-mono">
                 <!-- Rempli dynamiquement -->
               </select>
             </div>
             <div id="trophy-organ-col" class="hidden">
               <label class="block text-xs font-semibold text-slate-300 mb-1">Organe cible</label>
-              <select id="trophy-input-organ" onchange="updateTrophyTargetPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500">
+              <select id="trophy-input-organ" onchange="updateTrophyTargetPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-base sm:text-xs focus:outline-none focus:border-amber-500">
                 <!-- Rempli dynamiquement -->
               </select>
             </div>
             <div id="trophy-count-col">
               <label id="trophy-count-label" class="block text-xs font-semibold text-slate-300 mb-1">Pourcentage requis (%)</label>
               <div class="relative">
-                <input type="number" id="trophy-input-count" min="5" max="100" step="5" value="50" oninput="updateTrophyTargetPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500 font-mono pr-8">
+                <input type="number" id="trophy-input-count" min="5" max="100" step="5" value="50" oninput="updateTrophyTargetPreview()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-base sm:text-xs focus:outline-none focus:border-amber-500 font-mono pr-8">
                 <span id="trophy-input-count-unit" class="absolute right-2.5 top-2 text-xs text-amber-400 font-bold">%</span>
               </div>
             </div>
@@ -2010,7 +2013,7 @@
           </div>
         </div>
 
-        <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
+        <div class="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-slate-800">
           <button type="button" onclick="closeCreateTrophyModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">Annuler</button>
           <button type="submit" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition flex items-center space-x-1.5 shadow-sm shadow-amber-500/20">
             <i data-lucide="award" class="w-4 h-4"></i>
@@ -2023,18 +2026,18 @@
 
   <!-- Modal Boîte à Outils : Pré-phrases (Lésions & Générales) -->
   <div id="modal-manage-statement-templates" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl relative max-h-[90vh] flex flex-col">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-        <div class="flex items-center space-x-3">
-          <div class="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-4 sm:p-6 space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto flex flex-col">
+      <div class="flex items-center justify-between gap-2 pb-3 border-b border-slate-800">
+        <div class="flex items-center space-x-3 min-w-0">
+          <div class="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center shrink-0">
             <i data-lucide="folder-tree" class="w-5 h-5"></i>
           </div>
-          <div>
+          <div class="min-w-0">
             <h3 class="text-base font-bold text-white">Boîte à Outils : Pré-phrases de Lésions</h3>
             <p class="text-xs text-slate-400">Personnalisez les amorces de questions par lésion (Niveau 3) ou générales.</p>
           </div>
         </div>
-        <button type="button" onclick="closeManageStatementTemplatesModal()" class="text-slate-500 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+        <button type="button" onclick="closeManageStatementTemplatesModal()" class="text-slate-500 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition shrink-0">
           <i data-lucide="x" class="w-5 h-5"></i>
         </button>
       </div>
@@ -2042,11 +2045,11 @@
       <!-- Sélecteur de Lésion cible -->
       <div class="space-y-1.5">
         <label class="block text-xs font-semibold text-slate-300">Sélectionner la lésion ou catégorie à configurer</label>
-        <div class="flex items-center space-x-2">
-          <select id="manage-templates-organ-select" onchange="renderManageStatementTemplatesList()" class="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <select id="manage-templates-organ-select" onchange="renderManageStatementTemplatesList()" class="w-full sm:flex-1 min-w-0 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white focus:outline-none focus:border-amber-500">
             <!-- Rempli dynamiquement -->
           </select>
-          <button type="button" onclick="promptAddNewLesionForTemplates()" class="px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition shrink-0 flex items-center space-x-1" title="Ajouter une nouvelle lésion">
+          <button type="button" onclick="promptAddNewLesionForTemplates()" class="px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition shrink-0 flex items-center justify-center space-x-1" title="Ajouter une nouvelle lésion">
             <i data-lucide="plus" class="w-3.5 h-3.5"></i>
             <span>Nouvelle Lésion</span>
           </button>
@@ -2061,9 +2064,9 @@
       <!-- Formulaire d'ajout rapide -->
       <form onsubmit="submitNewTemplateInManager(event)" class="pt-3 border-t border-slate-800 space-y-2">
         <label class="block text-xs font-semibold text-slate-300" id="manage-templates-add-label">Ajouter une pré-phrase pour cette sélection</label>
-        <div class="flex items-center space-x-2">
-          <input type="text" id="manage-templates-input-text" required placeholder="ex: Quel est le profil IHC caractéristique de..." class="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500">
-          <button type="submit" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition flex items-center space-x-1.5 shrink-0 shadow-sm shadow-amber-500/20">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <input type="text" id="manage-templates-input-text" required placeholder="ex: Quel est le profil IHC caractéristique de..." class="w-full sm:flex-1 min-w-0 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500">
+          <button type="submit" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition flex items-center justify-center space-x-1.5 shrink-0 shadow-sm shadow-amber-500/20">
             <i data-lucide="plus" class="w-3.5 h-3.5"></i>
             <span>Ajouter</span>
           </button>
@@ -2078,18 +2081,18 @@
 
   <!-- Modal Gestionnaire des Tags (#) : Modification, Renommage & Suppression -->
   <div id="modal-manage-tags" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 space-y-4 shadow-2xl relative max-h-[90vh] flex flex-col">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-        <div class="flex items-center space-x-3">
-          <div class="w-9 h-9 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-4 sm:p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto flex flex-col">
+      <div class="flex items-center justify-between gap-2 pb-3 border-b border-slate-800">
+        <div class="flex items-center space-x-3 min-w-0">
+          <div class="w-9 h-9 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center shrink-0">
             <i data-lucide="tag" class="w-5 h-5"></i>
           </div>
-          <div>
+          <div class="min-w-0">
             <h3 class="text-base font-bold text-white">Gestionnaire des Tags (#)</h3>
             <p class="text-xs text-slate-400">Modifier, renommer ou supprimer des tags pour toute l'équipe.</p>
           </div>
         </div>
-        <button type="button" onclick="closeManageTagsModal()" class="text-slate-500 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+        <button type="button" onclick="closeManageTagsModal()" class="text-slate-500 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition shrink-0">
           <i data-lucide="x" class="w-5 h-5"></i>
         </button>
       </div>
@@ -2097,9 +2100,9 @@
       <!-- Formulaire d'ajout rapide de nouveau tag -->
       <form onsubmit="submitNewTagInManager(event)" class="space-y-1.5">
         <label class="block text-xs font-semibold text-slate-300">Ajouter un nouveau tag</label>
-        <div class="flex items-center space-x-2">
-          <input type="text" id="manage-tags-new-input" placeholder="ex: Cytogénétique, Ki67, Lame..." class="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono">
-          <button type="submit" class="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shrink-0 shadow-sm shadow-teal-500/20">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <input type="text" id="manage-tags-new-input" placeholder="ex: Cytogénétique, Ki67, Lame..." class="w-full sm:flex-1 min-w-0 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono">
+          <button type="submit" class="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center justify-center space-x-1.5 shrink-0 shadow-sm shadow-teal-500/20">
             <i data-lucide="plus" class="w-4 h-4"></i>
             <span>Créer</span>
           </button>
@@ -2107,12 +2110,12 @@
       </form>
 
       <!-- Barre de recherche / filtrage et bouton purger inutilisés -->
-      <div class="flex items-center justify-between gap-2 pt-1">
-        <div class="relative flex-1">
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-1">
+        <div class="relative flex-1 min-w-0">
           <i data-lucide="search" class="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5"></i>
-          <input type="text" id="manage-tags-search-input" oninput="renderManageTagsList()" placeholder="Rechercher parmi les tags..." class="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono">
+          <input type="text" id="manage-tags-search-input" oninput="renderManageTagsList()" placeholder="Rechercher parmi les tags..." class="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500 font-mono">
         </div>
-        <button type="button" onclick="cleanUnusedTags()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 border border-slate-700/60 text-[11px] font-semibold transition flex items-center space-x-1 shrink-0" title="Supprimer tous les tags rattachés à 0 question et 0 DP">
+        <button type="button" onclick="cleanUnusedTags()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 border border-slate-700/60 text-[11px] font-semibold transition flex items-center justify-center space-x-1 shrink-0" title="Supprimer tous les tags rattachés à 0 question et 0 DP">
           <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i>
           <span>Purger inutilisés</span>
         </button>
@@ -2123,7 +2126,7 @@
         <!-- Rempli dynamiquement -->
       </div>
 
-      <div class="pt-2 flex justify-between items-center border-t border-slate-800">
+      <div class="pt-2 flex flex-wrap justify-between items-center gap-2 border-t border-slate-800">
         <span id="manage-tags-total-count" class="text-xs text-slate-500 font-mono">0 tags configurés</span>
         <button type="button" onclick="closeManageTagsModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">Fermer</button>
       </div>
@@ -2132,7 +2135,7 @@
 
   <!-- ================= MODALE CONFIRMATION ENREGISTREMENT FLUIDE ================= -->
   <div id="modal-save-success" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm hidden items-center justify-center p-4" onclick="if (event.target === this) closeSaveSuccessModal()">
-    <div class="bg-slate-900 border border-teal-500/30 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-200">
+    <div class="bg-slate-900 border border-teal-500/30 rounded-3xl max-w-lg w-full p-4 sm:p-7 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
       
       <!-- En-tête avec Icône de Succès -->
       <div class="flex items-start justify-between">
@@ -2173,7 +2176,7 @@
             <i data-lucide="database" class="w-4 h-4 text-emerald-400"></i>
           </div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center space-x-1.5">
+            <div class="flex flex-wrap items-center gap-1.5">
               <span class="text-xs font-bold text-white">Stockage Local (Navigateur)</span>
               <span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">✓ BIEN ENREGISTRÉ</span>
             </div>
@@ -2187,7 +2190,7 @@
             <i id="save-success-cloud-icon" data-lucide="cloud" class="w-4 h-4 text-teal-400"></i>
           </div>
           <div class="flex-1 min-w-0">
-            <div class="flex items-center space-x-1.5">
+            <div class="flex flex-wrap items-center gap-1.5">
               <span class="text-xs font-bold text-white">Banque Cloud Collective (Supabase)</span>
               <span id="save-success-cloud-pill" class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-400 border border-teal-500/30">✓ EN LIGNE</span>
             </div>
