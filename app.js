@@ -3880,7 +3880,11 @@ function saveQuestions() {
     delete copy.stats;
     return copy;
   });
-  localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(sanitized));
+  try {
+    localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(sanitized));
+  } catch (storageErr) {
+    console.warn("⚠️ Stockage local plein (saveQuestions):", storageErr);
+  }
   updateTopBar();
   renderHierarchySelector();
   renderTagsCloud();
@@ -3890,7 +3894,11 @@ function saveQuestions() {
 }
 
 function saveCases() {
-  localStorage.setItem(STORAGE_KEY_CASES, JSON.stringify(state.cases));
+  try {
+    localStorage.setItem(STORAGE_KEY_CASES, JSON.stringify(state.cases));
+  } catch (storageErr) {
+    console.warn("⚠️ Stockage local plein (saveCases):", storageErr);
+  }
   updateTopBar();
   renderDPCardsOnPlay();
   renderBank();
@@ -3899,7 +3907,11 @@ function saveCases() {
 
 function saveCustomTags() {
   state.customTags = (state.customTags || []).filter(t => !isSystemTag(t));
-  localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(state.customTags));
+  try {
+    localStorage.setItem(STORAGE_KEY_TAGS, JSON.stringify(state.customTags));
+  } catch (storageErr) {
+    console.warn("⚠️ Stockage local plein (saveCustomTags):", storageErr);
+  }
   renderTagsCloud();
   renderEditorTagsSelector();
   renderDPTagsSelector();
@@ -3909,14 +3921,18 @@ function saveCustomTags() {
 function saveStats() {
   const email = getCurrentUserEmail();
   const key = getUserStatsStorageKey(email);
-  if (state.stats && state.stats.lastActiveDate) {
-    localStorage.setItem('pathosorus_last_active_' + email, state.stats.lastActiveDate);
-  }
-  localStorage.setItem(key, JSON.stringify(state.stats));
-  if (state.currentUser) {
-    if (state.currentUser.id) {
+  try {
+    if (state.stats && state.stats.lastActiveDate) {
+      localStorage.setItem('pathosorus_last_active_' + email, state.stats.lastActiveDate);
+    }
+    localStorage.setItem(key, JSON.stringify(state.stats));
+    if (state.currentUser && state.currentUser.id) {
       localStorage.setItem(STORAGE_KEY_STATS + '_' + state.currentUser.id, JSON.stringify(state.stats));
     }
+  } catch (storageErr) {
+    console.warn("⚠️ Stockage local plein (saveStats):", storageErr);
+  }
+  if (state.currentUser) {
     syncStatsToCloud();
   }
   updateTopBar();
@@ -7365,9 +7381,13 @@ function chooseReviewInterval(days) {
     dbSaveUserProgress(q);
   }
 
-  saveQuestions();
-  renderSpacedRepetitionDashboard();
-  checkDailyStreak();
+  try {
+    saveQuestions();
+    renderSpacedRepetitionDashboard();
+    checkDailyStreak();
+  } catch (e) {
+    console.warn("Erreur post-planification délai:", e);
+  }
   playSound('correct');
   nextSessionQuestion();
 }
