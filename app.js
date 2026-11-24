@@ -760,34 +760,9 @@ function debouncedSyncUserProgressTagToCloud() {
 }
 
 async function syncUserProgressTagToCloud() {
-  if (!supabaseClient || !state.currentUser) return;
-  const email = getCurrentUserEmail();
-  if (!email) return;
-
-  try {
-    const compactMap = {};
-    // La progression personnelle est isolée par compte dans state.userProgress
-    Object.keys(state.userProgress || {}).forEach(qId => {
-      const p = state.userProgress[qId];
-      if (!p) return;
-      const st = p.stats || getDefaultQuestionStats();
-      if (p.mastered || p.flagged || (st && (st.seen > 0 || st.lastReviewed))) {
-        compactMap[qId] = {
-          s: st,
-          m: p.mastered ? 1 : 0,
-          f: p.flagged ? 1 : 0
-        };
-      }
-    });
-
-    const payload = JSON.stringify(compactMap);
-    const tagName = `UPROG:${email}:${payload}`;
-
-    await supabaseClient.from('custom_tags').delete().ilike('name', `UPROG:${email}:%`);
-    await supabaseClient.from('custom_tags').upsert({ name: tagName }, { onConflict: 'name' });
-  } catch (err) {
-    console.warn("Erreur syncUserProgressTagToCloud:", err);
-  }
+  // Désactivé : la progression par question est désormais persistée directement dans public.user_question_progress
+  // (évite les erreurs HTTP 500 de taille d'index PostgreSQL sur custom_tags.name et réduit la charge Supabase).
+  return;
 }
 
 async function syncUserStatsTagToCloud() {
@@ -14218,14 +14193,16 @@ async function checkForRemoteChanges() {
 }
 window.checkForRemoteChanges = checkForRemoteChanges;
 
+let _lastImmediateSyncAt = 0;
 function triggerImmediateSync() {
-  if (supabaseClient) {
-    checkForRemoteChanges();
-    fetchSupabaseData(true);
-  }
+  if (!supabaseClient) return;
+  const now = Date.now();
+  if (now - _lastImmediateSyncAt < 30000) return;
+  _lastImmediateSyncAt = now;
+  checkForRemoteChanges();
 }
 
-// Réaction instantanée au focus, visibilité, retour en avant-plan et reconnexion Wi-Fi
+// Réaction au focus, visibilité, retour en avant-plan et reconnexion Wi-Fi (avec cooldown 30s)
 window.addEventListener('focus', triggerImmediateSync);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') triggerImmediateSync();
@@ -14233,20 +14210,15 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pageshow', triggerImmediateSync);
 window.addEventListener('online', () => {
   console.log("🌐 Connexion réseau rétablie, resynchronisation immédiate...");
+  _lastImmediateSyncAt = 0;
   triggerImmediateSync();
   if (typeof setupRealtimeSync === 'function') setupRealtimeSync();
 });
 
-// Heartbeat rapide toutes les 10 secondes (vérification par HEAD count ultra-légère 0 octet)
-setInterval(() => {
-  if (supabaseClient) {
-    checkForRemoteChanges();
-  }
-}, 10000);
-
-// Heartbeat complet toutes les 35 secondes si l'onglet est actif
+// Vérification légère toutes les 60 secondes uniquement si l'onglet est visible
+// (ne déclenche fetchSupabaseData(true) que si un changement réel est détecté)
 setInterval(() => {
   if (supabaseClient && document.visibilityState === 'visible') {
-    fetchSupabaseData(true);
+    checkForRemoteChanges();
   }
-}, 35000);
+}, 60000);
