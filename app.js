@@ -3110,7 +3110,19 @@ async function fetchSupabaseData(silent = false) {
       });
 
       state.questions = mergedQuestions;
-      localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(state.questions));
+      try {
+        const sanitizedCache = state.questions.map(q => {
+          if (!q) return q;
+          const copy = { ...q };
+          delete copy.mastered;
+          delete copy.flagged;
+          delete copy.stats;
+          return copy;
+        });
+        localStorage.setItem(STORAGE_KEY_QUESTIONS, JSON.stringify(sanitizedCache));
+      } catch (storageErr) {
+        console.warn("⚠️ Stockage local plein (fetchSupabaseData questions):", storageErr);
+      }
 
       // Sauvegarder dans le cache local propre à cet utilisateur pour la répétition espacée
       const syncProg = {};
@@ -3119,7 +3131,11 @@ async function fetchSupabaseData(silent = false) {
           syncProg[q.id] = { stats: q.stats, mastered: Boolean(q.mastered), flagged: Boolean(q.flagged) };
         }
       });
-      localStorage.setItem(userStorageKey, JSON.stringify(syncProg));
+      try {
+        localStorage.setItem(userStorageKey, JSON.stringify(syncProg));
+      } catch (storageErr) {
+        console.warn("⚠️ Stockage local plein (fetchSupabaseData progress):", storageErr);
+      }
 
       // Synchronisation sécurisée des trophées une fois les questions personnelles chargées et isolées
       if (currentEmail) {
@@ -3158,7 +3174,11 @@ async function fetchSupabaseData(silent = false) {
       });
 
       state.cases = mergedCases;
-      localStorage.setItem(STORAGE_KEY_CASES, JSON.stringify(state.cases));
+      try {
+        localStorage.setItem(STORAGE_KEY_CASES, JSON.stringify(state.cases));
+      } catch (storageErr) {
+        console.warn("⚠️ Stockage local plein (fetchSupabaseData cases):", storageErr);
+      }
 
       // Auto-push automatique en tâche de fond pour garantir la persistance Cloud
       if (unsyncedQuestionsToPush.length > 0 || unsyncedCasesToPush.length > 0) {
